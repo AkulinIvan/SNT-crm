@@ -182,7 +182,7 @@
                         </span>
                     </td>
                     <td>${statusBadge}</td>
-                    <td>${plot.latitude ? '✅' : '<span style="color: var(--gray-400);">❌</span>'}</td>
+                    <td>${plot.latitude && plot.longitude ? '✅' : '<span style="color: var(--gray-400);">❌</span>'}</td>
                     <td>${ownersDisplay}</td>
                     <td>
                         <div class="table-actions">

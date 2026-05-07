@@ -806,28 +806,28 @@
                 <span>Система управления</span>
             </div>
             <nav class="sidebar-nav">
-                <div class="nav-section">
+                {% comment %} <div class="nav-section">
                     <div class="nav-section-title">Главное</div>
                     <a href="/" class="nav-link {% if active_page == 'dashboard' %}active{% endif %}">
                         <span class="icon">📊</span> Дашборд
                     </a>
-                </div>
+                </div> {% endcomment %}
                 <div class="nav-section">
-                    <div class="nav-section-title">Управление</div>
+                    {% comment %} <div class="nav-section-title">Управление</div> {% endcomment %}
                     <a href="/owners/" class="nav-link {% if active_page == 'owners' %}active{% endif %}">
                         <span class="icon">👤</span> Владельцы
-                        <span class="badge" id="owners-count">0</span>
+                        {% comment %} <span class="badge" id="owners-count"></span> {% endcomment %}
                     </a>
                     <a href="/plots/" class="nav-link {% if active_page == 'plots' %}active{% endif %}">
                         <span class="icon">🏠</span> Участки
                     </a>
-                    <a href="/calls/" class="nav-link {% if active_page == 'calls' %}active{% endif %}">
+                    {% comment %} <a href="/calls/" class="nav-link {% if active_page == 'calls' %}active{% endif %}">
                         <span class="icon">📞</span> Звонки
                         <span class="badge" id="calls-new-count">0</span>
-                    </a>
+                    </a> {% endcomment %}
                 </div>
                 <div class="nav-section">
-                    <div class="nav-section-title">Финансы</div>
+                    {% comment %} <div class="nav-section-title">Финансы</div>
                     <a href="/payments/" class="nav-link {% if active_page == 'payments' %}active{% endif %}">
                         <span class="icon">💰</span> Платежи
                         <span class="badge" id="payments-debt-count" style="background: var(--warning);">0</span>
@@ -837,16 +837,16 @@
                     </a>
                     <a href="/payments/import/" class="nav-link {% if active_page == 'bank-import' %}active{% endif %}">
                         <span class="icon">🏦</span> Импорт из банка
-                    </a>
+                    </a> {% endcomment %}
                 </div>
                 <div class="nav-section">
-                    <div class="nav-section-title">Сервисы</div>
+                    {% comment %} <div class="nav-section-title">Сервисы</div>
                     <a href="/map/" class="nav-link {% if active_page == 'map' %}active{% endif %}">
                         <span class="icon">🗺️</span> Карта СНТ
                     </a>
                     <a href="/stats/" class="nav-link {% if active_page == 'stats' %}active{% endif %}">
                         <span class="icon">📈</span> Статистика
-                    </a>
+                    </a> {% endcomment %}
                 </div>
             </nav>
             <div class="sidebar-footer">
@@ -895,7 +895,7 @@
                 
                 {% block content %}
                 <!-- Default Dashboard -->
-                <div class="page-header">
+                {% comment %} <div class="page-header">
                     <h2>Дашборд</h2>
                     <p>Обзор системы управления СНТ</p>
                 </div>
@@ -930,7 +930,7 @@
                         <div class="stat-value" id="stat-paid">—</div>
                         <div class="stat-change positive">За текущий период</div>
                     </div>
-                </div>
+                </div> {% endcomment %}
                 {% endblock %}
             </div>
         </main>

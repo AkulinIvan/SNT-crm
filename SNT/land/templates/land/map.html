@@ -89,21 +89,21 @@
         const statusFilter = document.getElementById('map-status-filter').value;
         const params = new URLSearchParams();
         if (statusFilter) params.append('status', statusFilter);
-
+        
         const data = await apiFetch(`/api/plots/geo/?${params}`);
         if (!data) return;
-
+        
         allPlots = data;
         document.getElementById('map-plots-count').textContent = 
             `Отображается: ${data.length} ${pluralize(data.length, 'участок', 'участка', 'участков')}`;
-
+        
         // Вычисляем центр карты
         if (data.length > 0) {
             const lats = data.map(p => p.latitude);
             const lons = data.map(p => p.longitude);
             mapCenterLat = (Math.min(...lats) + Math.max(...lats)) / 2;
             mapCenterLon = (Math.min(...lons) + Math.max(...lons)) / 2;
-
+        
             // Оцениваем зум по разбросу координат
             const latSpread = Math.max(...lats) - Math.min(...lats);
             const lonSpread = Math.max(...lons) - Math.min(...lons);
@@ -113,26 +113,19 @@
             else if (maxSpread < 0.01) mapZoom = 16;
             else if (maxSpread < 0.02) mapZoom = 15;
             else mapZoom = 14;
-
-            // Строим URL с маркерами
-            const markers = data.map(p => 
-                `${p.latitude},${p.longitude},${p.plot_number}`
-            ).join('|');
-
+        
             const bbox = `${mapCenterLon-0.005},${mapCenterLat-0.003},${mapCenterLon+0.005},${mapCenterLat+0.003}`;
             
-            // Используем Static Map API с маркерами или OpenStreetMap
-            // Для простоты — OpenStreetMap с iframe
             document.getElementById('map-iframe').src = 
                 `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik`;
-            
-            document.getElementById('map-loading').style.display = 'none';
         } else {
+            // Если нет участков с координатами, показываем центр Москвы
             document.getElementById('map-iframe').src = 
                 `https://www.openstreetmap.org/export/embed.html?bbox=37.5,55.6,37.8,55.9&layer=mapnik`;
-            document.getElementById('map-loading').style.display = 'none';
         }
-
+        
+        document.getElementById('map-loading').style.display = 'none';
+    
         // Загружаем участки без координат
         loadPlotsWithoutCoords();
     }

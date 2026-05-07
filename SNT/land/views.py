@@ -27,13 +27,13 @@ class LandPlotViewSet(viewsets.ModelViewSet):
     
     Дополнительные action'ы:
     geo/      — получение координат всех активных участков для карты
-    search/   — поиск по номеру или кадастровому номеру
+    stats/    — статистика по участкам
     """
     queryset = LandPlot.objects.all()
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['status']
     search_fields = ['plot_number', 'cadastral_number', 'address']
-    ordering_fields = ['plot_number', 'area_sqm', 'cadastral_number']
+    ordering_fields = ['plot_number', 'area_sqm', 'cadastral_number', 'created_at']
     ordering = ['plot_number']
 
     def get_serializer_class(self):
@@ -53,9 +53,7 @@ class LandPlotViewSet(viewsets.ModelViewSet):
         GET /api/plots/geo/
         
         Возвращает координаты участков, у которых заданы latitude и longitude.
-        Идеально для построения карты СНТ.
-        Дополнительные фильтры:
-        - ?status=active — только активные участки (по умолчанию все)
+        Дополнительные фильтры: ?status=active
         """
         status_filter = request.query_params.get('status', None)
         queryset = LandPlot.objects.filter(
@@ -72,7 +70,7 @@ class LandPlotViewSet(viewsets.ModelViewSet):
         """
         POST /api/plots/{id}/set-coordinates/
         
-        Быстрое обновление координат одного участка без полного PATCH-запроса.
+        Быстрое обновление координат одного участка.
         Тело запроса: {"latitude": 55.123456, "longitude": 37.654321}
         """
         land_plot = self.get_object()
@@ -101,7 +99,7 @@ class LandPlotViewSet(viewsets.ModelViewSet):
         """
         GET /api/plots/stats/
         
-        Простейшая статистика по участкам: общее количество и по статусам.
+        Простейшая статистика по участкам.
         """
         total = LandPlot.objects.count()
         active = LandPlot.objects.filter(status='active').count()
@@ -113,7 +111,7 @@ class LandPlotViewSet(viewsets.ModelViewSet):
             'abandoned': abandoned,
             'disputed': disputed,
         })
-        
+
 
 class LandPlotListView(View):
     """Страница со списком участков."""
