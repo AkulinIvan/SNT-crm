@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <style>
+        @page { size: A4; margin: 1cm; }
+        body { font-family: 'Arial', sans-serif; font-size: 12px; }
+        .receipt-header { text-align: center; border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 15px; }
+        .receipt-header h2 { font-size: 16px; margin: 0 0 5px 0; }
+        .receipt-body { display: flex; gap: 20px; }
+        .receipt-left { flex: 1; }
+        .receipt-right { width: 250px; text-align: center; }
+        .section { margin-bottom: 15px; }
+        .section h3 { font-size: 13px; margin: 0 0 8px 0; border-bottom: 1px solid #ccc; padding-bottom: 3px; }
+        .field { display: flex; justify-content: space-between; padding: 3px 0; font-size: 11px; }
+        .field-label { color: #333; }
+        .field-value { font-weight: bold; }
+        .amount { font-size: 16px; font-weight: bold; }
+        .qr-section { text-align: center; }
+        .qr-section img { width: 200px; height: auto; }
+        .footer { margin-top: 30px; text-align: center; font-size: 10px; color: #666; }
+    </style>
+</head>
+<body>
+    <div class="receipt-header">
+        <h2>{{ snt_details.name }}</h2>
+        <p>Квитанция № {{ assessment.id }}</p>
+    </div>
+    
+    <div class="receipt-body">
+        <div class="receipt-left">
+            <div class="section">
+                <h3>Плательщик: {{ owner_name }}</h3>
+                <div class="field"><span>Участок:</span><span class="field-value">№{{ plot_number }}</span></div>
+                <div class="field"><span>Период:</span><span class="field-value">{{ assessment.period }}</span></div>
+                <div class="field"><span>Сумма к оплате:</span><span class="field-value amount">{{ amount }} ₽</span></div>
+            </div>
+            
+            <div class="section">
+                <h3>Реквизиты</h3>
+                <div class="field"><span>Получатель:</span><span class="field-value">{{ snt_details.name }}</span></div>
+                <div class="field"><span>ИНН:</span><span class="field-value">{{ snt_details.inn }}</span></div>
+                <div class="field"><span>Счёт:</span><span class="field-value">{{ snt_details.account }}</span></div>
+                <div class="field"><span>Банк:</span><span class="field-value">{{ snt_details.bank_name }}</span></div>
+                <div class="field"><span>БИК:</span><span class="field-value">{{ snt_details.bank_bik }}</span></div>
+                <div class="field"><span>Корр. счёт:</span><span class="field-value">{{ snt_details.bank_corr }}</span></div>
+            </div>
+        </div>
+        
+        <div class="receipt-right">
+            <div class="qr-section">
+                <img src="{{ qr_code }}" alt="QR">
+                <p style="font-size: 10px;">Отсканируйте для оплаты</p>
+            </div>
+        </div>
+    </div>
+    
+    <div class="footer">
+        <p>{{ snt_details.chairman }} _________________</p>
+    </div>
+</body>
+</html>

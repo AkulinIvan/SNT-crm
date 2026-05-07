@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+
+{% block title %}Дашборд | CRM СНТ{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2>📊 Дашборд СНТ</h2>
+    <p>Обзор системы управления садовым товариществом</p>
+</div>
+
+<div class="stats-grid">
+    <div class="stat-card" style="cursor: pointer;" onclick="window.location.href='/owners/'">
+        <div class="stat-label">👤 Владельцев</div>
+        <div class="stat-value" id="stat-owners">—</div>
+        <div class="stat-change positive">Перейти к списку →</div>
+    </div>
+    <div class="stat-card" style="cursor: pointer;" onclick="window.location.href='/plots/'">
+        <div class="stat-label">🏠 Участков</div>
+        <div class="stat-value" id="stat-plots">—</div>
+        <div class="stat-change positive" id="stat-plots-active">—</div>
+    </div>
+    <div class="stat-card" style="cursor: pointer;" onclick="window.location.href='/calls/'">
+        <div class="stat-label">📞 Звонков всего</div>
+        <div class="stat-value" id="stat-calls-total">—</div>
+        <div class="stat-change" id="stat-calls-recent">—</div>
+    </div>
+    <div class="stat-card" style="cursor: pointer;" onclick="window.location.href='/calls/?status=new'">
+        <div class="stat-label">🆕 Новых звонков</div>
+        <div class="stat-value" id="stat-calls-new">—</div>
+        <div class="stat-change negative">Требуют обработки →</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">📋 Записей в обработке</div>
+        <div class="stat-value" id="stat-calls-processed">—</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">📁 Архивных записей</div>
+        <div class="stat-value" id="stat-calls-archived">—</div>
+    </div>
+</div>
+
+<!-- Последние владельцы -->
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
+    <div class="table-container">
+        <div class="table-toolbar">
+            <span style="font-weight: 600;">👤 Последние добавленные владельцы</span>
+            <a href="/owners/" style="font-size: 0.85rem; color: var(--primary);">Все →</a>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>ФИО</th>
+                    <th>Участков</th>
+                    <th>Дата</th>
+                </tr>
+            </thead>
+            <tbody id="recent-owners-body">
+                <tr><td colspan="3">Загрузка...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Последние звонки -->
+    <div class="table-container">
+        <div class="table-toolbar">
+            <span style="font-weight: 600;">📞 Последние звонки</span>
+            <a href="/calls/" style="font-size: 0.85rem; color: var(--primary);">Все →</a>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Номер</th>
+                    <th>Тип</th>
+                    <th>Время</th>
+                </tr>
+            </thead>
+            <tbody id="recent-calls-body">
+                <tr><td colspan="3">Загрузка...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    async function loadDashboard() {
+        // Статистика владельцев
+        const ownersData = await apiFetch('/api/owners/?limit=1');
+        if (ownersData) {
+            document.getElementById('stat-owners').textContent = ownersData.count || 0;
+        }
+
+        // Статистика участков
+        const plotsData = await apiFetch('/api/plots/stats/');
+        if (plotsData) {
+            document.getElementById('stat-plots').textContent = plotsData.total || 0;
+            document.getElementById('stat-plots-active').textContent = 
+                `Активных: ${plotsData.active || 0}`;
+        }
+
+        // Статистика звонков
+        const callsData = await apiFetch('/api/calls/stats/');
+        if (callsData) {
+            document.getElementById('stat-calls-total').textContent = callsData.total || 0;
+            document.getElementById('stat-calls-new').textContent = 
+                callsData.by_status ? (callsData.by_status.new || 0) : 0;
+            document.getElementById('stat-calls-processed').textContent = 
+                callsData.by_status ? (callsData.by_status.processed || 0) : 0;
+            document.getElementById('stat-calls-archived').textContent = 
+                callsData.by_status ? (callsData.by_status.archived || 0) : 0;
+            document.getElementById('stat-calls-recent').textContent = 
+                `Сегодня: загрузка...`;
+        }
+
+        // Последние владельцы
+        const recentOwners = await apiFetch('/api/owners/?ordering=-created_at&limit=5');
+        if (recentOwners && recentOwners.results) {
+            document.getElementById('recent-owners-body').innerHTML = 
+                recentOwners.results.map(o => `
+                    <tr>
+                        <td>
+                            <a href="/owners/${o.id}/" style="color: var(--primary); text-decoration: none;">
+                                ${escapeHtml(o.full_name)}
+                            </a>
+                        </td>
+                        <td>${o.plots_count || 0}</td>
+                        <td>${formatDate(o.created_at)}</td>
+                    </tr>
+                `).join('');
+        }
+
+        // Последние звонки
+        const recentCalls = await apiFetch('/api/calls/?ordering=-started_at&limit=5');
+        if (recentCalls && recentCalls.results) {
+            document.getElementById('recent-calls-body').innerHTML = 
+                recentCalls.results.map(c => `
+                    <tr>
+                        <td>${escapeHtml(c.caller_display || c.caller_number)}</td>
+                        <td>
+                            <span class="badge-status ${c.direction === 'in' ? 'badge-active' : 'badge-warning'}">
+                                ${c.direction === 'in' ? 'Вход.' : 'Исход.'}
+                            </span>
+                        </td>
+                        <td>${formatDateTime(c.started_at)}</td>
+                    </tr>
+                `).join('');
+        }
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    document.addEventListener('DOMContentLoaded', loadDashboard);
+</script>
+{% endblock %}

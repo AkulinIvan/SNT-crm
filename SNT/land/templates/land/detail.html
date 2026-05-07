@@ -1,0 +1,468 @@
+{% extends "base.html" %}
+
+{% block title %}Карточка участка | CRM СНТ{% endblock %}
+
+{% block breadcrumb %}
+<a href="/">Главная</a> <span>/</span> <a href="/plots/">Участки</a> <span>/</span> <span id="breadcrumb-name">Загрузка...</span>
+{% endblock %}
+
+{% block content %}
+<div id="plot-detail">
+    <div class="page-header" style="display: flex; justify-content: space-between; align-items: flex-start;">
+        <div>
+            <h2 id="plot-title">🏠 Загрузка...</h2>
+            <p id="plot-meta" style="color: var(--gray-500);">...</p>
+        </div>
+        <div style="display: flex; gap: 8px;">
+            <button class="btn btn-secondary" onclick="window.location.href='/plots/'">← К списку</button>
+            <button class="btn btn-primary" id="btn-edit-plot" onclick="openEditPlotModal()">✏️ Редактировать</button>
+            <button class="btn btn-danger" id="btn-delete-plot" onclick="confirmDeletePlot()">🗑️ Удалить</button>
+        </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
+        <!-- Основная информация -->
+        <div class="table-container">
+            <div class="table-toolbar">
+                <span style="font-weight: 600;">📋 Основная информация</span>
+                <span id="plot-status-badge"></span>
+            </div>
+            <table>
+                <tbody>
+                    <tr><td style="color: var(--gray-500); width: 40%;">Номер участка</td><td id="info-plot-number">—</td></tr>
+                    <tr><td style="color: var(--gray-500);">Кадастровый номер</td><td id="info-cadastral" style="font-family: monospace;">—</td></tr>
+                    <tr><td style="color: var(--gray-500);">Площадь</td><td id="info-area">—</td></tr>
+                    <tr><td style="color: var(--gray-500);">Адрес</td><td id="info-address">—</td></tr>
+                    <tr><td style="color: var(--gray-500);">Статус</td><td id="info-status">—</td></tr>
+                    <tr><td style="color: var(--gray-500);">Дата добавления</td><td id="info-created">—</td></tr>
+                    <tr><td style="color: var(--gray-500);">Последнее обновление</td><td id="info-updated">—</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Координаты и карта -->
+        <div class="table-container">
+            <div class="table-toolbar">
+                <span style="font-weight: 600;">🗺️ Координаты</span>
+                <button class="btn btn-secondary btn-sm" id="btn-set-coords" onclick="openSetCoordinatesModal()">📍 Задать координаты</button>
+            </div>
+            <div id="map-container" style="height: 300px; background: var(--gray-100); display: flex; align-items: center; justify-content: center; border-radius: var(--radius-sm);">
+                <div id="map-placeholder" class="empty-state">
+                    <div class="empty-icon">🗺️</div>
+                    <h3>Координаты не заданы</h3>
+                    <p>Нажмите «Задать координаты» для отображения на карте</p>
+                </div>
+                <div id="map-display" style="display: none; width: 100%; height: 100%;">
+                    <iframe id="map-iframe" width="100%" height="100%" frameborder="0" style="border-radius: var(--radius-sm);"></iframe>
+                </div>
+            </div>
+            <table style="margin-top: 0;">
+                <tbody>
+                    <tr><td style="color: var(--gray-500);">Широта</td><td id="info-latitude">—</td></tr>
+                    <tr><td style="color: var(--gray-500);">Долгота</td><td id="info-longitude">—</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Владельцы участка -->
+    <div class="table-container" style="margin-top: 24px;">
+        <div class="table-toolbar">
+            <span style="font-weight: 600;">👤 Владельцы участка</span>
+            <button class="btn btn-primary btn-sm" onclick="openAddOwnerModal()">+ Привязать владельца</button>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>ФИО</th>
+                    <th>Доля</th>
+                    <th>Дата вступления</th>
+                    <th>Документ-основание</th>
+                    <th>Контакты</th>
+                    <th>Действия</th>
+                </tr>
+            </thead>
+            <tbody id="owners-table-body">
+                <tr>
+                    <td colspan="6">
+                        <div class="empty-state">
+                            <div class="empty-icon">👤</div>
+                            <h3>Загрузка...</h3>
+                        </div>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Примечания -->
+    <div class="table-container" style="margin-top: 24px;">
+        <div class="table-toolbar">
+            <span style="font-weight: 600;">📝 Примечания</span>
+        </div>
+        <div style="padding: 16px; min-height: 60px;" id="info-notes">
+            <span style="color: var(--gray-400);">Загрузка...</span>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    const plotId = {{ plot_id }};
+    let plotData = null;
+
+    async function loadPlotDetail() {
+        plotData = await apiFetch(`/api/plots/${plotId}/`);
+        if (!plotData) {
+            document.getElementById('plot-detail').innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-icon">❌</div>
+                    <h3>Участок не найден</h3>
+                    <p>Возможно, запись была удалена</p>
+                    <button class="btn btn-primary" onclick="window.location.href='/plots/'">← К списку</button>
+                </div>`;
+            return;
+        }
+
+        document.getElementById('plot-title').textContent = 
+            `🏠 Участок №${plotData.plot_number}`;
+        document.getElementById('breadcrumb-name').textContent = 
+            `Уч. №${plotData.plot_number}`;
+        document.getElementById('plot-meta').textContent = 
+            `Кадастровый номер: ${plotData.cadastral_number}`;
+
+        // Статус
+        const statusBadge = getStatusBadge(plotData.status);
+        document.getElementById('plot-status-badge').innerHTML = statusBadge;
+
+        // Заполняем поля
+        document.getElementById('info-plot-number').textContent = 
+            `Уч. №${plotData.plot_number}`;
+        document.getElementById('info-cadastral').textContent = 
+            plotData.cadastral_number;
+        document.getElementById('info-area').textContent = 
+            `${plotData.area_sqm} м²`;
+        document.getElementById('info-address').textContent = 
+            plotData.address || '—';
+        document.getElementById('info-status').innerHTML = statusBadge;
+        document.getElementById('info-created').textContent = 
+            formatDateTime(plotData.created_at);
+        document.getElementById('info-updated').textContent = 
+            formatDateTime(plotData.updated_at);
+
+        // Координаты
+        document.getElementById('info-latitude').textContent = 
+            plotData.latitude ? plotData.latitude.toFixed(6) : '—';
+        document.getElementById('info-longitude').textContent = 
+            plotData.longitude ? plotData.longitude.toFixed(6) : '—';
+
+        if (plotData.latitude && plotData.longitude) {
+            document.getElementById('map-placeholder').style.display = 'none';
+            document.getElementById('map-display').style.display = 'block';
+            document.getElementById('map-iframe').src = 
+                `https://www.openstreetmap.org/export/embed.html?bbox=${plotData.longitude-0.002},${plotData.latitude-0.001},${plotData.longitude+0.002},${plotData.latitude+0.001}&layer=mapnik&marker=${plotData.latitude},${plotData.longitude}`;
+        }
+
+        // Примечания
+        document.getElementById('info-notes').innerHTML = 
+            plotData.notes 
+                ? `<p style="white-space: pre-wrap;">${escapeHtml(plotData.notes)}</p>` 
+                : '<span style="color: var(--gray-400);">Нет примечаний</span>';
+
+        // Загружаем владельцев
+        loadOwners();
+    }
+
+    function getStatusBadge(status) {
+        const badges = {
+            'active': '<span class="badge-status badge-active">Активный</span>',
+            'abandoned': '<span class="badge-status badge-inactive">Заброшенный</span>',
+            'disputed': '<span class="badge-status badge-warning">Спорный</span>',
+        };
+        return badges[status] || `<span class="badge-status badge-inactive">${status}</span>`;
+    }
+
+    async function loadOwners() {
+        const data = await apiFetch(`/api/ownerships/?land_plot=${plotId}`);
+        const tbody = document.getElementById('owners-table-body');
+
+        if (!data || !data.results || data.results.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="6">
+                        <div class="empty-state">
+                            <div class="empty-icon">👤</div>
+                            <h3>Нет владельцев</h3>
+                            <p>Привяжите владельца к этому участку</p>
+                        </div>
+                    </td>
+                </tr>`;
+            return;
+        }
+
+        // Получаем контакты для каждого владельца
+        const ownerIds = data.results.map(o => o.owner);
+        const ownersWithContacts = [];
+
+        for (const ownership of data.results) {
+            const ownerData = await apiFetch(`/api/owners/${ownership.owner}/`);
+            const phone = ownerData ? ownerData.primary_phone : null;
+            ownersWithContacts.push({ ...ownership, phone });
+        }
+
+        tbody.innerHTML = ownersWithContacts.map(o => `
+            <tr>
+                <td>
+                    <a href="/owners/${o.owner}/" style="color: var(--primary); text-decoration: none; font-weight: 500;">
+                        ${escapeHtml(o.owner_name)}
+                    </a>
+                </td>
+                <td>
+                    <span class="badge-status badge-active">${escapeHtml(o.share)}</span>
+                </td>
+                <td>${formatDate(o.ownership_since)}</td>
+                <td>${escapeHtml(o.document_basis || '—')}</td>
+                <td>
+                    ${o.phone 
+                        ? `<a href="tel:${o.phone}" style="color: var(--gray-700); text-decoration: none;">${escapeHtml(o.phone)}</a>` 
+                        : '<span style="color: var(--gray-400);">—</span>'}
+                </td>
+                <td>
+                    <div class="table-actions">
+                        <button class="btn-icon" onclick="editOwnership(${o.id}, '${escapeHtml(o.share)}', '${o.ownership_since || ''}', '${escapeHtml(o.document_basis || '')}')" title="Редактировать">✏️</button>
+                        <button class="btn-icon danger" onclick="removeOwnership(${o.id}, '${escapeHtml(o.owner_name)}')" title="Отвязать">🔗🚫</button>
+                    </div>
+                </td>
+            </tr>
+        `).join('');
+    }
+
+    // --- Координаты ---
+
+    function openSetCoordinatesModal() {
+        openModal('Задать координаты участка', `
+            <div class="form-group">
+                <label>Широта *</label>
+                <input type="number" id="coord-lat" value="${plotData.latitude || '55.7558'}" step="any" placeholder="55.7558">
+            </div>
+            <div class="form-group">
+                <label>Долгота *</label>
+                <input type="number" id="coord-lon" value="${plotData.longitude || '37.6173'}" step="any" placeholder="37.6173">
+            </div>
+            <p style="font-size: 0.8rem; color: var(--gray-500);">
+                Координаты можно найти на Яндекс.Картах или Google Maps
+            </p>
+        `, 'Сохранить', async () => {
+            const lat = parseFloat(document.getElementById('coord-lat').value);
+            const lon = parseFloat(document.getElementById('coord-lon').value);
+            if (isNaN(lat) || isNaN(lon)) {
+                showAlert('Введите корректные координаты', 'error');
+                return;
+            }
+            const result = await apiFetch(`/api/plots/${plotId}/set-coordinates/`, {
+                method: 'POST',
+                body: JSON.stringify({ latitude: lat, longitude: lon }),
+            });
+            if (result) {
+                showAlert('Координаты обновлены', 'success');
+                loadPlotDetail();
+            }
+        });
+    }
+
+    // --- Редактирование участка ---
+
+    function openEditPlotModal() {
+        openModal(`Редактировать участок №${escapeHtml(plotData.plot_number)}`, `
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                <div class="form-group">
+                    <label>Номер участка *</label>
+                    <input type="text" id="edit-plot-number" value="${escapeHtml(plotData.plot_number)}" required>
+                </div>
+                <div class="form-group">
+                    <label>Площадь (м²) *</label>
+                    <input type="number" id="edit-plot-area" value="${plotData.area_sqm}" step="0.01" min="0.01" required>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Кадастровый номер *</label>
+                <input type="text" id="edit-plot-cadastral" value="${escapeHtml(plotData.cadastral_number)}" required>
+            </div>
+            <div class="form-group">
+                <label>Адрес / расположение</label>
+                <input type="text" id="edit-plot-address" value="${escapeHtml(plotData.address || '')}">
+            </div>
+            <div class="form-group">
+                <label>Статус</label>
+                <select id="edit-plot-status">
+                    <option value="active" ${plotData.status === 'active' ? 'selected' : ''}>Активный</option>
+                    <option value="abandoned" ${plotData.status === 'abandoned' ? 'selected' : ''}>Заброшенный</option>
+                    <option value="disputed" ${plotData.status === 'disputed' ? 'selected' : ''}>Спорный</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Примечания</label>
+                <textarea id="edit-plot-notes" rows="3">${escapeHtml(plotData.notes || '')}</textarea>
+            </div>
+        `, 'Сохранить', async () => {
+            const payload = {
+                plot_number: document.getElementById('edit-plot-number').value.trim(),
+                area_sqm: parseFloat(document.getElementById('edit-plot-area').value),
+                cadastral_number: document.getElementById('edit-plot-cadastral').value.trim(),
+                address: document.getElementById('edit-plot-address').value.trim(),
+                status: document.getElementById('edit-plot-status').value,
+                notes: document.getElementById('edit-plot-notes').value.trim(),
+            };
+
+            const result = await apiFetch(`/api/plots/${plotId}/`, {
+                method: 'PATCH',
+                body: JSON.stringify(payload),
+            });
+
+            if (result) {
+                showAlert('Участок обновлён', 'success');
+                loadPlotDetail();
+            }
+        });
+    }
+
+    function confirmDeletePlot() {
+        openModal('Удаление участка', `
+            <p>Вы действительно хотите удалить <strong>Уч. №${escapeHtml(plotData.plot_number)}</strong>?</p>
+            <p style="color: var(--danger); font-size: 0.85rem; margin-top: 8px;">
+                Это действие нельзя отменить. Все связи с владельцами будут удалены.
+            </p>
+        `, 'Удалить', async () => {
+            const result = await apiFetch(`/api/plots/${plotId}/`, {
+                method: 'DELETE',
+            });
+            if (result !== null) {
+                showAlert('Участок удалён', 'success');
+                window.location.href = '/plots/';
+            }
+        });
+    }
+
+    // --- Управление владельцами ---
+
+    async function openAddOwnerModal() {
+        const ownersData = await apiFetch('/api/owners/?limit=100');
+        if (!ownersData || !ownersData.results) {
+            showAlert('Не удалось загрузить список владельцев', 'error');
+            return;
+        }
+
+        // Исключаем уже привязанных владельцев
+        const existingOwnerIds = [];
+        const ownershipsData = await apiFetch(`/api/ownerships/?land_plot=${plotId}`);
+        if (ownershipsData && ownershipsData.results) {
+            ownershipsData.results.forEach(o => existingOwnerIds.push(o.owner));
+        }
+
+        const availableOwners = ownersData.results.filter(o => !existingOwnerIds.includes(o.id));
+
+        if (availableOwners.length === 0) {
+            showAlert('Все владельцы уже привязаны к этому участку', 'info');
+            return;
+        }
+
+        const ownerOptions = availableOwners.map(o => 
+            `<option value="${o.id}">${escapeHtml(o.full_name)}${o.primary_phone ? ' (' + o.primary_phone + ')' : ''}</option>`
+        ).join('');
+
+        openModal('Привязать владельца к участку', `
+            <div class="form-group">
+                <label>Владелец *</label>
+                <select id="owner-select">${ownerOptions}</select>
+            </div>
+            <div class="form-group">
+                <label>Доля</label>
+                <input type="text" id="owner-share" value="1/1" placeholder="1/1, 1/2...">
+            </div>
+            <div class="form-group">
+                <label>Дата вступления во владение</label>
+                <input type="date" id="owner-since">
+            </div>
+            <div class="form-group">
+                <label>Документ-основание</label>
+                <input type="text" id="owner-document" placeholder="Номер свидетельства или выписки ЕГРН">
+            </div>
+        `, 'Привязать', async () => {
+            const ownerId = parseInt(document.getElementById('owner-select').value);
+            const share = document.getElementById('owner-share').value.trim() || '1/1';
+            const since = document.getElementById('owner-since').value || null;
+            const doc = document.getElementById('owner-document').value.trim();
+
+            const result = await apiFetch(`/api/ownerships/`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    owner: ownerId,
+                    land_plot: plotId,
+                    share,
+                    ownership_since: since,
+                    document_basis: doc,
+                }),
+            });
+
+            if (result) {
+                showAlert('Владелец привязан', 'success');
+                loadOwners();
+                if (typeof loadStats === 'function') loadStats();
+            }
+        });
+    }
+
+    function editOwnership(id, currentShare, currentSince, currentDoc) {
+        openModal('Редактировать право собственности', `
+            <div class="form-group">
+                <label>Доля</label>
+                <input type="text" id="edit-share" value="${escapeHtml(currentShare)}" placeholder="1/1, 1/2...">
+            </div>
+            <div class="form-group">
+                <label>Дата вступления во владение</label>
+                <input type="date" id="edit-since" value="${currentSince}">
+            </div>
+            <div class="form-group">
+                <label>Документ-основание</label>
+                <input type="text" id="edit-document" value="${escapeHtml(currentDoc)}">
+            </div>
+        `, 'Сохранить', async () => {
+            const result = await apiFetch(`/api/ownerships/${id}/`, {
+                method: 'PATCH',
+                body: JSON.stringify({
+                    share: document.getElementById('edit-share').value.trim(),
+                    ownership_since: document.getElementById('edit-since').value || null,
+                    document_basis: document.getElementById('edit-document').value.trim(),
+                }),
+            });
+            if (result) {
+                showAlert('Данные обновлены', 'success');
+                loadOwners();
+            }
+        });
+    }
+
+    function removeOwnership(id, ownerName) {
+        openModal('Отвязать владельца', `
+            <p>Вы действительно хотите отвязать <strong>${escapeHtml(ownerName)}</strong> от этого участка?</p>
+        `, 'Отвязать', async () => {
+            const result = await apiFetch(`/api/ownerships/${id}/`, {
+                method: 'DELETE',
+            });
+            if (result !== null) {
+                showAlert('Владелец отвязан', 'success');
+                loadOwners();
+            }
+        });
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    document.addEventListener('DOMContentLoaded', loadPlotDetail);
+</script>
+{% endblock %}

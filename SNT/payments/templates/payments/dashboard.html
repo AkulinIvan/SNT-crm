@@ -1,0 +1,214 @@
+{% extends "base.html" %}
+
+{% block title %}Платежи | CRM СНТ{% endblock %}
+
+{% block breadcrumb %}
+<a href="/">Главная</a> <span>/</span> <span>Платежи</span>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div>
+            <h2>💰 Финансы и платежи</h2>
+            <p>Управление взносами и оплатами</p>
+        </div>
+        <div style="display: flex; gap: 8px;">
+            <button class="btn btn-secondary" onclick="window.location.href='/payments/assessments/'">📋 Начисления</button>
+            <button class="btn btn-primary" onclick="window.location.href='/payments/import/'">🏦 Импорт выписки</button>
+        </div>
+    </div>
+</div>
+
+<!-- Статистика -->
+<div class="stats-grid">
+    <div class="stat-card" style="cursor: pointer;" onclick="window.location.href='/payments/assessments/?status=pending'">
+        <div class="stat-label">🔴 Задолженность</div>
+        <div class="stat-value" id="stat-debt">—</div>
+        <div class="stat-change negative">Требует оплаты</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">💰 Начислено всего</div>
+        <div class="stat-value" id="stat-total">—</div>
+        <div class="stat-change positive">За все периоды</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">✅ Оплачено</div>
+        <div class="stat-value" id="stat-paid">—</div>
+        <div class="stat-change positive">Общая сумма оплат</div>
+    </div>
+    <div class="stat-card" style="cursor: pointer;" onclick="window.location.href='/payments/assessments/?status=overdue'">
+        <div class="stat-label">⚠️ Просрочено</div>
+        <div class="stat-value" id="stat-overdue">—</div>
+        <div class="stat-change negative">Должники</div>
+    </div>
+</div>
+
+<!-- Последние платежи -->
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
+    <div class="table-container">
+        <div class="table-toolbar">
+            <span style="font-weight: 600;">📋 Последние начисления</span>
+            <a href="/payments/assessments/" style="font-size: 0.85rem; color: var(--primary);">Все →</a>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Владелец</th>
+                    <th>Категория</th>
+                    <th>Сумма</th>
+                    <th>Статус</th>
+                </tr>
+            </thead>
+            <tbody id="recent-assessments">
+                <tr><td colspan="4">Загрузка...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="table-container">
+        <div class="table-toolbar">
+            <span style="font-weight: 600;">💳 Последние платежи</span>
+            <a href="/api/payments/" style="font-size: 0.85rem; color: var(--primary);">Все →</a>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Плательщик</th>
+                    <th>Сумма</th>
+                    <th>Дата</th>
+                    <th>Метод</th>
+                </tr>
+            </thead>
+            <tbody id="recent-payments">
+                <tr><td colspan="4">Загрузка...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Быстрые действия -->
+<div class="table-container" style="margin-top: 24px;">
+    <div class="table-toolbar">
+        <span style="font-weight: 600;">⚡ Быстрые действия</span>
+    </div>
+    <div style="padding: 20px; display: flex; gap: 12px; flex-wrap: wrap;">
+        <button class="btn btn-primary" onclick="openGenerateModal()">🔄 Сгенерировать начисления</button>
+        <button class="btn btn-secondary" onclick="window.location.href='/payments/import/'">🏦 Импортировать выписку</button>
+        <button class="btn btn-secondary" onclick="window.location.href='/api/admin/'">⚙️ Управление категориями</button>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    async function loadPaymentsDashboard() {
+        // Статистика
+        const stats = await apiFetch('/api/assessments/stats/');
+        if (stats) {
+            document.getElementById('stat-debt').textContent = 
+                (stats.total_debt || 0).toLocaleString('ru-RU') + ' ₽';
+            document.getElementById('stat-total').textContent = 
+                (stats.total_amount || 0).toLocaleString('ru-RU') + ' ₽';
+            document.getElementById('stat-paid').textContent = 
+                (stats.total_paid || 0).toLocaleString('ru-RU') + ' ₽';
+            document.getElementById('stat-overdue').textContent = 
+                (stats.by_status?.overdue || 0) + ' начислений';
+        }
+
+        // Последние начисления
+        const assessments = await apiFetch('/api/assessments/?ordering=-created_at&limit=5');
+        if (assessments && assessments.results) {
+            document.getElementById('recent-assessments').innerHTML = 
+                assessments.results.map(a => `
+                    <tr>
+                        <td>${escapeHtml(a.owner_name)}</td>
+                        <td>${escapeHtml(a.category_name)}</td>
+                        <td><strong>${a.amount} ₽</strong></td>
+                        <td>${getStatusBadge(a.status_display)}</td>
+                    </tr>
+                `).join('');
+        }
+
+        // Последние платежи
+        const payments = await apiFetch('/api/payments/?ordering=-payment_date&limit=5');
+        if (payments && payments.results) {
+            document.getElementById('recent-payments').innerHTML = 
+                payments.results.map(p => `
+                    <tr>
+                        <td>${escapeHtml(p.owner_name || '—')}</td>
+                        <td><strong>${p.amount} ₽</strong></td>
+                        <td>${formatDate(p.payment_date)}</td>
+                        <td>${p.payment_method === 'bank' ? '🏦' : '💵'} ${p.payment_method}</td>
+                    </tr>
+                `).join('');
+        }
+    }
+
+    function getStatusBadge(status) {
+        const map = {
+            'Оплачено': '<span class="badge-status badge-active">✅ Оплачено</span>',
+            'Ожидает оплаты': '<span class="badge-status badge-warning">⏳ Ожидает</span>',
+            'Частично оплачено': '<span class="badge-status badge-warning">📊 Частично</span>',
+            'Просрочено': '<span class="badge-status badge-danger">🔴 Просрочено</span>',
+        };
+        return map[status] || `<span class="badge-status badge-inactive">${status}</span>`;
+    }
+
+    function openGenerateModal() {
+        // Загружаем категории и периоды
+        Promise.all([
+            apiFetch('/api/payment-categories/'),
+            apiFetch('/api/payment-periods/'),
+        ]).then(([categories, periods]) => {
+            if (!categories || !periods) return;
+
+            const categoryOptions = categories.map(c => 
+                `<option value="${c.id}">${escapeHtml(c.name)} (${c.default_amount} ₽/${c.unit})</option>`
+            ).join('');
+
+            const periodOptions = periods.filter(p => p.is_active).map(p => 
+                `<option value="${p.id}">${p.year} ${p.quarter ? 'Q' + p.quarter : ''} (срок: ${formatDate(p.due_date)})</option>`
+            ).join('');
+
+            openModal('Сгенерировать начисления', `
+                <div class="form-group">
+                    <label>Категория взноса *</label>
+                    <select id="gen-category">${categoryOptions}</select>
+                </div>
+                <div class="form-group">
+                    <label>Период *</label>
+                    <select id="gen-period">${periodOptions}</select>
+                </div>
+                <p style="font-size: 0.85rem; color: var(--gray-500);">
+                    Начисления будут созданы для всех активных участков
+                </p>
+            `, 'Сгенерировать', async () => {
+                const categoryId = document.getElementById('gen-category').value;
+                const periodId = document.getElementById('gen-period').value;
+
+                const result = await apiFetch('/api/assessments/generate/', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        period_id: parseInt(periodId),
+                        category_id: parseInt(categoryId),
+                    }),
+                });
+
+                if (result) {
+                    showAlert(`Создано ${result.count} начислений`, 'success');
+                    loadPaymentsDashboard();
+                }
+            });
+        });
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    document.addEventListener('DOMContentLoaded', loadPaymentsDashboard);
+</script>
+{% endblock %}

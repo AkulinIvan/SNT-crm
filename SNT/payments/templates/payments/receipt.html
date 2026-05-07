@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Квитанция №{{ assessment_id }}</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Arial', sans-serif;
+            background: #f5f5f5;
+            padding: 20px;
+        }
+        .receipt {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .receipt-header {
+            text-align: center;
+            border-bottom: 2px solid #2c7a47;
+            padding-bottom: 15px;
+            margin-bottom: 20px;
+        }
+        .receipt-header h2 {
+            color: #2c7a47;
+            font-size: 1.5rem;
+            margin-bottom: 5px;
+        }
+        .receipt-header .receipt-number {
+            color: #666;
+            font-size: 0.9rem;
+        }
+        .receipt-body {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        .receipt-section {
+            margin-bottom: 20px;
+        }
+        .receipt-section h3 {
+            color: #333;
+            font-size: 1rem;
+            margin-bottom: 10px;
+            padding-bottom: 5px;
+            border-bottom: 1px solid #eee;
+        }
+        .field {
+            display: flex;
+            justify-content: space-between;
+            padding: 6px 0;
+            font-size: 0.9rem;
+        }
+        .field-label {
+            color: #666;
+        }
+        .field-value {
+            font-weight: 600;
+            text-align: right;
+        }
+        .field-value.amount {
+            font-size: 1.2rem;
+            color: #2c7a47;
+        }
+        .qr-section {
+            text-align: center;
+            padding: 20px;
+        }
+        .qr-section img {
+            max-width: 250px;
+            height: auto;
+        }
+        .qr-section p {
+            margin-top: 10px;
+            font-size: 0.85rem;
+            color: #666;
+        }
+        .receipt-footer {
+            margin-top: 20px;
+            padding-top: 15px;
+            border-top: 1px solid #eee;
+            text-align: center;
+            font-size: 0.8rem;
+            color: #999;
+        }
+        .actions {
+            text-align: center;
+            margin-top: 20px;
+        }
+        .btn {
+            display: inline-block;
+            padding: 10px 20px;
+            background: #2c7a47;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            margin: 0 5px;
+            cursor: pointer;
+        }
+        .btn:hover {
+            background: #1e5c32;
+        }
+        @media print {
+            body { background: white; padding: 0; }
+            .receipt { box-shadow: none; }
+            .actions { display: none; }
+        }
+    </style>
+</head>
+<body>
+    <div class="receipt" id="receipt">
+        <div class="receipt-header">
+            <h2>{{ snt_details.name }}</h2>
+            <p>Квитанция на оплату</p>
+            <p class="receipt-number">№ {{ assessment_id }} от {% now "d.m.Y" %}</p>
+        </div>
+        
+        <div class="receipt-body">
+            <div class="receipt-left">
+                <div class="receipt-section">
+                    <h3>Плательщик</h3>
+                    <div class="field">
+                        <span class="field-label">ФИО:</span>
+                        <span class="field-value">{{ owner_name }}</span>
+                    </div>
+                    <div class="field">
+                        <span class="field-label">Участок:</span>
+                        <span class="field-value">№{{ plot_number }}</span>
+                    </div>
+                    <div class="field">
+                        <span class="field-label">Период:</span>
+                        <span class="field-value">{{ assessment.period }}</span>
+                    </div>
+                    <div class="field">
+                        <span class="field-label">Категория:</span>
+                        <span class="field-value">{{ assessment.category.name }}</span>
+                    </div>
+                    <div class="field">
+                        <span class="field-label">Срок оплаты:</span>
+                        <span class="field-value">{{ due_date|default:"—" }}</span>
+                    </div>
+                </div>
+                
+                <div class="receipt-section">
+                    <h3>Получатель платежа</h3>
+                    <div class="field">
+                        <span class="field-label">Получатель:</span>
+                        <span class="field-value">{{ snt_details.name }}</span>
+                    </div>
+                    <div class="field">
+                        <span class="field-label">ИНН:</span>
+                        <span class="field-value">{{ snt_details.inn }}</span>
+                    </div>
+                    <div class="field">
+                        <span class="field-label">КПП:</span>
+                        <span class="field-value">{{ snt_details.kpp }}</span>
+                    </div>
+                    <div class="field">
+                        <span class="field-label">Счёт:</span>
+                        <span class="field-value">{{ snt_details.account }}</span>
+                    </div>
+                    <div class="field">
+                        <span class="field-label">Банк:</span>
+                        <span class="field-value">{{ snt_details.bank_name }}</span>
+                    </div>
+                    <div class="field">
+                        <span class="field-label">БИК:</span>
+                        <span class="field-value">{{ snt_details.bank_bik }}</span>
+                    </div>
+                    <div class="field">
+                        <span class="field-label">Корр. счёт:</span>
+                        <span class="field-value">{{ snt_details.bank_corr }}</span>
+                    </div>
+                </div>
+                
+                <div class="receipt-section">
+                    <h3>Сумма к оплате</h3>
+                    <div class="field">
+                        <span class="field-label">Начислено:</span>
+                        <span class="field-value">{{ assessment.amount }} ₽</span>
+                    </div>
+                    <div class="field">
+                        <span class="field-label">Оплачено:</span>
+                        <span class="field-value">{{ assessment.paid_amount }} ₽</span>
+                    </div>
+                    <div class="field">
+                        <span class="field-label">К оплате:</span>
+                        <span class="field-value amount">{{ amount }} ₽</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="receipt-right">
+                <div class="qr-section">
+                    {% if qr_code %}
+                        <img src="{{ qr_code }}" alt="QR-код для оплаты">
+                        <p>Отсканируйте QR-код<br>в мобильном приложении банка</p>
+                    {% else %}
+                        <p style="color: red;">QR-код не сгенерирован</p>
+                    {% endif %}
+                </div>
+                
+                <div class="receipt-section">
+                    <h3>Назначение платежа</h3>
+                    <p style="font-size: 0.85rem; color: #666;">{{ purpose }}</p>
+                </div>
+            </div>
+        </div>
+        
+        <div class="receipt-footer">
+            <p>{{ snt_details.chairman }} / _______________ /</p>
+            <p style="margin-top: 10px;">При оплате через Сбербанк Онлайн сканируйте QR-код — все реквизиты заполнятся автоматически</p>
+        </div>
+    </div>
+    
+    <div class="actions">
+        <button class="btn" onclick="window.print()">🖨️ Распечатать</button>
+        <a href="/api/assessments/{{ assessment_id }}/receipt-pdf/" class="btn">📥 Скачать PDF</a>
+        <button class="btn" onclick="copyQRData()">📋 Копировать данные QR</button>
+        <a href="/" class="btn" style="background: #666;">↩ Назад</a>
+    </div>
+    
+    <script>
+        function copyQRData() {
+            const qrData = `{{ qr_data|escapejs }}`;
+            navigator.clipboard.writeText(qrData).then(() => {
+                alert('Данные QR-кода скопированы в буфер обмена');
+            });
+        }
+    </script>
+</body>
+</html>

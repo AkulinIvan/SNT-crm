@@ -1,0 +1,232 @@
+{% extends "base.html" %}
+
+{% block title %}Импорт из банка | CRM СНТ{% endblock %}
+
+{% block breadcrumb %}
+<a href="/">Главная</a> <span>/</span> <a href="/payments/">Платежи</a> <span>/</span> <span>Импорт</span>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div>
+            <h2>🏦 Импорт банковской выписки</h2>
+            <p>Загрузка и автоматическое сопоставление платежей</p>
+        </div>
+        <button class="btn btn-secondary" onclick="window.location.href='/payments/'">← К платежам</button>
+    </div>
+</div>
+
+<!-- Форма загрузки -->
+<div class="table-container" style="margin-bottom: 24px;">
+    <div class="table-toolbar">
+        <span style="font-weight: 600;">📤 Загрузить выписку</span>
+    </div>
+    <div style="padding: 24px;">
+        <!-- Скрытая форма для правильной отправки файла -->
+        <form id="upload-form" enctype="multipart/form-data" style="display: none;">
+            {% csrf_token %}
+            <input type="file" name="file" id="form-file-input" accept=".csv,.xlsx,.xls,.txt">
+        </form>
+        
+        <div style="border: 2px dashed var(--gray-300); border-radius: var(--radius); padding: 40px; text-align: center;" id="drop-zone">
+            <div class="empty-icon" style="font-size: 3rem;">📁</div>
+            <h3>Перетащите файл сюда или нажмите для выбора</h3>
+            <p style="color: var(--gray-500); margin-top: 8px;">Поддерживаются форматы: CSV, Excel (.xlsx, .xls), 1С (.txt)</p>
+            <input type="file" id="file-input" accept=".csv,.xlsx,.xls,.txt" style="display: none;" onchange="handleFileSelect(event)">
+            <button class="btn btn-primary" style="margin-top: 16px;" onclick="document.getElementById('file-input').click()">Выбрать файл</button>
+        </div>
+        
+        <div id="file-info" style="display: none; margin-top: 16px; padding: 12px; background: var(--primary-light); border-radius: var(--radius-sm);">
+            <strong>Выбран файл:</strong> <span id="file-name"></span>
+            <button class="btn btn-primary" style="margin-left: 12px;" onclick="uploadFile()">🚀 Загрузить и обработать</button>
+            <div id="upload-progress" style="display: none; margin-top: 8px;">
+                <div style="height: 4px; background: var(--primary-light); border-radius: 2px;">
+                    <div id="progress-bar" style="height: 100%; background: var(--primary); width: 0%; border-radius: 2px; transition: width 0.3s;"></div>
+                </div>
+                <span style="font-size: 0.8rem; color: var(--gray-600);">Обработка...</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- История импортов -->
+<div class="table-container">
+    <div class="table-toolbar">
+        <span style="font-weight: 600;">📋 История импортов</span>
+    </div>
+    <table>
+        <thead>
+            <tr>
+                <th>Дата</th>
+                <th>Банк</th>
+                <th>Файл</th>
+                <th>Транзакций</th>
+                <th>Сопоставлено</th>
+                <th>Статус</th>
+            </tr>
+        </thead>
+        <tbody id="history-table">
+            <tr><td colspan="6">Загрузка...</td></tr>
+        </tbody>
+    </table>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let selectedFile = null;
+
+    // Функция получения CSRF-токена из cookie
+    function getCSRFToken() {
+        const name = 'csrftoken';
+        let cookieValue = null;
+        if (document.cookie && document.cookie !== '') {
+            const cookies = document.cookie.split(';');
+            for (let i = 0; i < cookies.length; i++) {
+                const cookie = cookies[i].trim();
+                if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                    break;
+                }
+            }
+        }
+        return cookieValue;
+    }
+
+    // Drag & Drop
+    const dropZone = document.getElementById('drop-zone');
+    dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropZone.style.borderColor = 'var(--primary)';
+        dropZone.style.background = 'var(--primary-light)';
+    });
+    dropZone.addEventListener('dragleave', () => {
+        dropZone.style.borderColor = 'var(--gray-300)';
+        dropZone.style.background = 'transparent';
+    });
+    dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.style.borderColor = 'var(--gray-300)';
+        dropZone.style.background = 'transparent';
+        const file = e.dataTransfer.files[0];
+        if (file) selectFile(file);
+    });
+
+    function handleFileSelect(event) {
+        const file = event.target.files[0];
+        if (file) selectFile(file);
+    }
+
+    function selectFile(file) {
+        selectedFile = file;
+        document.getElementById('file-info').style.display = 'block';
+        document.getElementById('file-name').textContent = `${file.name} (${formatFileSize(file.size)})`;
+    }
+
+    async function uploadFile() {
+        if (!selectedFile) {
+            showAlert('Выберите файл', 'error');
+            return;
+        }
+
+        const progressDiv = document.getElementById('upload-progress');
+        const progressBar = document.getElementById('progress-bar');
+        progressDiv.style.display = 'block';
+        progressBar.style.width = '30%';
+
+        const formData = new FormData();
+        formData.append('file', selectedFile);
+
+        const csrftoken = getCSRFToken();
+        console.log('CSRF Token:', csrftoken); // Для отладки
+
+        try {
+            const response = await fetch('/api/bank-statements/import/', {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': csrftoken,
+                    // Не устанавливаем Content-Type! Браузер сам установит с boundary
+                },
+                body: formData,
+                credentials: 'same-origin', // Важно для передачи cookie
+            });
+
+            progressBar.style.width = '100%';
+
+            console.log('Response status:', response.status); // Для отладки
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error('Error response:', errorText);
+                throw new Error(`Ошибка ${response.status}: ${errorText}`);
+            }
+
+            const data = await response.json();
+            showAlert(`✅ Импортировано: ${data.detail}, сопоставлено: ${data.matched}`, 'success');
+            
+            // Сброс
+            selectedFile = null;
+            document.getElementById('file-info').style.display = 'none';
+            document.getElementById('file-input').value = '';
+            
+            loadHistory();
+        } catch (error) {
+            console.error('Upload error:', error);
+            showAlert('Ошибка: ' + error.message, 'error');
+        } finally {
+            progressDiv.style.display = 'none';
+            progressBar.style.width = '0%';
+        }
+    }
+
+    async function loadHistory() {
+        try {
+            const data = await apiFetch('/api/bank-statements/?ordering=-statement_date&limit=10');
+            const tbody = document.getElementById('history-table');
+            
+            if (!data || !data.results || data.results.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state"><div class="empty-icon">📋</div><h3>Нет импортов</h3></div></td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = data.results.map(s => `
+                <tr>
+                    <td>${formatDate(s.statement_date)}</td>
+                    <td>${escapeHtml(s.bank_name)}</td>
+                    <td><a href="${s.file_original}" style="color: var(--primary);">📎 ${s.file_original.split('/').pop()}</a></td>
+                    <td>${s.total_transactions}</td>
+                    <td><strong>${s.matched_transactions}</strong></td>
+                    <td>${getImportStatusBadge(s.status)}</td>
+                </tr>
+            `).join('');
+        } catch (error) {
+            console.error('Load history error:', error);
+        }
+    }
+
+    function getImportStatusBadge(status) {
+        const map = {
+            'imported': '<span class="badge-status badge-warning">Импортирована</span>',
+            'processed': '<span class="badge-status badge-active">✅ Обработана</span>',
+            'error': '<span class="badge-status badge-danger">❌ Ошибка</span>',
+        };
+        return map[status] || status;
+    }
+
+    function formatFileSize(bytes) {
+        if (bytes < 1024) return bytes + ' Б';
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' КБ';
+        return (bytes / (1024 * 1024)).toFixed(1) + ' МБ';
+    }
+
+    function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    document.addEventListener('DOMContentLoaded', loadHistory);
+</script>
+{% endblock %}

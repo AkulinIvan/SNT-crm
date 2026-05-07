@@ -1,0 +1,242 @@
+{% extends "base.html" %}
+
+{% block title %}Карта СНТ | CRM СНТ{% endblock %}
+
+{% block breadcrumb %}
+<a href="/">Главная</a> <span>/</span> <span>Карта СНТ</span>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div>
+            <h2>🗺️ Карта СНТ</h2>
+            <p>Расположение участков на карте</p>
+        </div>
+        <div style="display: flex; gap: 8px;">
+            <div class="filter-group">
+                <label>Статус:</label>
+                <select id="map-status-filter" onchange="loadMapData()">
+                    <option value="">Все</option>
+                    <option value="active">Активные</option>
+                    <option value="abandoned">Заброшенные</option>
+                    <option value="disputed">Спорные</option>
+                </select>
+            </div>
+            <button class="btn btn-secondary" onclick="window.location.href='/plots/'">📋 Таблица</button>
+        </div>
+    </div>
+</div>
+
+<!-- Легенда -->
+<div class="filters-bar">
+    <span style="font-weight: 500;">Легенда:</span>
+    <span class="badge-status badge-active">Активный</span>
+    <span class="badge-status badge-inactive">Заброшенный</span>
+    <span class="badge-status badge-warning">Спорный</span>
+    <span style="margin-left: auto; font-size: 0.85rem; color: var(--gray-600);" id="map-plots-count">—</span>
+</div>
+
+<!-- Карта -->
+<div class="table-container" style="height: 600px; position: relative;">
+    <div id="map-loading" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 10;">
+        <div class="empty-state">
+            <div class="empty-icon">⏳</div>
+            <h3>Загрузка карты...</h3>
+        </div>
+    </div>
+    <iframe id="map-iframe" width="100%" height="100%" frameborder="0" style="border-radius: var(--radius);"></iframe>
+</div>
+
+<!-- Список участков без координат -->
+<div class="table-container" style="margin-top: 24px;" id="no-coords-container">
+    <div class="table-toolbar">
+        <span style="font-weight: 600;">⚠️ Участки без координат</span>
+        <span style="font-size: 0.85rem; color: var(--gray-500);">Эти участки не отображаются на карте</span>
+    </div>
+    <table>
+        <thead>
+            <tr>
+                <th>Номер</th>
+                <th>Кадастровый номер</th>
+                <th>Статус</th>
+                <th>Действие</th>
+            </tr>
+        </thead>
+        <tbody id="no-coords-table-body">
+            <tr>
+                <td colspan="4">
+                    <div class="empty-state">
+                        <div class="empty-icon">✅</div>
+                        <h3>Все участки на карте</h3>
+                        <p>У всех участков заданы координаты</p>
+                    </div>
+                </td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let allPlots = [];
+    let mapCenterLat = 55.7558;
+    let mapCenterLon = 37.6173;
+    let mapZoom = 16;
+
+    async function loadMapData() {
+        const statusFilter = document.getElementById('map-status-filter').value;
+        const params = new URLSearchParams();
+        if (statusFilter) params.append('status', statusFilter);
+
+        const data = await apiFetch(`/api/plots/geo/?${params}`);
+        if (!data) return;
+
+        allPlots = data;
+        document.getElementById('map-plots-count').textContent = 
+            `Отображается: ${data.length} ${pluralize(data.length, 'участок', 'участка', 'участков')}`;
+
+        // Вычисляем центр карты
+        if (data.length > 0) {
+            const lats = data.map(p => p.latitude);
+            const lons = data.map(p => p.longitude);
+            mapCenterLat = (Math.min(...lats) + Math.max(...lats)) / 2;
+            mapCenterLon = (Math.min(...lons) + Math.max(...lons)) / 2;
+
+            // Оцениваем зум по разбросу координат
+            const latSpread = Math.max(...lats) - Math.min(...lats);
+            const lonSpread = Math.max(...lons) - Math.min(...lons);
+            const maxSpread = Math.max(latSpread, lonSpread);
+            if (maxSpread < 0.001) mapZoom = 18;
+            else if (maxSpread < 0.005) mapZoom = 17;
+            else if (maxSpread < 0.01) mapZoom = 16;
+            else if (maxSpread < 0.02) mapZoom = 15;
+            else mapZoom = 14;
+
+            // Строим URL с маркерами
+            const markers = data.map(p => 
+                `${p.latitude},${p.longitude},${p.plot_number}`
+            ).join('|');
+
+            const bbox = `${mapCenterLon-0.005},${mapCenterLat-0.003},${mapCenterLon+0.005},${mapCenterLat+0.003}`;
+            
+            // Используем Static Map API с маркерами или OpenStreetMap
+            // Для простоты — OpenStreetMap с iframe
+            document.getElementById('map-iframe').src = 
+                `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik`;
+            
+            document.getElementById('map-loading').style.display = 'none';
+        } else {
+            document.getElementById('map-iframe').src = 
+                `https://www.openstreetmap.org/export/embed.html?bbox=37.5,55.6,37.8,55.9&layer=mapnik`;
+            document.getElementById('map-loading').style.display = 'none';
+        }
+
+        // Загружаем участки без координат
+        loadPlotsWithoutCoords();
+    }
+
+    async function loadPlotsWithoutCoords() {
+        const statusFilter = document.getElementById('map-status-filter').value;
+        const params = new URLSearchParams();
+        if (statusFilter) params.append('status', statusFilter);
+        params.append('limit', '50');
+
+        const data = await apiFetch(`/api/plots/?${params}`);
+        if (!data || !data.results) return;
+
+        const plotsWithoutCoords = data.results.filter(p => !p.latitude || !p.longitude);
+        const tbody = document.getElementById('no-coords-table-body');
+
+        if (plotsWithoutCoords.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="4">
+                        <div class="empty-state">
+                            <div class="empty-icon">✅</div>
+                            <h3>Все участки на карте</h3>
+                            <p>У всех участков заданы координаты</p>
+                        </div>
+                    </td>
+                </tr>`;
+            return;
+        }
+
+        tbody.innerHTML = plotsWithoutCoords.map(plot => `
+            <tr>
+                <td>
+                    <a href="/plots/${plot.id}/" style="color: var(--primary); text-decoration: none;">
+                        Уч. №${escapeHtml(plot.plot_number)}
+                    </a>
+                </td>
+                <td style="font-family: monospace; font-size: 0.8rem;">
+                    ${escapeHtml(plot.cadastral_number)}
+                </td>
+                <td>${getStatusBadge(plot.status)}</td>
+                <td>
+                    <button class="btn btn-sm btn-primary" onclick="openSetCoordsFromMap(${plot.id}, '${escapeHtml(plot.plot_number)}', ${mapCenterLat}, ${mapCenterLon})">
+                        📍 Задать координаты
+                    </button>
+                </td>
+            </tr>
+        `).join('');
+    }
+
+    function getStatusBadge(status) {
+        const badges = {
+            'active': '<span class="badge-status badge-active">Активный</span>',
+            'abandoned': '<span class="badge-status badge-inactive">Заброшенный</span>',
+            'disputed': '<span class="badge-status badge-warning">Спорный</span>',
+        };
+        return badges[status] || `<span class="badge-status badge-inactive">${status}</span>`;
+    }
+
+    function openSetCoordsFromMap(plotId, plotNumber, defaultLat, defaultLon) {
+        openModal(`Задать координаты для участка №${escapeHtml(plotNumber)}`, `
+            <div class="form-group">
+                <label>Широта *</label>
+                <input type="number" id="coord-lat" value="${defaultLat}" step="any" placeholder="55.7558">
+            </div>
+            <div class="form-group">
+                <label>Долгота *</label>
+                <input type="number" id="coord-lon" value="${defaultLon}" step="any" placeholder="37.6173">
+            </div>
+            <p style="font-size: 0.8rem; color: var(--gray-500);">
+                Координаты можно скопировать из Яндекс.Карт или Google Maps
+            </p>
+        `, 'Сохранить', async () => {
+            const lat = parseFloat(document.getElementById('coord-lat').value);
+            const lon = parseFloat(document.getElementById('coord-lon').value);
+            if (isNaN(lat) || isNaN(lon)) {
+                showAlert('Введите корректные координаты', 'error');
+                return;
+            }
+            const result = await apiFetch(`/api/plots/${plotId}/set-coordinates/`, {
+                method: 'POST',
+                body: JSON.stringify({ latitude: lat, longitude: lon }),
+            });
+            if (result) {
+                showAlert('Координаты сохранены', 'success');
+                loadMapData();
+            }
+        });
+    }
+
+    function pluralize(n, one, few, many) {
+        const mod10 = n % 10;
+        const mod100 = n % 100;
+        if (mod10 === 1 && mod100 !== 11) return one;
+        if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return few;
+        return many;
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    document.addEventListener('DOMContentLoaded', loadMapData);
+</script>
+{% endblock %}

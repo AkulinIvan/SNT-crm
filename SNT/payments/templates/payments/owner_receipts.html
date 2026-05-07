@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+
+{% block title %}Мои квитанции | CRM СНТ{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2>🧾 Мои квитанции</h2>
+    <p>Начисления и оплата взносов</p>
+</div>
+
+<div id="receipts-container">
+    <div class="empty-state">
+        <div class="empty-icon">⏳</div>
+        <h3>Загрузка...</h3>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    const ownerId = {{ owner_id }};
+    
+    async function loadReceipts() {
+        const data = await apiFetch(`/api/assessments/owner-receipts/?owner_id=${ownerId}`);
+        if (!data || data.length === 0) {
+            document.getElementById('receipts-container').innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-icon">📋</div>
+                    <h3>Нет начислений</h3>
+                    <p>У вас пока нет активных квитанций</p>
+                </div>`;
+            return;
+        }
+        
+        document.getElementById('receipts-container').innerHTML = data.map(r => `
+            <div class="table-container" style="margin-bottom: 16px;">
+                <table>
+                    <tr>
+                        <td style="width: 80px; text-align: center;">
+                            ${r.qr_code ? `<img src="${r.qr_code}" width="80" height="80" alt="QR">` : '—'}
+                        </td>
+                        <td>
+                            <strong>${escapeHtml(r.category)}</strong><br>
+                            <span style="font-size: 0.85rem; color: var(--gray-500);">${escapeHtml(r.period)}</span>
+                        </td>
+                        <td>
+                            <span class="badge-status badge-${r.status === 'Оплачено' ? 'active' : 'warning'}">${r.status}</span>
+                        </td>
+                        <td style="text-align: right;">
+                            <div style="font-size: 1.1rem; font-weight: 600;">${r.debt} ₽</div>
+                            <span style="font-size: 0.75rem; color: var(--gray-500);">
+                                из ${r.amount} ₽
+                            </span>
+                        </td>
+                        <td style="width: 150px; text-align: center;">
+                            <a href="/api/assessments/${r.assessment_id}/receipt/?format=html" 
+                               target="_blank" class="btn btn-primary btn-sm">
+                                🧾 Квитанция
+                            </a>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+        `).join('');
+    }
+    
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+    
+    document.addEventListener('DOMContentLoaded', loadReceipts);
+</script>
+{% endblock %}

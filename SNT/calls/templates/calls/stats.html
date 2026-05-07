@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+
+{% block title %}Статистика звонков | CRM СНТ{% endblock %}
+
+{% block breadcrumb %}
+<a href="/">Главная</a> <span>/</span> <a href="/calls/">Звонки</a> <span>/</span> <span>Статистика</span>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2>📊 Статистика звонков</h2>
+    <p>Аналитика телефонных разговоров</p>
+</div>
+
+<!-- Основные показатели -->
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-label">Всего звонков</div>
+        <div class="stat-value" id="stat-total">—</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Общая длительность</div>
+        <div class="stat-value" id="stat-duration">—</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Новых</div>
+        <div class="stat-value" id="stat-new">—</div>
+        <div class="stat-change negative">Требуют обработки</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Обработано</div>
+        <div class="stat-value" id="stat-processed">—</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Важных</div>
+        <div class="stat-value" id="stat-important">—</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">С записью</div>
+        <div class="stat-value" id="stat-with-recording">—</div>
+    </div>
+</div>
+
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
+    <!-- По направлениям -->
+    <div class="table-container">
+        <div class="table-toolbar">
+            <span style="font-weight: 600;">📥📤 По направлениям</span>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Направление</th>
+                    <th>Количество</th>
+                    <th>Процент</th>
+                </tr>
+            </thead>
+            <tbody id="by-direction-body">
+                <tr><td colspan="3">Загрузка...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- По статусам -->
+    <div class="table-container">
+        <div class="table-toolbar">
+            <span style="font-weight: 600;">📋 По статусам обработки</span>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Статус</th>
+                    <th>Количество</th>
+                    <th>Процент</th>
+                </tr>
+            </thead>
+            <tbody id="by-status-body">
+                <tr><td colspan="3">Загрузка...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    async function loadStats() {
+        const data = await apiFetch('/api/calls/stats/');
+        if (!data) return;
+
+        // Основные показатели
+        document.getElementById('stat-total').textContent = data.total || 0;
+        document.getElementById('stat-duration').textContent = formatDuration(data.total_duration_seconds || 0);
+        document.getElementById('stat-new').textContent = data.by_status?.new || 0;
+        document.getElementById('stat-processed').textContent = data.by_status?.processed || 0;
+        document.getElementById('stat-important').textContent = data.important || 0;
+        document.getElementById('stat-with-recording').textContent = data.with_recording || 0;
+
+        // По направлениям
+        const directionLabels = {
+            'in': '📥 Входящие',
+            'out': '📤 Исходящие',
+            'missed': '📵 Пропущенные',
+        };
+        const byDirection = data.by_direction || {};
+        const total = data.total || 1;
+        document.getElementById('by-direction-body').innerHTML = 
+            Object.entries(byDirection).map(([key, count]) => `
+                <tr>
+                    <td>${directionLabels[key] || key}</td>
+                    <td><strong>${count}</strong></td>
+                    <td>${((count / total) * 100).toFixed(1)}%</td>
+                </tr>
+            `).join('') || '<tr><td colspan="3">Нет данных</td></tr>';
+
+        // По статусам
+        const statusLabels = {
+            'new': '🆕 Новые',
+            'processed': '✅ Обработанные',
+            'archived': '📁 Архивные',
+        };
+        const byStatus = data.by_status || {};
+        document.getElementById('by-status-body').innerHTML = 
+            Object.entries(byStatus).map(([key, count]) => `
+                <tr>
+                    <td>${statusLabels[key] || key}</td>
+                    <td><strong>${count}</strong></td>
+                    <td>${((count / total) * 100).toFixed(1)}%</td>
+                </tr>
+            `).join('') || '<tr><td colspan="3">Нет данных</td></tr>';
+    }
+
+    function formatDuration(totalSeconds) {
+        if (!totalSeconds) return '0с';
+        const h = Math.floor(totalSeconds / 3600);
+        const m = Math.floor((totalSeconds % 3600) / 60);
+        const s = totalSeconds % 60;
+        const parts = [];
+        if (h) parts.push(`${h}ч`);
+        if (m) parts.push(`${m}м`);
+        if (s || parts.length === 0) parts.push(`${s}с`);
+        return parts.join(' ');
+    }
+
+    document.addEventListener('DOMContentLoaded', loadStats);
+</script>
+{% endblock %}

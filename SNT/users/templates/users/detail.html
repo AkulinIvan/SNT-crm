@@ -1,0 +1,817 @@
+{% extends "base.html" %}
+
+{% block title %}Карточка владельца | CRM СНТ{% endblock %}
+
+{% block breadcrumb %}
+<a href="/">Главная</a> <span>/</span> <a href="/owners/">Владельцы</a> <span>/</span> <span id="breadcrumb-name">Загрузка...</span>
+{% endblock %}
+
+{% block content %}
+<div id="owner-detail">
+    <div class="page-header" style="display: flex; justify-content: space-between; align-items: flex-start;">
+        <div>
+            <h2 id="owner-name">👤 Загрузка...</h2>
+            <p id="owner-meta" style="color: var(--gray-500);">...</p>
+        </div>
+        <div style="display: flex; gap: 8px;">
+            <button class="btn btn-secondary" onclick="window.location.href='/owners/'">← К списку</button>
+            <button class="btn btn-danger" id="btn-delete-owner" onclick="confirmDeleteOwner()">🗑️ Удалить</button>
+        </div>
+    </div>
+
+    <!-- Сводка по финансам -->
+    <div class="stats-grid" id="finance-summary" style="margin-bottom: 24px;">
+        <div class="stat-card">
+            <div class="stat-label">💰 Общая задолженность</div>
+            <div class="stat-value" id="stat-total-debt" style="color: var(--danger);">—</div>
+            <div class="stat-change negative">Требует оплаты</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">📋 Всего начислено</div>
+            <div class="stat-value" id="stat-total-assessed">—</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">✅ Оплачено</div>
+            <div class="stat-value" id="stat-total-paid" style="color: var(--primary);">—</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">⚠️ Просрочено</div>
+            <div class="stat-value" id="stat-overdue-count">—</div>
+            <div class="stat-change negative">Начислений</div>
+        </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
+        <!-- Левая колонка: Контакты -->
+        <div>
+            <div class="table-container" style="margin-bottom: 24px;">
+                <div class="table-toolbar">
+                    <span style="font-weight: 600;">📞 Контактные данные</span>
+                    <button class="btn btn-primary btn-sm" onclick="openAddContactModal()">+ Добавить</button>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Тип</th>
+                            <th>Значение</th>
+                            <th>Статус</th>
+                            <th>Действия</th>
+                        </tr>
+                    </thead>
+                    <tbody id="contacts-table-body">
+                        <tr>
+                            <td colspan="4">
+                                <div class="empty-state">
+                                    <div class="empty-icon">📞</div>
+                                    <h3>Загрузка...</h3>
+                                </div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Последние звонки -->
+            <div class="table-container" style="margin-bottom: 24px;">
+                <div class="table-toolbar">
+                    <span style="font-weight: 600;">📞 Последние звонки</span>
+                    <button class="btn btn-secondary btn-sm" onclick="window.location.href='/calls/?owner={{ owner_id }}'">Все звонки</button>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Дата</th>
+                            <th>Номер</th>
+                            <th>Тип</th>
+                            <th>Запись</th>
+                        </tr>
+                    </thead>
+                    <tbody id="calls-table-body">
+                        <tr>
+                            <td colspan="4">
+                                <div class="empty-state">
+                                    <div class="empty-icon">📞</div>
+                                    <h3>Загрузка...</h3>
+                                </div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Правая колонка: Участки -->
+        <div>
+            <div class="table-container" style="margin-bottom: 24px;">
+                <div class="table-toolbar">
+                    <span style="font-weight: 600;">🏠 Участки в собственности</span>
+                    <button class="btn btn-primary btn-sm" onclick="openAddPlotModal()">+ Привязать участок</button>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Участок</th>
+                            <th>Кад. номер</th>
+                            <th>Площадь</th>
+                            <th>Владельцы</th>
+                            <th>Действия</th>
+                        </tr>
+                    </thead>
+                    <tbody id="plots-table-body">
+                        <tr>
+                            <td colspan="5">
+                                <div class="empty-state">
+                                    <div class="empty-icon">🏠</div>
+                                    <h3>Загрузка...</h3>
+                                </div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Начисления и платежи -->
+    <div class="table-container" style="margin-top: 24px;">
+        <div class="table-toolbar">
+            <span style="font-weight: 600;">💰 Начисления и платежи</span>
+            <div style="display: flex; gap: 8px;">
+                <button class="btn btn-primary btn-sm" onclick="generateOwnerAssessment()">🔄 Создать начисление</button>
+                <button class="btn btn-secondary btn-sm" onclick="window.location.href='/payments/assessments/?search={{ owner_id }}'">📋 Все начисления</button>
+            </div>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Период</th>
+                    <th>Категория</th>
+                    <th>Участок</th>
+                    <th>Начислено</th>
+                    <th>Оплачено</th>
+                    <th>Долг</th>
+                    <th>Статус</th>
+                    <th>Действия</th>
+                </tr>
+            </thead>
+            <tbody id="assessments-table-body">
+                <tr>
+                    <td colspan="8">
+                        <div class="empty-state">
+                            <div class="empty-icon">💰</div>
+                            <h3>Загрузка...</h3>
+                        </div>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- История платежей -->
+    <div class="table-container" style="margin-top: 24px;">
+        <div class="table-toolbar">
+            <span style="font-weight: 600;">💳 История платежей</span>
+            <button class="btn btn-secondary btn-sm" onclick="window.location.href='/api/payments/?assessment__owner={{ owner_id }}'">📄 Экспорт</button>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Дата</th>
+                    <th>Сумма</th>
+                    <th>Категория</th>
+                    <th>Участок</th>
+                    <th>Способ</th>
+                </tr>
+            </thead>
+            <tbody id="payments-table-body">
+                <tr>
+                    <td colspan="5">
+                        <div class="empty-state">
+                            <div class="empty-icon">💳</div>
+                            <h3>Загрузка...</h3>
+                        </div>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    const ownerId = {{ owner_id }};
+    let ownerData = null;
+
+    async function loadOwnerDetail() {
+        ownerData = await apiFetch(`/api/owners/${ownerId}/`);
+        if (!ownerData) {
+            document.getElementById('owner-detail').innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-icon">❌</div>
+                    <h3>Владелец не найден</h3>
+                    <p>Возможно, запись была удалена</p>
+                    <button class="btn btn-primary" onclick="window.location.href='/owners/'">← К списку</button>
+                </div>`;
+            return;
+        }
+
+        document.getElementById('owner-name').textContent = '👤 ' + ownerData.full_name;
+        document.getElementById('breadcrumb-name').textContent = ownerData.full_name;
+
+        const plotsCount = ownerData.ownerships ? ownerData.ownerships.length : 0;
+        document.getElementById('owner-meta').textContent = 
+            `Участков: ${plotsCount} | Добавлен: ${formatDate(ownerData.created_at)}`;
+
+        renderContacts(ownerData.contacts || []);
+        renderPlots(ownerData.ownerships || []);
+        loadCalls();
+        loadAssessments();
+        loadPayments();
+    }
+
+    // ==================== КОНТАКТЫ ====================
+    
+    function renderContacts(contacts) {
+        const tbody = document.getElementById('contacts-table-body');
+        if (contacts.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="4">
+                        <div class="empty-state">
+                            <div class="empty-icon">📞</div>
+                            <h3>Нет контактов</h3>
+                            <p>Добавьте телефон или email владельца</p>
+                        </div>
+                    </td>
+                </tr>`;
+            return;
+        }
+
+        tbody.innerHTML = contacts.map(c => `
+            <tr>
+                <td>${c.type === 'ph' ? '📱 Телефон' : '📧 Email'}</td>
+                <td>
+                    ${c.type === 'ph' ? 
+                        `<a href="tel:${c.value}" style="color: var(--gray-800); text-decoration: none;">${escapeHtml(c.value)}</a>` :
+                        `<a href="mailto:${c.value}" style="color: var(--gray-800); text-decoration: none;">${escapeHtml(c.value)}</a>`}
+                </td>
+                <td>
+                    <span class="badge-status ${c.is_active ? 'badge-active' : 'badge-inactive'}">
+                        ${c.is_active ? 'Активен' : 'Неактивен'}
+                    </span>
+                    ${c.is_verified ? ' ✅' : ''}
+                </td>
+                <td>
+                    <div class="table-actions">
+                        ${c.is_active ? 
+                            `<button class="btn-icon danger" onclick="deactivateContact(${c.id})" title="Деактивировать">🚫</button>` :
+                            `<button class="btn-icon" onclick="activateContact(${c.id})" title="Активировать">✅</button>`}
+                        <button class="btn-icon danger" onclick="deleteContact(${c.id})" title="Удалить">🗑️</button>
+                    </div>
+                </td>
+            </tr>
+        `).join('');
+    }
+
+    // ==================== УЧАСТКИ ====================
+    
+    async function renderPlots(ownerships) {
+        const tbody = document.getElementById('plots-table-body');
+        if (ownerships.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="5">
+                        <div class="empty-state">
+                            <div class="empty-icon">🏠</div>
+                            <h3>Нет участков</h3>
+                            <p>Привяжите участок к владельцу</p>
+                        </div>
+                    </td>
+                </tr>`;
+            return;
+        }
+
+        // Получаем ID всех участков
+        const plotIds = ownerships.map(o => o.land_plot);
+        
+        // Загружаем информацию о владельцах для каждого участка
+        const ownershipsData = await apiFetch(`/api/ownerships/?land_plot__in=${plotIds.join(',')}`);
+        const ownersByPlot = {};
+        
+        if (ownershipsData && ownershipsData.results) {
+            ownershipsData.results.forEach(o => {
+                if (!ownersByPlot[o.land_plot]) {
+                    ownersByPlot[o.land_plot] = [];
+                }
+                // Не добавляем текущего владельца в список
+                if (o.owner !== ownerId) {
+                    ownersByPlot[o.land_plot].push(o.owner_name);
+                }
+            });
+        }
+
+        tbody.innerHTML = ownerships.map(o => {
+        const otherOwners = ownersByPlot[o.land_plot] || [];
+        const allOwners = [];
+        
+        // Текущий владелец первый
+        if (ownerData) {
+            allOwners.push(`<strong>${escapeHtml(ownerData.full_name)}</strong> <span class="badge-status badge-active">${o.share}</span>`);
+        }
+        
+        // Другие совладельцы
+        otherOwners.forEach(ownerName => {
+            allOwners.push(`<span style="font-size: 0.8rem; color: var(--gray-600);">${escapeHtml(ownerName)}</span>`);
+        });
+
+        return `
+            <tr>
+                <td>
+                    <a href="/plots/${o.land_plot}/" style="color: var(--primary); text-decoration: none; font-weight: 600;">
+                        Уч. №${o.land_plot_detail ? o.land_plot_detail.plot_number : o.land_plot}
+                    </a>
+                </td>
+                <td>
+                    <span style="font-size: 0.8rem; color: var(--gray-500);">
+                        ${o.land_plot_detail ? o.land_plot_detail.cadastral_number : '—'}
+                    </span>
+                </td>
+                <td>${o.land_plot_detail ? o.land_plot_detail.area_sqm + ' м²' : '—'}</td>
+                <td>
+                    <div style="display: flex; flex-direction: column; gap: 2px;">
+                        ${allOwners.join('<br>')}
+                    </div>
+                </td>
+                <td>
+                    <div class="table-actions">
+                        <button class="btn-icon danger" onclick="removePlot(${o.land_plot})" title="Отвязать">🔗🚫</button>
+                    </div>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+    // ==================== ЗВОНКИ ====================
+    
+    async function loadCalls() {
+        const data = await apiFetch(`/api/calls/?owner=${ownerId}&ordering=-started_at&limit=5`);
+        const tbody = document.getElementById('calls-table-body');
+        
+        if (!data || !data.results || data.results.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="4">
+                        <div class="empty-state">
+                            <div class="empty-icon">📞</div>
+                            <h3>Нет звонков</h3>
+                            <p>Здесь будут отображаться последние звонки владельца</p>
+                        </div>
+                    </td>
+                </tr>`;
+            return;
+        }
+
+        tbody.innerHTML = data.results.map(call => `
+            <tr>
+                <td>${formatDateTime(call.started_at)}</td>
+                <td>${escapeHtml(call.caller_number)}</td>
+                <td>
+                    <span class="badge-status ${call.direction === 'in' ? 'badge-active' : call.direction === 'missed' ? 'badge-danger' : 'badge-warning'}">
+                        ${call.direction === 'in' ? 'Входящий' : call.direction === 'out' ? 'Исходящий' : 'Пропущенный'}
+                    </span>
+                </td>
+                <td>
+                    ${call.has_recording ? 
+                        `<button class="btn-icon" onclick="window.open('/api/calls/${call.id}/download/')" title="Скачать запись">🔊</button>` 
+                        : '❌'}
+                </td>
+            </tr>
+        `).join('');
+    }
+
+    // ==================== НАЧИСЛЕНИЯ ====================
+    
+    async function loadAssessments() {
+        const data = await apiFetch(`/api/assessments/?owner=${ownerId}&ordering=-created_at`);
+        const tbody = document.getElementById('assessments-table-body');
+        
+        if (!data || !data.results || data.results.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="8">
+                        <div class="empty-state">
+                            <div class="empty-icon">💰</div>
+                            <h3>Нет начислений</h3>
+                            <p>Создайте начисление для этого владельца</p>
+                        </div>
+                    </td>
+                </tr>`;
+            updateFinanceSummary([]);
+            return;
+        }
+
+        // Обновляем сводку
+        updateFinanceSummary(data.results);
+
+        tbody.innerHTML = data.results.map(a => `
+            <tr>
+                <td>${escapeHtml(a.period_display)}</td>
+                <td>${escapeHtml(a.category_name)}</td>
+                <td>
+                    <a href="/plots/${a.land_plot}/" style="color: var(--primary); text-decoration: none;">
+                        Уч. №${escapeHtml(a.plot_number)}
+                    </a>
+                </td>
+                <td><strong>${a.amount} ₽</strong></td>
+                <td style="color: var(--primary);">${a.paid_amount} ₽</td>
+                <td style="color: ${a.debt > 0 ? 'var(--danger)' : 'var(--primary)'}; font-weight: 600;">
+                    ${a.debt} ₽
+                </td>
+                <td>${getAssessmentStatusBadge(a.status_display)}</td>
+                <td>
+                    <div class="table-actions">
+                        ${a.debt > 0 ? 
+                            `<button class="btn-icon" onclick="openAddPaymentModal(${a.id}, ${a.debt})" title="Добавить платёж">💳</button>` : ''}
+                        <button class="btn-icon" onclick="window.open('/api/assessments/${a.id}/receipt/?format=html')" title="Квитанция">🧾</button>
+                    </div>
+                </td>
+            </tr>
+        `).join('');
+    }
+
+    function updateFinanceSummary(assessments) {
+        let totalAssessed = 0;
+        let totalPaid = 0;
+        let totalDebt = 0;
+        let overdueCount = 0;
+
+        assessments.forEach(a => {
+            totalAssessed += parseFloat(a.amount);
+            totalPaid += parseFloat(a.paid_amount);
+            totalDebt += parseFloat(a.debt);
+            if (a.status === 'overdue') overdueCount++;
+        });
+
+        document.getElementById('stat-total-debt').textContent = totalDebt.toLocaleString('ru-RU') + ' ₽';
+        document.getElementById('stat-total-assessed').textContent = totalAssessed.toLocaleString('ru-RU') + ' ₽';
+        document.getElementById('stat-total-paid').textContent = totalPaid.toLocaleString('ru-RU') + ' ₽';
+        document.getElementById('stat-overdue-count').textContent = overdueCount;
+    }
+
+    function getAssessmentStatusBadge(status) {
+        const map = {
+            'Оплачено': '<span class="badge-status badge-active">✅ Оплачено</span>',
+            'Ожидает оплаты': '<span class="badge-status badge-warning">⏳ Ожидает</span>',
+            'Частично оплачено': '<span class="badge-status badge-warning">📊 Частично</span>',
+            'Просрочено': '<span class="badge-status badge-danger">🔴 Просрочено</span>',
+            'Отменено': '<span class="badge-status badge-inactive">❌ Отменено</span>',
+        };
+        return map[status] || `<span class="badge-status badge-inactive">${status}</span>`;
+    }
+
+    // ==================== ПЛАТЕЖИ ====================
+    
+    async function loadPayments() {
+        const data = await apiFetch(`/api/payments/?assessment__owner=${ownerId}&ordering=-payment_date&limit=10`);
+        const tbody = document.getElementById('payments-table-body');
+        
+        if (!data || !data.results || data.results.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="5">
+                        <div class="empty-state">
+                            <div class="empty-icon">💳</div>
+                            <h3>Нет платежей</h3>
+                            <p>Здесь будет отображаться история оплат</p>
+                        </div>
+                    </td>
+                </tr>`;
+            return;
+        }
+
+        tbody.innerHTML = data.results.map(p => `
+            <tr>
+                <td>${formatDate(p.payment_date)}</td>
+                <td><strong style="color: var(--primary);">${p.amount} ₽</strong></td>
+                <td>${escapeHtml(p.owner_name || '—')}</td>
+                <td>—</td>
+                <td>${getPaymentMethodIcon(p.payment_method)} ${p.payment_method === 'bank' ? 'Банк' : p.payment_method === 'cash' ? 'Наличные' : p.payment_method}</td>
+            </tr>
+        `).join('');
+    }
+
+    function getPaymentMethodIcon(method) {
+        const icons = {
+            'bank': '🏦',
+            'cash': '💵',
+            'terminal': '🏧',
+            'online': '📱',
+        };
+        return icons[method] || '💳';
+    }
+
+    // ==================== ДЕЙСТВИЯ ====================
+
+    function openAddPaymentModal(assessmentId, maxAmount) {
+        openModal('Добавить платёж', `
+            <div class="form-group">
+                <label>Сумма (макс: ${maxAmount} ₽)</label>
+                <input type="number" id="payment-amount" value="${maxAmount}" step="0.01" min="0.01" max="${maxAmount}">
+            </div>
+            <div class="form-group">
+                <label>Способ оплаты</label>
+                <select id="payment-method">
+                    <option value="cash">💵 Наличные</option>
+                    <option value="bank">🏦 Банковский перевод</option>
+                    <option value="terminal">🏧 Терминал</option>
+                    <option value="online">📱 Онлайн-платёж</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Дата платежа</label>
+                <input type="date" id="payment-date" value="${new Date().toISOString().split('T')[0]}">
+            </div>
+            <div class="form-group">
+                <label>Примечание</label>
+                <input type="text" id="payment-note" placeholder="Необязательно">
+            </div>
+        `, 'Добавить', async () => {
+            const amount = document.getElementById('payment-amount').value;
+            const method = document.getElementById('payment-method').value;
+            const date = document.getElementById('payment-date').value;
+            const note = document.getElementById('payment-note').value;
+
+            const result = await apiFetch(`/api/assessments/${assessmentId}/add-payment/`, {
+                method: 'POST',
+                body: JSON.stringify({ 
+                    amount: parseFloat(amount),
+                    payment_method: method,
+                    payment_date: date,
+                    notes: note,
+                }),
+            });
+
+            if (result) {
+                showAlert('Платёж добавлен', 'success');
+                loadAssessments();
+                loadPayments();
+            }
+        });
+    }
+
+    async function generateOwnerAssessment() {
+        const [categories, periods] = await Promise.all([
+            apiFetch('/api/payment-categories/'),
+            apiFetch('/api/payment-periods/'),
+        ]);
+        
+        if (!categories || !periods) return;
+
+        const plots = ownerData.ownerships || [];
+        if (plots.length === 0) {
+            showAlert('Сначала привяжите участок к владельцу', 'error');
+            return;
+        }
+
+        const plotOptions = plots.map(o => {
+            const p = o.land_plot_detail;
+            return p ? `<option value="${p.id}">Уч. №${p.plot_number} (${p.cadastral_number})</option>` : '';
+        }).join('');
+
+        const categoryOptions = categories.map(c => 
+            `<option value="${c.id}">${escapeHtml(c.name)} (${c.default_amount} ₽)</option>`
+        ).join('');
+
+        const periodOptions = periods.filter(p => p.is_active).map(p => 
+            `<option value="${p.id}">${p.year} ${p.quarter ? 'Q' + p.quarter : ''}</option>`
+        ).join('');
+
+        openModal('Создать начисление', `
+            <div class="form-group">
+                <label>Участок *</label>
+                <select id="gen-plot">${plotOptions}</select>
+            </div>
+            <div class="form-group">
+                <label>Категория *</label>
+                <select id="gen-category">${categoryOptions}</select>
+            </div>
+            <div class="form-group">
+                <label>Период *</label>
+                <select id="gen-period">${periodOptions}</select>
+            </div>
+            <div class="form-group">
+                <label>Сумма (₽)</label>
+                <input type="number" id="gen-amount" placeholder="Оставьте пустым для суммы по умолчанию" step="0.01">
+            </div>
+        `, 'Создать', async () => {
+            const plotId = document.getElementById('gen-plot').value;
+            const categoryId = document.getElementById('gen-category').value;
+            const periodId = document.getElementById('gen-period').value;
+            let amount = document.getElementById('gen-amount').value;
+
+            // Если сумма не указана, используем сумму из категории
+            if (!amount) {
+                const category = categories.find(c => c.id == categoryId);
+                amount = category ? category.default_amount : 0;
+            }
+
+            const result = await apiFetch('/api/assessments/', {
+                method: 'POST',
+                body: JSON.stringify({
+                    owner: ownerId,
+                    land_plot: parseInt(plotId),
+                    category: parseInt(categoryId),
+                    period: parseInt(periodId),
+                    amount: parseFloat(amount),
+                }),
+            });
+
+            if (result) {
+                showAlert('Начисление создано', 'success');
+                loadAssessments();
+            }
+        });
+    }
+
+    // --- Контакты ---
+    
+    function openAddContactModal() {
+        openModal('Добавить контакт', `
+            <div class="form-group">
+                <label>Тип *</label>
+                <select id="contact-type">
+                    <option value="ph">📱 Телефон</option>
+                    <option value="em">📧 Email</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Значение *</label>
+                <input type="text" id="contact-value" placeholder="+79161234567 или email@example.com">
+            </div>
+            <div class="form-group">
+                <label>Примечание</label>
+                <input type="text" id="contact-note" placeholder="Личный, рабочий...">
+            </div>
+        `, 'Добавить', async () => {
+            const type = document.getElementById('contact-type').value;
+            const value = document.getElementById('contact-value').value.trim();
+            const note = document.getElementById('contact-note').value.trim();
+            if (!value) {
+                showAlert('Введите значение контакта', 'error');
+                return;
+            }
+            const result = await apiFetch(`/api/owners/${ownerId}/add-contact/`, {
+                method: 'POST',
+                body: JSON.stringify({ type, value, note }),
+            });
+            if (result) {
+                showAlert('Контакт добавлен', 'success');
+                loadOwnerDetail();
+            }
+        });
+    }
+
+    async function deactivateContact(contactId) {
+        const result = await apiFetch(`/api/owners/${ownerId}/deactivate-contact/`, {
+            method: 'POST',
+            body: JSON.stringify({ contact_id: contactId }),
+        });
+        if (result) {
+            showAlert('Контакт деактивирован', 'info');
+            loadOwnerDetail();
+        }
+    }
+
+    async function activateContact(contactId) {
+        const result = await apiFetch(`/api/contacts/${contactId}/`, {
+            method: 'PATCH',
+            body: JSON.stringify({ is_active: true }),
+        });
+        if (result) {
+            showAlert('Контакт активирован', 'success');
+            loadOwnerDetail();
+        }
+    }
+
+    async function deleteContact(contactId) {
+        openModal('Удаление контакта', `
+            <p>Вы действительно хотите удалить этот контакт?</p>
+        `, 'Удалить', async () => {
+            const result = await apiFetch(`/api/contacts/${contactId}/`, {
+                method: 'DELETE',
+            });
+            if (result !== null) {
+                showAlert('Контакт удалён', 'success');
+                loadOwnerDetail();
+            }
+        });
+    }
+
+    // --- Участки ---
+    
+    async function openAddPlotModal() {
+        const plotsData = await apiFetch('/api/plots/?limit=100');
+        if (!plotsData || !plotsData.results) {
+            showAlert('Не удалось загрузить список участков', 'error');
+            return;
+        }
+
+        const ownedPlotIds = (ownerData.ownerships || []).map(o => o.land_plot);
+        const availablePlots = plotsData.results.filter(p => !ownedPlotIds.includes(p.id));
+
+        if (availablePlots.length === 0) {
+            showAlert('Все участки уже привязаны к этому владельцу', 'info');
+            return;
+        }
+
+        const plotOptions = availablePlots.map(p => 
+            `<option value="${p.id}">Уч. №${p.plot_number} (${p.cadastral_number}) - ${p.area_sqm} м²</option>`
+        ).join('');
+
+        openModal('Привязать участок', `
+            <div class="form-group">
+                <label>Участок *</label>
+                <select id="plot-select">${plotOptions}</select>
+            </div>
+            <div class="form-group">
+                <label>Доля</label>
+                <input type="text" id="plot-share" value="1/1" placeholder="1/1, 1/2...">
+            </div>
+            <div class="form-group">
+                <label>Дата вступления во владение</label>
+                <input type="date" id="plot-since">
+            </div>
+            <div class="form-group">
+                <label>Документ-основание</label>
+                <input type="text" id="plot-document" placeholder="Номер свидетельства или выписки ЕГРН">
+            </div>
+        `, 'Привязать', async () => {
+            const landPlotId = document.getElementById('plot-select').value;
+            const share = document.getElementById('plot-share').value.trim() || '1/1';
+            const since = document.getElementById('plot-since').value;
+            const doc = document.getElementById('plot-document').value.trim();
+
+            const result = await apiFetch(`/api/owners/${ownerId}/add-plot/`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    land_plot_id: parseInt(landPlotId),
+                    share,
+                    ownership_since: since || null,
+                    document_basis: doc,
+                }),
+            });
+            if (result) {
+                showAlert('Участок привязан', 'success');
+                loadOwnerDetail();
+            }
+        });
+    }
+
+    function removePlot(plotId) {
+        openModal('Отвязать участок', `
+            <p>Вы действительно хотите отвязать этот участок от владельца?</p>
+            <p style="color: var(--warning); font-size: 0.85rem;">
+                Информация о праве собственности будет удалена.
+            </p>
+        `, 'Отвязать', async () => {
+            const result = await apiFetch(`/api/owners/${ownerId}/remove-plot/`, {
+                method: 'POST',
+                body: JSON.stringify({ land_plot_id: plotId }),
+            });
+            if (result !== null) {
+                showAlert('Участок отвязан', 'success');
+                loadOwnerDetail();
+            }
+        });
+    }
+
+    // --- Удаление ---
+    
+    function confirmDeleteOwner() {
+        openModal('Удаление владельца', `
+            <p>Вы действительно хотите удалить владельца <strong>${escapeHtml(ownerData.full_name)}</strong>?</p>
+            <p style="color: var(--danger); font-size: 0.85rem; margin-top: 8px;">
+                Это действие нельзя отменить. Все контакты и связи с участками будут удалены.
+            </p>
+        `, 'Удалить', async () => {
+            const result = await apiFetch(`/api/owners/${ownerId}/`, {
+                method: 'DELETE',
+            });
+            if (result !== null) {
+                showAlert('Владелец удалён', 'success');
+                window.location.href = '/owners/';
+            }
+        });
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text || '';
+        return div.innerHTML;
+    }
+
+    document.addEventListener('DOMContentLoaded', loadOwnerDetail);
+</script>
+{% endblock %}

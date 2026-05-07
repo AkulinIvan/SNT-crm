@@ -1,0 +1,454 @@
+{% extends "base.html" %}
+
+{% block title %}Детали звонка | CRM СНТ{% endblock %}
+
+{% block breadcrumb %}
+<a href="/">Главная</a> <span>/</span> <a href="/calls/">Звонки</a> <span>/</span> <span id="breadcrumb-name">Загрузка...</span>
+{% endblock %}
+
+{% block content %}
+<div id="call-detail">
+    <div class="page-header" style="display: flex; justify-content: space-between; align-items: flex-start;">
+        <div>
+            <h2 id="call-title">📞 Загрузка...</h2>
+            <p id="call-meta" style="color: var(--gray-500);">...</p>
+        </div>
+        <div style="display: flex; gap: 8px;">
+            <button class="btn btn-secondary" onclick="window.location.href='/calls/'">← К списку</button>
+            <button class="btn btn-primary" id="btn-process" onclick="processCall()">✅ Обработать</button>
+            <button class="btn btn-danger" id="btn-delete" onclick="confirmDeleteCall()">🗑️ Удалить</button>
+        </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
+        <!-- Левая колонка: информация о звонке -->
+        <div>
+            <div class="table-container" style="margin-bottom: 24px;">
+                <div class="table-toolbar">
+                    <span style="font-weight: 600;">📋 Информация о звонке</span>
+                </div>
+                <table>
+                    <tbody>
+                        <tr><td style="color: var(--gray-500); width: 40%;">Номер звонящего</td><td id="info-caller">—</td></tr>
+                        <tr><td style="color: var(--gray-500);">Номер назначения</td><td id="info-called">—</td></tr>
+                        <tr><td style="color: var(--gray-500);">Направление</td><td id="info-direction">—</td></tr>
+                        <tr><td style="color: var(--gray-500);">Начало</td><td id="info-started">—</td></tr>
+                        <tr><td style="color: var(--gray-500);">Ответ</td><td id="info-answered">—</td></tr>
+                        <tr><td style="color: var(--gray-500);">Окончание</td><td id="info-ended">—</td></tr>
+                        <tr><td style="color: var(--gray-500);">Длительность</td><td id="info-duration">—</td></tr>
+                        <tr><td style="color: var(--gray-500);">Статус</td><td id="info-status">—</td></tr>
+                        <tr><td style="color: var(--gray-500);">Важный</td><td id="info-important">—</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Владелец и участок -->
+            <div class="table-container" style="margin-bottom: 24px;">
+                <div class="table-toolbar">
+                    <span style="font-weight: 600;">👤 Связи</span>
+                </div>
+                <table>
+                    <tbody>
+                        <tr>
+                            <td style="color: var(--gray-500); width: 40%;">Владелец</td>
+                            <td id="info-owner">
+                                <span style="color: var(--gray-400);">Загрузка...</span>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td style="color: var(--gray-500);">Участок</td>
+                            <td id="info-land-plot">
+                                <span style="color: var(--gray-400);">Загрузка...</span>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td style="color: var(--gray-500);">Контакты владельца</td>
+                            <td id="info-owner-contacts">
+                                <span style="color: var(--gray-400);">—</span>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Правая колонка: запись, заметки, теги -->
+        <div>
+            <!-- Аудиозапись -->
+            <div class="table-container" style="margin-bottom: 24px;">
+                <div class="table-toolbar">
+                    <span style="font-weight: 600;">🔊 Аудиозапись</span>
+                    <div style="display: flex; gap: 4px;">
+                        <button class="btn btn-sm btn-secondary" id="btn-download" onclick="downloadRecording()" style="display: none;">💾 Скачать</button>
+                        <button class="btn btn-sm btn-primary" id="btn-fetch" onclick="fetchRecording()" style="display: none;">🔄 Загрузить</button>
+                    </div>
+                </div>
+                <div style="padding: 16px;">
+                    <div id="audio-player-container" style="display: none;">
+                        <audio controls style="width: 100%;" id="audio-player">
+                            Ваш браузер не поддерживает аудиоплеер.
+                        </audio>
+                    </div>
+                    <div id="no-recording" class="empty-state" style="padding: 24px;">
+                        <div class="empty-icon">🎙️</div>
+                        <h3>Нет записи</h3>
+                        <p id="no-recording-msg">Запись разговора отсутствует</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Заметки -->
+            <div class="table-container" style="margin-bottom: 24px;">
+                <div class="table-toolbar">
+                    <span style="font-weight: 600;">📝 Заметка оператора</span>
+                    <button class="btn btn-sm btn-primary" onclick="editNote()">✏️ Редактировать</button>
+                </div>
+                <div style="padding: 16px; min-height: 80px;" id="info-note">
+                    <span style="color: var(--gray-400);">Загрузка...</span>
+                </div>
+            </div>
+
+            <!-- Теги -->
+            <div class="table-container" style="margin-bottom: 24px;">
+                <div class="table-toolbar">
+                    <span style="font-weight: 600;">🏷️ Теги</span>
+                    <button class="btn btn-sm btn-primary" onclick="addTag()">+ Добавить тег</button>
+                </div>
+                <div style="padding: 16px;" id="tags-container">
+                    <span style="color: var(--gray-400);">Загрузка...</span>
+                </div>
+            </div>
+
+            <!-- Техническая информация Asterisk -->
+            <div class="table-container">
+                <div class="table-toolbar">
+                    <span style="font-weight: 600;">⚙️ Техническая информация (Asterisk)</span>
+                </div>
+                <table>
+                    <tbody>
+                        <tr><td style="color: var(--gray-500); width: 40%; font-size: 0.8rem;">UniqueID</td><td id="info-asterisk-uid" style="font-size: 0.8rem;">—</td></tr>
+                        <tr><td style="color: var(--gray-500); font-size: 0.8rem;">Канал</td><td id="info-asterisk-channel" style="font-size: 0.8rem;">—</td></tr>
+                        <tr><td style="color: var(--gray-500); font-size: 0.8rem;">Файл записи</td><td id="info-asterisk-file" style="font-size: 0.8rem;">—</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    const callId = {{ call_id }};
+    let callData = null;
+
+    async function loadCallDetail() {
+        callData = await apiFetch(`/api/calls/${callId}/`);
+        if (!callData) {
+            document.getElementById('call-detail').innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-icon">❌</div>
+                    <h3>Звонок не найден</h3>
+                    <p>Возможно, запись была удалена</p>
+                    <button class="btn btn-primary" onclick="window.location.href='/calls/'">← К списку</button>
+                </div>`;
+            return;
+        }
+
+        // Заголовок
+        const directionEmoji = callData.direction === 'in' ? '📥' : callData.direction === 'out' ? '📤' : '📵';
+        document.getElementById('call-title').textContent = 
+            `${directionEmoji} ${callData.direction_display} от ${callData.caller_number}`;
+        document.getElementById('breadcrumb-name').textContent = 
+            `${callData.direction_display} | ${callData.caller_number}`;
+        document.getElementById('call-meta').textContent = 
+            formatDateTime(callData.started_at);
+
+        // Информация о звонке
+        document.getElementById('info-caller').innerHTML = 
+            `<a href="tel:${callData.caller_number}" style="color: var(--gray-800); text-decoration: none; font-family: monospace;">${escapeHtml(callData.caller_number)}</a>`;
+        document.getElementById('info-called').textContent = callData.called_number || '—';
+        document.getElementById('info-direction').innerHTML = getDirectionBadge(callData.direction);
+        document.getElementById('info-started').textContent = formatDateTime(callData.started_at);
+        document.getElementById('info-answered').textContent = formatDateTime(callData.answered_at);
+        document.getElementById('info-ended').textContent = formatDateTime(callData.ended_at);
+        document.getElementById('info-duration').textContent = callData.duration_display || '—';
+        document.getElementById('info-status').innerHTML = getStatusBadge(callData.status);
+        document.getElementById('info-important').textContent = callData.is_important ? '⭐ Да' : 'Нет';
+
+        // Владелец
+        if (callData.owner) {
+            document.getElementById('info-owner').innerHTML = 
+                `<a href="/owners/${callData.owner}/" style="color: var(--primary); text-decoration: none; font-weight: 500;">${escapeHtml(callData.owner_name)}</a>`;
+        } else {
+            document.getElementById('info-owner').innerHTML = '<span style="color: var(--gray-400);">Не определён</span>';
+        }
+
+        // Участок
+        if (callData.land_plot) {
+            document.getElementById('info-land-plot').innerHTML = 
+                `<a href="/plots/${callData.land_plot}/" style="color: var(--primary); text-decoration: none;">Уч. №${escapeHtml(callData.land_plot_number)}</a>`;
+        } else {
+            document.getElementById('info-land-plot').textContent = '—';
+        }
+
+        // Контакты владельца
+        if (callData.owner_contacts && callData.owner_contacts.length > 0) {
+            document.getElementById('info-owner-contacts').innerHTML = callData.owner_contacts.map(c => {
+                const icon = c.type === 'ph' ? '📱' : '📧';
+                const href = c.type === 'ph' ? `tel:${c.value}` : `mailto:${c.value}`;
+                return `<a href="${href}" style="color: var(--gray-700); text-decoration: none; display: block;">${icon} ${escapeHtml(c.value)}</a>`;
+            }).join('');
+        } else {
+            document.getElementById('info-owner-contacts').textContent = '—';
+        }
+
+        // Аудиозапись
+        if (callData.has_recording) {
+            document.getElementById('audio-player-container').style.display = 'block';
+            document.getElementById('no-recording').style.display = 'none';
+            document.getElementById('audio-player').src = `/api/calls/${callId}/download/`;
+            document.getElementById('btn-download').style.display = 'inline-block';
+            document.getElementById('btn-download').onclick = () => {
+                window.open(`/api/calls/${callId}/download/`, '_blank');
+            };
+        } else if (callData.asterisk_recording_file) {
+            document.getElementById('no-recording-msg').textContent = 
+                'Запись есть на сервере Asterisk, но не загружена в CRM';
+            document.getElementById('btn-fetch').style.display = 'inline-block';
+        }
+
+        // Заметка
+        document.getElementById('info-note').innerHTML = callData.operator_note 
+            ? `<p style="white-space: pre-wrap;">${escapeHtml(callData.operator_note)}</p>`
+            : '<span style="color: var(--gray-400);">Нет заметки</span>';
+
+        // Теги
+        renderTags(callData.tags_list || []);
+
+        // Техническая информация
+        document.getElementById('info-asterisk-uid').textContent = callData.asterisk_uniqueid || '—';
+        document.getElementById('info-asterisk-channel').textContent = callData.asterisk_channel || '—';
+        document.getElementById('info-asterisk-file').textContent = callData.asterisk_recording_file || '—';
+
+        // Кнопка "Обработать" — скрываем, если уже обработан
+        if (callData.status === 'processed' || callData.status === 'archived') {
+            document.getElementById('btn-process').style.display = 'none';
+        }
+    }
+
+    function getDirectionBadge(direction) {
+        const badges = {
+            'in': '<span class="badge-status badge-active">📥 Входящий</span>',
+            'out': '<span class="badge-status" style="background: #e3f2fd; color: #1565c0;">📤 Исходящий</span>',
+            'missed': '<span class="badge-status badge-danger">📵 Пропущенный</span>',
+        };
+        return badges[direction] || `<span class="badge-status badge-inactive">${direction}</span>`;
+    }
+
+    function getStatusBadge(status) {
+        const badges = {
+            'new': '<span class="badge-status badge-warning">🆕 Новый</span>',
+            'processed': '<span class="badge-status badge-active">✅ Обработан</span>',
+            'archived': '<span class="badge-status badge-inactive">📁 Архив</span>',
+        };
+        return badges[status] || `<span class="badge-status badge-inactive">${status}</span>`;
+    }
+
+    function renderTags(tags) {
+        const container = document.getElementById('tags-container');
+        if (tags.length === 0) {
+            container.innerHTML = '<span style="color: var(--gray-400);">Нет тегов</span>';
+            return;
+        }
+        container.innerHTML = tags.map(tag => `
+            <span style="display: inline-flex; align-items: center; gap: 4px; background: var(--primary-light); color: var(--primary-dark); padding: 4px 12px; border-radius: 16px; margin: 4px; font-size: 0.85rem;">
+                ${escapeHtml(tag)}
+                <button onclick="removeTag('${escapeHtml(tag)}')" style="background: none; border: none; cursor: pointer; color: var(--primary-dark); font-weight: bold; padding: 0 2px;" title="Удалить тег">&times;</button>
+            </span>
+        `).join('');
+    }
+
+    // --- Действия ---
+
+    async function processCall() {
+        const result = await apiFetch(`/api/calls/${callId}/`, {
+            method: 'PATCH',
+            body: JSON.stringify({ status: 'processed' }),
+        });
+        if (result) {
+            showAlert('Звонок обработан', 'success');
+            loadCallDetail();
+        }
+    }
+
+    function editNote() {
+        openModal('Редактировать заметку', `
+            <div class="form-group">
+                <label>Заметка оператора</label>
+                <textarea id="edit-note" rows="5" placeholder="Опишите суть разговора...">${escapeHtml(callData.operator_note || '')}</textarea>
+            </div>
+            <div class="form-group">
+                <label>Статус</label>
+                <select id="edit-status">
+                    <option value="new" ${callData.status === 'new' ? 'selected' : ''}>Новый</option>
+                    <option value="processed" ${callData.status === 'processed' ? 'selected' : ''}>Обработан</option>
+                    <option value="archived" ${callData.status === 'archived' ? 'selected' : ''}>Архивирован</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" id="edit-important" ${callData.is_important ? 'checked' : ''}> 
+                    ⭐ Важный звонок
+                </label>
+            </div>
+            <div class="form-group">
+                <label>Привязать к владельцу</label>
+                <select id="edit-owner">
+                    <option value="">Не выбран</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Привязать к участку</label>
+                <select id="edit-plot">
+                    <option value="">Не выбран</option>
+                </select>
+            </div>
+        `, 'Сохранить', async () => {
+            const payload = {
+                operator_note: document.getElementById('edit-note').value.trim(),
+                status: document.getElementById('edit-status').value,
+                is_important: document.getElementById('edit-important').checked,
+            };
+
+            const ownerId = document.getElementById('edit-owner').value;
+            const plotId = document.getElementById('edit-plot').value;
+            if (ownerId) payload.owner = parseInt(ownerId);
+            if (plotId) payload.land_plot = parseInt(plotId);
+
+            const result = await apiFetch(`/api/calls/${callId}/`, {
+                method: 'PATCH',
+                body: JSON.stringify(payload),
+            });
+
+            if (result) {
+                showAlert('Данные обновлены', 'success');
+                loadCallDetail();
+            }
+        });
+
+        // Загружаем список владельцев и участков для select'ов
+        loadOwnersForSelect();
+        loadPlotsForSelect();
+    }
+
+    async function loadOwnersForSelect() {
+        const data = await apiFetch('/api/owners/?limit=200');
+        if (data && data.results) {
+            const select = document.getElementById('edit-owner');
+            data.results.forEach(o => {
+                const option = document.createElement('option');
+                option.value = o.id;
+                option.textContent = o.full_name;
+                if (callData.owner === o.id) option.selected = true;
+                select.appendChild(option);
+            });
+        }
+    }
+
+    async function loadPlotsForSelect() {
+        const data = await apiFetch('/api/plots/?limit=200');
+        if (data && data.results) {
+            const select = document.getElementById('edit-plot');
+            data.results.forEach(p => {
+                const option = document.createElement('option');
+                option.value = p.id;
+                option.textContent = `Уч. №${p.plot_number} (${p.cadastral_number})`;
+                if (callData.land_plot === p.id) option.selected = true;
+                select.appendChild(option);
+            });
+        }
+    }
+
+    function addTag() {
+        openModal('Добавить тег', `
+            <div class="form-group">
+                <label>Тег *</label>
+                <input type="text" id="new-tag" placeholder="жалоба, должник, электричество...">
+            </div>
+            <p style="font-size: 0.8rem; color: var(--gray-500);">
+                Можно добавить несколько тегов через запятую
+            </p>
+        `, 'Добавить', async () => {
+            const tagInput = document.getElementById('new-tag').value.trim();
+            if (!tagInput) {
+                showAlert('Введите название тега', 'error');
+                return;
+            }
+            const tags = tagInput.split(',').map(t => t.trim()).filter(Boolean);
+            let success = true;
+            for (const tag of tags) {
+                const result = await apiFetch(`/api/calls/${callId}/add-tag/`, {
+                    method: 'POST',
+                    body: JSON.stringify({ tag }),
+                });
+                if (!result) success = false;
+            }
+            if (success) {
+                showAlert('Теги добавлены', 'success');
+                loadCallDetail();
+            }
+        });
+    }
+
+    async function removeTag(tag) {
+        const result = await apiFetch(`/api/calls/${callId}/remove-tag/`, {
+            method: 'POST',
+            body: JSON.stringify({ tag }),
+        });
+        if (result) {
+            showAlert(`Тег «${tag}» удалён`, 'success');
+            loadCallDetail();
+        }
+    }
+
+    async function fetchRecording() {
+        const result = await apiFetch(`/api/calls/${callId}/fetch-recording/`, {
+            method: 'POST',
+        });
+        if (result) {
+            showAlert('Запись загружена с сервера Asterisk', 'success');
+            loadCallDetail();
+        }
+    }
+
+    function downloadRecording() {
+        window.open(`/api/calls/${callId}/download/`, '_blank');
+    }
+
+    function confirmDeleteCall() {
+        openModal('Удаление записи звонка', `
+            <p>Вы действительно хотите удалить эту запись?</p>
+            <p style="color: var(--danger); font-size: 0.85rem; margin-top: 8px;">
+                Это действие нельзя отменить. Файл записи также будет удалён.
+            </p>
+        `, 'Удалить', async () => {
+            const result = await apiFetch(`/api/calls/${callId}/`, {
+                method: 'DELETE',
+            });
+            if (result !== null) {
+                showAlert('Запись удалена', 'success');
+                window.location.href = '/calls/';
+            }
+        });
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    document.addEventListener('DOMContentLoaded', loadCallDetail);
+</script>
+{% endblock %}
