@@ -5,3 +5,5 @@ bank_statements
 migrations/
 /migrations/
 **/migrations/
+.env
+create_users.py
