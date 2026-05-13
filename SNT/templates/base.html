@@ -14,6 +14,8 @@
             --danger-light: #ffebee;
             --warning: #f57c00;
             --warning-light: #fff3e0;
+            --info: #1976d2;
+            --info-light: #e3f2fd;
             --gray-50: #fafafa;
             --gray-100: #f5f5f5;
             --gray-200: #eeeeee;
@@ -25,20 +27,16 @@
             --gray-800: #424242;
             --gray-900: #212121;
             --white: #ffffff;
-            --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
-            --shadow: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.06);
-            --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.07), 0 2px 4px rgba(0, 0, 0, 0.06);
-            --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.1), 0 4px 6px rgba(0, 0, 0, 0.05);
+            --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+            --shadow: 0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06);
+            --shadow-md: 0 4px 6px rgba(0,0,0,0.07), 0 2px 4px rgba(0,0,0,0.06);
+            --shadow-lg: 0 10px 15px rgba(0,0,0,0.1), 0 4px 6px rgba(0,0,0,0.05);
             --radius: 8px;
             --radius-sm: 4px;
             --sidebar-width: 250px;
         }
 
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
 
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
@@ -57,7 +55,7 @@
         /* Sidebar */
         .sidebar {
             width: var(--sidebar-width);
-            background: var(--gray-900);
+            background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%);
             color: var(--white);
             position: fixed;
             top: 0;
@@ -67,43 +65,57 @@
             display: flex;
             flex-direction: column;
             transition: transform 0.3s ease;
+            box-shadow: 2px 0 20px rgba(0,0,0,0.1);
         }
 
         .sidebar-logo {
-            padding: 20px;
-            border-bottom: 1px solid var(--gray-700);
+            padding: 24px 20px;
+            border-bottom: 1px solid rgba(255,255,255,0.08);
         }
 
         .sidebar-logo h1 {
-            font-size: 1.25rem;
+            font-size: 1.2rem;
             font-weight: 600;
             color: var(--white);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .sidebar-logo .logo-icon {
+            width: 36px;
+            height: 36px;
+            background: var(--primary);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2rem;
         }
 
         .sidebar-logo span {
-            font-size: 0.75rem;
-            color: var(--gray-400);
+            font-size: 0.7rem;
+            color: rgba(255,255,255,0.5);
             display: block;
-            margin-top: 2px;
+            margin-top: 4px;
         }
 
         .sidebar-nav {
             flex: 1;
-            padding: 16px 0;
+            padding: 12px 8px;
             overflow-y: auto;
         }
 
         .nav-section {
-            padding: 0 12px;
             margin-bottom: 8px;
         }
 
         .nav-section-title {
-            font-size: 0.7rem;
+            font-size: 0.65rem;
             text-transform: uppercase;
-            letter-spacing: 0.05em;
-            color: var(--gray-500);
-            padding: 8px 12px;
+            letter-spacing: 0.1em;
+            color: rgba(255,255,255,0.35);
+            padding: 12px 16px 8px;
             font-weight: 600;
         }
 
@@ -111,27 +123,30 @@
             display: flex;
             align-items: center;
             gap: 12px;
-            padding: 10px 12px;
-            color: var(--gray-300);
+            padding: 10px 16px;
+            color: rgba(255,255,255,0.65);
             text-decoration: none;
-            border-radius: var(--radius-sm);
+            border-radius: 8px;
             transition: all 0.2s;
             font-size: 0.9rem;
+            margin: 2px 0;
+            position: relative;
         }
 
         .nav-link:hover {
-            background: var(--gray-800);
+            background: rgba(255,255,255,0.08);
             color: var(--white);
         }
 
         .nav-link.active {
             background: var(--primary);
             color: var(--white);
+            box-shadow: 0 4px 12px rgba(44,122,71,0.3);
         }
 
         .nav-link .icon {
-            width: 20px;
-            height: 20px;
+            width: 22px;
+            height: 22px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -143,46 +158,79 @@
             margin-left: auto;
             background: var(--danger);
             color: var(--white);
-            font-size: 0.7rem;
-            padding: 2px 6px;
+            font-size: 0.65rem;
+            padding: 2px 8px;
             border-radius: 10px;
             font-weight: 600;
-            min-width: 20px;
+            min-width: 22px;
             text-align: center;
         }
 
         .sidebar-footer {
             padding: 16px;
-            border-top: 1px solid var(--gray-700);
+            border-top: 1px solid rgba(255,255,255,0.08);
+            background: rgba(0,0,0,0.2);
         }
 
         .user-info {
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 12px;
+            padding: 8px;
+            border-radius: 8px;
+            transition: background 0.2s;
+        }
+
+        .user-info:hover {
+            background: rgba(255,255,255,0.05);
         }
 
         .user-avatar {
-            width: 36px;
-            height: 36px;
-            border-radius: 50%;
-            background: var(--primary);
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            background: linear-gradient(135deg, var(--primary), var(--primary-dark));
             display: flex;
             align-items: center;
             justify-content: center;
             font-weight: 600;
-            font-size: 0.9rem;
+            font-size: 1rem;
             flex-shrink: 0;
+            color: var(--white);
+        }
+
+        .user-details {
+            flex: 1;
+            min-width: 0;
         }
 
         .user-name {
             font-size: 0.85rem;
             font-weight: 500;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         .user-role {
             font-size: 0.7rem;
-            color: var(--gray-400);
+            color: rgba(255,255,255,0.5);
+        }
+
+        .logout-btn {
+            background: none;
+            border: none;
+            color: rgba(255,255,255,0.5);
+            cursor: pointer;
+            padding: 6px;
+            border-radius: 6px;
+            transition: all 0.2s;
+            font-size: 1rem;
+        }
+
+        .logout-btn:hover {
+            background: rgba(220,38,38,0.2);
+            color: #ef4444;
         }
 
         /* Main content */
@@ -198,7 +246,7 @@
         .topbar {
             background: var(--white);
             border-bottom: 1px solid var(--gray-200);
-            padding: 12px 24px;
+            padding: 10px 24px;
             display: flex;
             align-items: center;
             justify-content: space-between;
@@ -222,7 +270,12 @@
             font-size: 1.5rem;
             cursor: pointer;
             color: var(--gray-700);
-            padding: 4px;
+            padding: 4px 8px;
+            border-radius: 6px;
+        }
+
+        .menu-toggle:hover {
+            background: var(--gray-100);
         }
 
         .breadcrumb {
@@ -233,51 +286,18 @@
         .breadcrumb a {
             color: var(--primary);
             text-decoration: none;
+            font-weight: 500;
         }
 
-        .breadcrumb a:hover {
-            text-decoration: underline;
-        }
-
-        .breadcrumb span {
-            color: var(--gray-500);
-        }
+        .breadcrumb a:hover { text-decoration: underline; }
+        .breadcrumb span { color: var(--gray-500); }
 
         .topbar-right {
             display: flex;
             align-items: center;
-            gap: 16px;
+            gap: 12px;
         }
 
-        .topbar-btn {
-            background: var(--gray-100);
-            border: 1px solid var(--gray-200);
-            padding: 8px 16px;
-            border-radius: var(--radius-sm);
-            cursor: pointer;
-            font-size: 0.85rem;
-            color: var(--gray-700);
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            transition: all 0.2s;
-        }
-
-        .topbar-btn:hover {
-            background: var(--gray-200);
-        }
-
-        .topbar-btn.primary {
-            background: var(--primary);
-            color: var(--white);
-            border-color: var(--primary);
-        }
-
-        .topbar-btn.primary:hover {
-            background: var(--primary-dark);
-        }
-
-        /* Search */
         .search-box {
             position: relative;
         }
@@ -285,9 +305,9 @@
         .search-box input {
             padding: 8px 12px 8px 36px;
             border: 1px solid var(--gray-300);
-            border-radius: var(--radius-sm);
+            border-radius: 20px;
             font-size: 0.85rem;
-            width: 250px;
+            width: 220px;
             transition: all 0.2s;
             background: var(--gray-50);
         }
@@ -295,17 +315,41 @@
         .search-box input:focus {
             outline: none;
             border-color: var(--primary);
-            box-shadow: 0 0 0 3px rgba(44, 122, 71, 0.1);
+            box-shadow: 0 0 0 3px rgba(44,122,71,0.1);
             background: var(--white);
+            width: 280px;
         }
 
         .search-box .search-icon {
             position: absolute;
-            left: 10px;
+            left: 12px;
             top: 50%;
             transform: translateY(-50%);
-            color: var(--gray-500);
+            color: var(--gray-400);
             pointer-events: none;
+            font-size: 0.9rem;
+        }
+
+        .topbar-btn {
+            background: var(--gray-50);
+            border: 1px solid var(--gray-200);
+            padding: 8px;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 0.9rem;
+            color: var(--gray-600);
+            transition: all 0.2s;
+            width: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .topbar-btn:hover {
+            background: var(--gray-100);
+            color: var(--gray-800);
+            border-color: var(--gray-300);
         }
 
         /* Page content */
@@ -340,11 +384,35 @@
 
         .stat-card {
             background: var(--white);
-            border-radius: var(--radius);
+            border-radius: 12px;
             padding: 20px;
             box-shadow: var(--shadow);
             border: 1px solid var(--gray-200);
+            cursor: pointer;
+            transition: all 0.2s;
+            position: relative;
+            overflow: hidden;
         }
+
+        .stat-card:hover {
+            box-shadow: var(--shadow-md);
+            transform: translateY(-2px);
+        }
+
+        .stat-card::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 4px;
+            height: 100%;
+            background: var(--primary);
+            border-radius: 12px 0 0 12px;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+
+        .stat-card:hover::after { opacity: 1; }
 
         .stat-label {
             font-size: 0.75rem;
@@ -356,29 +424,24 @@
         }
 
         .stat-value {
-            font-size: 1.5rem;
+            font-size: 1.8rem;
             font-weight: 700;
             color: var(--gray-900);
+            margin-bottom: 4px;
         }
 
         .stat-change {
             font-size: 0.8rem;
-            margin-top: 4px;
         }
 
-        .stat-change.positive {
-            color: var(--primary);
-        }
-
-        .stat-change.negative {
-            color: var(--danger);
-        }
+        .stat-change.positive { color: var(--primary); }
+        .stat-change.negative { color: var(--danger); }
 
         /* Filters bar */
         .filters-bar {
             background: var(--white);
-            border-radius: var(--radius);
-            padding: 16px;
+            border-radius: 10px;
+            padding: 12px 16px;
             margin-bottom: 16px;
             box-shadow: var(--shadow-sm);
             border: 1px solid var(--gray-200);
@@ -403,42 +466,39 @@
 
         .filter-group select,
         .filter-group input {
-            padding: 6px 10px;
+            padding: 6px 12px;
             border: 1px solid var(--gray-300);
-            border-radius: var(--radius-sm);
+            border-radius: 6px;
             font-size: 0.85rem;
             background: var(--white);
-            min-width: 150px;
         }
 
         .filter-group select:focus,
         .filter-group input:focus {
             outline: none;
             border-color: var(--primary);
-            box-shadow: 0 0 0 3px rgba(44, 122, 71, 0.1);
+            box-shadow: 0 0 0 3px rgba(44,122,71,0.1);
         }
 
         /* Table */
         .table-container {
             background: var(--white);
-            border-radius: var(--radius);
+            border-radius: 10px;
             box-shadow: var(--shadow);
             border: 1px solid var(--gray-200);
             overflow: hidden;
+            margin-bottom: 24px;
         }
 
         .table-toolbar {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 12px 16px;
+            padding: 14px 18px;
             border-bottom: 1px solid var(--gray-200);
             background: var(--gray-50);
-        }
-
-        .table-toolbar .results-count {
-            font-size: 0.85rem;
-            color: var(--gray-600);
+            gap: 12px;
+            flex-wrap: wrap;
         }
 
         table {
@@ -461,22 +521,17 @@
 
         tbody td {
             padding: 12px 16px;
-            font-size: 0.85rem;
+            font-size: 0.875rem;
             border-bottom: 1px solid var(--gray-100);
             color: var(--gray-800);
         }
 
-        tbody tr:hover {
-            background: var(--gray-50);
-        }
-
-        tbody tr:last-child td {
-            border-bottom: none;
-        }
+        tbody tr:hover { background: var(--gray-50); }
+        tbody tr:last-child td { border-bottom: none; }
 
         .table-actions {
             display: flex;
-            gap: 8px;
+            gap: 4px;
         }
 
         .btn-icon {
@@ -484,15 +539,15 @@
             border: none;
             cursor: pointer;
             padding: 6px;
-            border-radius: var(--radius-sm);
-            color: var(--gray-600);
+            border-radius: 6px;
+            color: var(--gray-500);
             transition: all 0.2s;
             font-size: 1rem;
         }
 
         .btn-icon:hover {
             background: var(--gray-100);
-            color: var(--gray-900);
+            color: var(--gray-800);
         }
 
         .btn-icon.danger:hover {
@@ -503,31 +558,18 @@
         /* Status badges */
         .badge-status {
             display: inline-block;
-            padding: 2px 10px;
+            padding: 3px 10px;
             border-radius: 12px;
             font-size: 0.75rem;
             font-weight: 600;
+            white-space: nowrap;
         }
 
-        .badge-active {
-            background: var(--primary-light);
-            color: var(--primary-dark);
-        }
-
-        .badge-inactive {
-            background: var(--gray-200);
-            color: var(--gray-600);
-        }
-
-        .badge-warning {
-            background: var(--warning-light);
-            color: var(--warning);
-        }
-
-        .badge-danger {
-            background: var(--danger-light);
-            color: var(--danger);
-        }
+        .badge-active { background: #dcfce7; color: #16a34a; }
+        .badge-inactive { background: #f1f5f9; color: #64748b; }
+        .badge-warning { background: #fef9c3; color: #a16207; }
+        .badge-danger { background: #fee2e2; color: #dc2626; }
+        .badge-info { background: #dbeafe; color: #2563eb; }
 
         /* Pagination */
         .pagination {
@@ -537,21 +579,24 @@
             gap: 4px;
             padding: 16px;
             border-top: 1px solid var(--gray-200);
+            flex-wrap: wrap;
         }
 
         .pagination button {
-            padding: 6px 12px;
+            min-width: 36px;
+            height: 36px;
+            padding: 6px 10px;
             border: 1px solid var(--gray-200);
             background: var(--white);
-            border-radius: var(--radius-sm);
+            border-radius: 6px;
             cursor: pointer;
             font-size: 0.85rem;
             color: var(--gray-700);
             transition: all 0.2s;
         }
 
-        .pagination button:hover:not(:disabled) {
-            background: var(--gray-100);
+        .pagination button:hover:not(:disabled):not(.active) {
+            background: var(--gray-50);
             border-color: var(--gray-300);
         }
 
@@ -562,52 +607,21 @@
         }
 
         .pagination button:disabled {
-            opacity: 0.5;
+            opacity: 0.4;
             cursor: not-allowed;
-        }
-
-        /* Alerts */
-        .alert {
-            padding: 12px 16px;
-            border-radius: var(--radius-sm);
-            margin-bottom: 16px;
-            font-size: 0.85rem;
-        }
-
-        .alert-success {
-            background: var(--primary-light);
-            color: var(--primary-dark);
-            border: 1px solid #c8e6c9;
-        }
-
-        .alert-error {
-            background: var(--danger-light);
-            color: var(--danger);
-            border: 1px solid #ffcdd2;
-        }
-
-        .alert-warning {
-            background: var(--warning-light);
-            color: var(--warning);
-            border: 1px solid #ffe0b2;
-        }
-
-        .alert-info {
-            background: #e3f2fd;
-            color: #1565c0;
-            border: 1px solid #bbdefb;
         }
 
         /* Empty state */
         .empty-state {
             text-align: center;
             padding: 48px 24px;
+            color: var(--gray-500);
         }
 
         .empty-state .empty-icon {
             font-size: 3rem;
             margin-bottom: 16px;
-            color: var(--gray-400);
+            opacity: 0.5;
         }
 
         .empty-state h3 {
@@ -619,7 +633,6 @@
         .empty-state p {
             color: var(--gray-500);
             font-size: 0.9rem;
-            margin-bottom: 16px;
         }
 
         /* Modal */
@@ -628,12 +641,13 @@
             position: fixed;
             top: 0;
             left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0, 0, 0, 0.5);
-            z-index: 200;
-            align-items: center;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 9999;
             justify-content: center;
+            align-items: center;
+            backdrop-filter: blur(4px);
         }
 
         .modal-overlay.active {
@@ -642,24 +656,27 @@
 
         .modal {
             background: var(--white);
-            border-radius: var(--radius);
-            box-shadow: var(--shadow-lg);
+            border-radius: 12px;
             width: 90%;
-            max-width: 600px;
-            max-height: 80vh;
+            max-width: 500px;
+            max-height: 90vh;
             overflow-y: auto;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            animation: modalSlideIn 0.3s ease;
         }
 
         .modal-header {
-            padding: 16px 20px;
-            border-bottom: 1px solid var(--gray-200);
             display: flex;
             justify-content: space-between;
             align-items: center;
+            padding: 20px 24px 16px;
+            border-bottom: 1px solid var(--gray-200);
         }
 
         .modal-header h3 {
+            margin: 0;
             font-size: 1.1rem;
+            font-weight: 600;
         }
 
         .modal-close {
@@ -668,19 +685,62 @@
             font-size: 1.5rem;
             cursor: pointer;
             color: var(--gray-500);
+            padding: 4px 8px;
+            border-radius: 6px;
+            transition: all 0.2s;
+            line-height: 1;
+        }
+
+        .modal-close:hover {
+            background: var(--gray-100);
+            color: var(--gray-800);
         }
 
         .modal-body {
-            padding: 20px;
+            padding: 20px 24px;
         }
 
         .modal-footer {
-            padding: 12px 20px;
-            border-top: 1px solid var(--gray-200);
             display: flex;
             justify-content: flex-end;
             gap: 8px;
+            padding: 16px 24px;
+            border-top: 1px solid var(--gray-200);
         }
+
+        @keyframes modalSlideIn {
+            from { transform: translateY(-20px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+
+        body.modal-open {
+            overflow: hidden;
+        }
+
+        /* Toast */
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            padding: 12px 20px;
+            border-radius: 8px;
+            color: white;
+            font-weight: 500;
+            z-index: 10000;
+            animation: toastSlideIn 0.3s ease;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            max-width: 400px;
+        }
+
+        @keyframes toastSlideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+
+        .toast.success { background: #16a34a; }
+        .toast.error { background: #dc2626; }
+        .toast.info { background: #2563eb; }
+        .toast.warning { background: #a16207; }
 
         /* Form */
         .form-group {
@@ -692,18 +752,19 @@
             font-size: 0.8rem;
             font-weight: 600;
             color: var(--gray-700);
-            margin-bottom: 4px;
+            margin-bottom: 6px;
         }
 
         .form-group input,
         .form-group select,
         .form-group textarea {
             width: 100%;
-            padding: 8px 12px;
+            padding: 10px 12px;
             border: 1px solid var(--gray-300);
-            border-radius: var(--radius-sm);
+            border-radius: 8px;
             font-size: 0.9rem;
             transition: all 0.2s;
+            background: var(--white);
         }
 
         .form-group input:focus,
@@ -711,17 +772,35 @@
         .form-group textarea:focus {
             outline: none;
             border-color: var(--primary);
-            box-shadow: 0 0 0 3px rgba(44, 122, 71, 0.1);
+            box-shadow: 0 0 0 3px rgba(44,122,71,0.1);
         }
 
+        .form-group small {
+            display: block;
+            color: var(--gray-500);
+            font-size: 0.75rem;
+            margin-top: 4px;
+        }
+
+        /* Buttons */
         .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
             padding: 8px 16px;
             border: 1px solid transparent;
-            border-radius: var(--radius-sm);
+            border-radius: 8px;
             cursor: pointer;
-            font-size: 0.85rem;
+            font-size: 0.875rem;
             font-weight: 500;
             transition: all 0.2s;
+            text-decoration: none;
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
         }
 
         .btn-primary {
@@ -729,8 +808,9 @@
             color: var(--white);
         }
 
-        .btn-primary:hover {
+        .btn-primary:hover:not(:disabled) {
             background: var(--primary-dark);
+            box-shadow: 0 4px 12px rgba(44,122,71,0.3);
         }
 
         .btn-secondary {
@@ -739,8 +819,9 @@
             color: var(--gray-700);
         }
 
-        .btn-secondary:hover {
+        .btn-secondary:hover:not(:disabled) {
             background: var(--gray-50);
+            border-color: var(--gray-400);
         }
 
         .btn-danger {
@@ -748,8 +829,14 @@
             color: var(--white);
         }
 
-        .btn-danger:hover {
+        .btn-danger:hover:not(:disabled) {
             background: #b71c1c;
+        }
+
+        .btn-sm {
+            padding: 5px 12px;
+            font-size: 0.8rem;
+            border-radius: 6px;
         }
 
         /* Mobile */
@@ -760,6 +847,7 @@
 
             .sidebar.open {
                 transform: translateX(0);
+                box-shadow: 4px 0 30px rgba(0,0,0,0.3);
             }
 
             .main-content {
@@ -767,15 +855,19 @@
             }
 
             .menu-toggle {
-                display: block;
+                display: flex;
             }
 
             .topbar {
-                padding: 12px 16px;
+                padding: 10px 16px;
             }
 
             .search-box input {
-                width: 150px;
+                width: 140px;
+            }
+
+            .search-box input:focus {
+                width: 180px;
             }
 
             .page-content {
@@ -783,15 +875,12 @@
             }
 
             .stats-grid {
-                grid-template-columns: repeat(2, 1fr);
+                grid-template-columns: 1fr 1fr;
+                gap: 10px;
             }
 
             .table-container {
                 overflow-x: auto;
-            }
-
-            .filters-bar {
-                flex-direction: column;
             }
         }
     </style>
@@ -802,61 +891,65 @@
         <!-- Sidebar -->
         <aside class="sidebar" id="sidebar">
             <div class="sidebar-logo">
-                <h1>🌿 СНТ Строитель-43</h1>
+                <h1>
+                    <span class="logo-icon">🌿</span>
+                    СНТ Строитель-43
+                </h1>
                 <span>Система управления</span>
             </div>
+            
             <nav class="sidebar-nav">
-                {% comment %} <div class="nav-section">
-                    <div class="nav-section-title">Главное</div>
+                <div class="nav-section">
+                    <div class="nav-section-title">Основное</div>
                     <a href="/" class="nav-link {% if active_page == 'dashboard' %}active{% endif %}">
                         <span class="icon">📊</span> Дашборд
                     </a>
-                </div> {% endcomment %}
-                <div class="nav-section">
-                    {% comment %} <div class="nav-section-title">Управление</div> {% endcomment %}
                     <a href="/owners/" class="nav-link {% if active_page == 'owners' %}active{% endif %}">
                         <span class="icon">👤</span> Владельцы
-                        {% comment %} <span class="badge" id="owners-count"></span> {% endcomment %}
                     </a>
                     <a href="/plots/" class="nav-link {% if active_page == 'plots' %}active{% endif %}">
                         <span class="icon">🏠</span> Участки
                     </a>
-                    {% comment %} <a href="/calls/" class="nav-link {% if active_page == 'calls' %}active{% endif %}">
-                        <span class="icon">📞</span> Звонки
-                        <span class="badge" id="calls-new-count">0</span>
-                    </a> {% endcomment %}
-                </div>
-                <div class="nav-section">
-                    {% comment %} <div class="nav-section-title">Финансы</div>
-                    <a href="/payments/" class="nav-link {% if active_page == 'payments' %}active{% endif %}">
-                        <span class="icon">💰</span> Платежи
-                        <span class="badge" id="payments-debt-count" style="background: var(--warning);">0</span>
-                    </a>
-                    <a href="/payments/assessments/" class="nav-link {% if active_page == 'assessments' %}active{% endif %}">
-                        <span class="icon">📋</span> Начисления
-                    </a>
-                    <a href="/payments/import/" class="nav-link {% if active_page == 'bank-import' %}active{% endif %}">
-                        <span class="icon">🏦</span> Импорт из банка
-                    </a> {% endcomment %}
-                </div>
-                <div class="nav-section">
-                    {% comment %} <div class="nav-section-title">Сервисы</div>
                     <a href="/map/" class="nav-link {% if active_page == 'map' %}active{% endif %}">
                         <span class="icon">🗺️</span> Карта СНТ
                     </a>
-                    <a href="/stats/" class="nav-link {% if active_page == 'stats' %}active{% endif %}">
-                        <span class="icon">📈</span> Статистика
+                </div>
+
+                {% if user.is_authenticated and user.is_admin %}
+                <div class="nav-section">
+                    <div class="nav-section-title">Администрирование</div>
+                    <a href="/users/" class="nav-link {% if active_page == 'users' %}active{% endif %}">
+                        <span class="icon">👥</span> Пользователи
+                    </a>
+                    {% comment %} <a href="/audit-log/" class="nav-link {% if active_page == 'audit' %}active{% endif %}">
+                        <span class="icon">📝</span> Логи действий
                     </a> {% endcomment %}
                 </div>
+                {% endif %}
             </nav>
+
             <div class="sidebar-footer">
-                <div class="user-info">
-                    <div class="user-avatar">П</div>
-                    <div>
-                        <div class="user-name">Председатель</div>
-                        <div class="user-role">Администратор</div>
+                {% if user.is_authenticated %}
+                <div class="user-info" onclick="window.location.href='/profile/'" style="cursor: pointer;" title="Перейти в профиль">
+                    <div class="user-avatar">
+                        {{ user.first_name|first|upper }}{{ user.last_name|first|upper }}
                     </div>
+                    <div class="user-details">
+                        <div class="user-name">{{ user.get_full_name|default:user.username }}</div>
+                        <div class="user-role">{{ user.get_role_display }}</div>
+                    </div>
+                    <button class="logout-btn" onclick="event.stopPropagation(); handleLogout()" title="Выйти">🚪</button>
                 </div>
+                {% else %}
+                <div class="user-info">
+                    <div class="user-avatar" style="background: var(--gray-600);">?</div>
+                    <div class="user-details">
+                        <div class="user-name">Гость</div>
+                        <div class="user-role">Не авторизован</div>
+                    </div>
+                    <a href="/login/" class="logout-btn" title="Войти" style="text-decoration: none;">🔑</a>
+                </div>
+                {% endif %}
             </div>
         </aside>
 
@@ -875,91 +968,39 @@
                 <div class="topbar-right">
                     <div class="search-box">
                         <span class="search-icon">🔍</span>
-                        <input type="text" placeholder="Поиск..." id="global-search" onkeyup="handleGlobalSearch(event)">
+                        <input type="text" placeholder="Поиск по системе..." id="global-search" onkeyup="handleGlobalSearch(event)">
                     </div>
-                    <button class="topbar-btn" onclick="refreshData()" title="Обновить данные">🔄</button>
+                    <button class="topbar-btn" onclick="window.location.reload()" title="Обновить страницу">🔄</button>
+                    {% if user.is_authenticated %}
+                    <button class="topbar-btn" onclick="window.location.href='/profile/'" title="Профиль">👤</button>
+                    {% endif %}
                 </div>
             </header>
 
             <!-- Page Content -->
             <div class="page-content">
-                {% if messages %}
-                <div id="messages">
-                    {% for message in messages %}
-                    <div class="alert alert-{{ message.tags }}">{{ message }}</div>
-                    {% endfor %}
-                </div>
-                {% endif %}
-                
                 <div id="alert-container"></div>
                 
                 {% block content %}
-                <!-- Default Dashboard -->
-                {% comment %} <div class="page-header">
-                    <h2>Дашборд</h2>
-                    <p>Обзор системы управления СНТ</p>
+                <div class="empty-state">
+                    <div class="empty-icon">📄</div>
+                    <h3>Содержимое страницы</h3>
+                    <p>Здесь будет отображаться контент</p>
                 </div>
-                <div class="stats-grid">
-                    <div class="stat-card">
-                        <div class="stat-label">Владельцев</div>
-                        <div class="stat-value" id="stat-owners">—</div>
-                        <div class="stat-change positive">Всего в системе</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-label">Участков</div>
-                        <div class="stat-value" id="stat-plots">—</div>
-                        <div class="stat-change positive">В СНТ</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-label">Звонков сегодня</div>
-                        <div class="stat-value" id="stat-calls-today">—</div>
-                        <div class="stat-change positive">За сегодня</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-label">Новых звонков</div>
-                        <div class="stat-value" id="stat-calls-new">—</div>
-                        <div class="stat-change negative" id="stat-calls-new-label">Требуют обработки</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-label">💰 Задолженность</div>
-                        <div class="stat-value" id="stat-debt">—</div>
-                        <div class="stat-change negative">Общий долг</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-label">✅ Оплачено</div>
-                        <div class="stat-value" id="stat-paid">—</div>
-                        <div class="stat-change positive">За текущий период</div>
-                    </div>
-                </div> {% endcomment %}
                 {% endblock %}
             </div>
         </main>
     </div>
 
-    <!-- Modal -->
-    <div class="modal-overlay" id="modal-overlay">
-        <div class="modal" id="modal">
-            <div class="modal-header">
-                <h3 id="modal-title">Модальное окно</h3>
-                <button class="modal-close" onclick="closeModal()">&times;</button>
-            </div>
-            <div class="modal-body" id="modal-body">
-                <p>Содержимое модального окна</p>
-            </div>
-            <div class="modal-footer" id="modal-footer">
-                <button class="btn btn-secondary" onclick="closeModal()">Отмена</button>
-                <button class="btn btn-primary" id="modal-confirm-btn" onclick="confirmModal()">Подтвердить</button>
-            </div>
-        </div>
-    </div>
-
     <script>
-        // Sidebar toggle for mobile
+        // ==================== ОСНОВНЫЕ ФУНКЦИИ ====================
+
+        // Переключение боковой панели (мобильные)
         function toggleSidebar() {
             document.getElementById('sidebar').classList.toggle('open');
         }
 
-        // Close sidebar on outside click (mobile)
+        // Закрытие боковой панели при клике вне её (мобильные)
         document.addEventListener('click', function(e) {
             const sidebar = document.getElementById('sidebar');
             const toggle = document.querySelector('.menu-toggle');
@@ -971,206 +1012,447 @@
             }
         });
 
-        // Global search
+        // Глобальный поиск
         function handleGlobalSearch(event) {
             if (event.key === 'Enter') {
                 const query = event.target.value.trim();
-                if (query) {
-                    window.location.href = `/search/?q=${encodeURIComponent(query)}`;
+                if (!query) return;
+
+                // Определяем текущий раздел по URL или активному пункту меню
+                const currentPath = window.location.pathname;
+                let searchUrl = '';
+
+                // Определяем контекст поиска
+                if (currentPath.includes('/owners/') || document.querySelector('.nav-link.active[href="/owners/"]')) {
+                    searchUrl = `/owners/?search=${encodeURIComponent(query)}`;
+                } 
+                else if (currentPath.includes('/plots/') || document.querySelector('.nav-link.active[href="/plots/"]')) {
+                    searchUrl = `/plots/?search=${encodeURIComponent(query)}`;
                 }
+                else if (currentPath.includes('/calls/') || document.querySelector('.nav-link.active[href="/calls/"]')) {
+                    searchUrl = `/calls/?search=${encodeURIComponent(query)}`;
+                }
+                else {
+                    // По умолчанию ищем везде - показываем страницу с результатами
+                    searchUrl = `/search/?q=${encodeURIComponent(query)}`;
+                }
+
+                window.location.href = searchUrl;
             }
         }
 
-        // Refresh data
-        function refreshData() {
-            showAlert('Данные обновлены', 'info');
-            loadStats();
+        // Функция для поиска по всем разделам (можно добавить отдельную страницу поиска)
+        async function globalSearch(query) {
+            const results = {
+                owners: [],
+                plots: [],
+                calls: []
+            };
+
+            // Ищем владельцев
+            try {
+                const ownersData = await apiFetch(`/api/owners/?search=${encodeURIComponent(query)}&limit=5`);
+                if (ownersData && ownersData.results) {
+                    results.owners = ownersData.results;
+                }
+            } catch (e) { console.error('Search owners error:', e); }
+
+            // Ищем участки
+            try {
+                const plotsData = await apiFetch(`/api/plots/?search=${encodeURIComponent(query)}&limit=5`);
+                if (plotsData && plotsData.results) {
+                    results.plots = plotsData.results;
+                }
+            } catch (e) { console.error('Search plots error:', e); }
+
+            return results;
         }
 
-        // Alert system
-        function showAlert(message, type = 'info') {
-            const container = document.getElementById('alert-container');
-            const alertDiv = document.createElement('div');
-            alertDiv.className = `alert alert-${type}`;
-            alertDiv.textContent = message;
-            container.appendChild(alertDiv);
+        
+
+        function displaySearchSuggestions(results, query) {
+            // Удаляем старые подсказки
+            hideSearchSuggestions();
+            
+            const suggestions = document.createElement('div');
+            suggestions.id = 'search-suggestions';
+            suggestions.style.cssText = `
+                position: absolute;
+                top: 100%;
+                left: 0;
+                right: 0;
+                background: white;
+                border: 1px solid var(--gray-200);
+                border-radius: 8px;
+                box-shadow: var(--shadow-lg);
+                z-index: 1000;
+                max-height: 400px;
+                overflow-y: auto;
+                margin-top: 4px;
+            `;
+            
+            let html = '<div style="padding: 8px 12px; border-bottom: 1px solid var(--gray-100);">';
+            
+            // Владельцы
+            if (results.owners.length > 0) {
+                html += '<div style="font-weight: 600; color: var(--primary); margin: 8px 0 4px;">👤 Владельцы</div>';
+                results.owners.forEach(owner => {
+                    html += `
+                        <a href="/owners/${owner.id}/" style="display: block; padding: 8px 12px; text-decoration: none; color: var(--gray-800); border-bottom: 1px solid var(--gray-50);">
+                            <div style="font-weight: 500;">${escapeHtml(owner.full_name)}</div>
+                            <div style="font-size: 0.75rem; color: var(--gray-500);">${owner.primary_phone || 'Нет телефона'}</div>
+                        </a>
+                    `;
+                });
+            }
+
+            // Участки
+            if (results.plots.length > 0) {
+                html += '<div style="font-weight: 600; color: var(--primary); margin: 8px 0 4px;">🏠 Участки</div>';
+                results.plots.forEach(plot => {
+                    html += `
+                        <a href="/plots/${plot.id}/" style="display: block; padding: 8px 12px; text-decoration: none; color: var(--gray-800); border-bottom: 1px solid var(--gray-50);">
+                            <div style="font-weight: 500;">Уч. №${escapeHtml(plot.plot_number)}</div>
+                            <div style="font-size: 0.75rem; color: var(--gray-500);">${escapeHtml(plot.cadastral_number)}</div>
+                        </a>
+                    `;
+                });
+            }
+
+            if (results.owners.length === 0 && results.plots.length === 0) {
+                html += '<div style="padding: 16px; text-align: center; color: var(--gray-500);">Ничего не найдено</div>';
+            }
+
+            html += '<div style="padding: 8px 12px; border-top: 1px solid var(--gray-100); font-size: 0.75rem; color: var(--gray-500); text-align: center;">';
+            html += `Нажмите Enter для поиска по всем разделам</div>`;
+            html += '</div>';
+
+            suggestions.innerHTML = html;
+
+            const searchBox = document.querySelector('.search-box');
+            if (searchBox) {
+                searchBox.style.position = 'relative';
+                searchBox.appendChild(suggestions);
+            }
+        }
+
+        function hideSearchSuggestions() {
+            const existing = document.getElementById('search-suggestions');
+            if (existing) existing.remove();
+        }
+
+        // Привязываем события к полю поиска
+        document.addEventListener('DOMContentLoaded', function() {
+            const searchInput = document.getElementById('global-search');
+            if (searchInput) {
+                searchInput.addEventListener('input', showSearchSuggestions);
+                // Скрываем подсказки при клике вне
+                document.addEventListener('click', function(e) {
+                    if (!e.target.closest('.search-box')) {
+                        hideSearchSuggestions();
+                    }
+                });
+            }
+        });
+
+        // Показать подсказки поиска
+        let searchTimeout;
+        async function showSearchSuggestions(event) {
+            clearTimeout(searchTimeout);
+            const query = event.target.value.trim();
+            
+            if (query.length < 2) {
+                hideSearchSuggestions();
+                return;
+            }
+            
+            searchTimeout = setTimeout(async () => {
+                const results = await globalSearch(query);
+                displaySearchSuggestions(results, query);
+            }, 300);
+        }
+
+        // Выход из системы
+        async function handleLogout() {
+            try {
+                const result = await apiFetch('/api/auth/logout/', { method: 'POST' });
+                if (result || result === null) {
+                    window.location.href = '/login/';
+                }
+            } catch (error) {
+                window.location.href = '/login/';
+            }
+        }
+
+        // ==================== МОДАЛЬНЫЕ ОКНА ====================
+
+        function openModal(title, content, confirmText = 'Подтвердить', onConfirm = null, onCancel = null) {
+            const existingModal = document.getElementById('global-modal');
+            if (existingModal) existingModal.remove();
+
+            const overlay = document.createElement('div');
+            overlay.className = 'modal-overlay active';
+            overlay.id = 'global-modal';
+            
+            overlay.innerHTML = `
+                <div class="modal">
+                    <div class="modal-header">
+                        <h3>${title}</h3>
+                        <button class="modal-close" id="modal-close-btn" title="Закрыть">×</button>
+                    </div>
+                    <div class="modal-body">${content}</div>
+                    <div class="modal-footer">
+                        <button class="btn btn-secondary" id="modal-cancel-btn">Отмена</button>
+                        <button class="btn btn-primary" id="modal-confirm-btn">${confirmText}</button>
+                    </div>
+                </div>
+            `;
+            
+            document.body.appendChild(overlay);
+            document.body.classList.add('modal-open');
+
+            // Закрытие
+            const closeHandler = () => {
+                closeModal();
+                if (typeof onCancel === 'function') onCancel();
+            };
+
+            overlay.querySelector('#modal-close-btn').addEventListener('click', closeHandler);
+            overlay.querySelector('#modal-cancel-btn').addEventListener('click', closeHandler);
+            
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay) closeHandler();
+            });
+
+            // Подтверждение
+            const confirmBtn = overlay.querySelector('#modal-confirm-btn');
+            confirmBtn.addEventListener('click', async () => {
+                if (typeof onConfirm === 'function') {
+                    confirmBtn.disabled = true;
+                    confirmBtn.textContent = 'Выполнение...';
+                    try {
+                        await onConfirm();
+                    } catch (error) {
+                        console.error('Ошибка:', error);
+                    } finally {
+                        confirmBtn.disabled = false;
+                        confirmBtn.textContent = confirmText;
+                    }
+                } else {
+                    closeModal();
+                }
+            });
+
+            // Escape
+            const escHandler = (e) => {
+                if (e.key === 'Escape') {
+                    closeHandler();
+                    document.removeEventListener('keydown', escHandler);
+                }
+            };
+            document.addEventListener('keydown', escHandler);
+
+            // Фокус на первом поле
             setTimeout(() => {
-                alertDiv.style.opacity = '0';
-                alertDiv.style.transition = 'opacity 0.3s';
-                setTimeout(() => alertDiv.remove(), 300);
-            }, 3000);
-        }
+                const firstInput = overlay.querySelector('input, select, textarea');
+                if (firstInput) firstInput.focus();
+            }, 100);
 
-        // Modal functions
-        let modalCallback = null;
-
-        function openModal(title, bodyHtml, confirmText = 'Подтвердить', callback = null) {
-            document.getElementById('modal-title').textContent = title;
-            document.getElementById('modal-body').innerHTML = bodyHtml;
-            document.getElementById('modal-confirm-btn').textContent = confirmText;
-            modalCallback = callback;
-            document.getElementById('modal-overlay').classList.add('active');
+            return overlay;
         }
 
         function closeModal() {
-            document.getElementById('modal-overlay').classList.remove('active');
-            modalCallback = null;
+            const overlay = document.getElementById('global-modal');
+            if (overlay) {
+                overlay.style.opacity = '0';
+                overlay.style.transition = 'opacity 0.2s';
+                setTimeout(() => {
+                    overlay.remove();
+                    document.body.classList.remove('modal-open');
+                }, 200);
+            }
         }
 
-        function confirmModal() {
-            if (modalCallback && typeof modalCallback === 'function') {
-                modalCallback();
-            }
-            closeModal();
+        // ==================== УВЕДОМЛЕНИЯ ====================
+
+        function showAlert(message, type = 'info', duration = 3000) {
+            const existingToasts = document.querySelectorAll('.toast');
+            if (existingToasts.length >= 3) existingToasts[0].remove();
+
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.textContent = message;
+            
+            const colors = {
+                success: '#16a34a',
+                error: '#dc2626',
+                info: '#2563eb',
+                warning: '#a16207',
+            };
+            toast.style.background = colors[type] || colors.info;
+            
+            document.body.appendChild(toast);
+            
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transition = 'opacity 0.3s';
+                setTimeout(() => toast.remove(), 300);
+            }, duration);
         }
 
-        // Close modal on overlay click
-        document.getElementById('modal-overlay').addEventListener('click', function(e) {
-            if (e.target === this) {
-                closeModal();
-            }
-        });
+        // ==================== API ЗАПРОСЫ ====================
 
-        // Escape key to close modal
-        document.addEventListener('keydown', function(e) {
-            if (e.key === 'Escape') {
-                closeModal();
-            }
-        });
-
-        // Функция получения CSRF-токена из cookie
         function getCSRFToken() {
-            const name = 'csrftoken';
-            let cookieValue = null;
-            if (document.cookie && document.cookie !== '') {
-                const cookies = document.cookie.split(';');
-                for (let i = 0; i < cookies.length; i++) {
-                    const cookie = cookies[i].trim();
-                    if (cookie.substring(0, name.length + 1) === (name + '=')) {
-                        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
-                        break;
-                    }
-                }
-            }
-            return cookieValue;
+            // Способ 1: из cookie
+            const cookieValue = document.cookie
+                .split('; ')
+                .find(row => row.startsWith('csrftoken='))
+                ?.split('=')[1];
+
+            if (cookieValue) return cookieValue;
+
+            // Способ 2: из meta-тега
+            const metaToken = document.querySelector('meta[name="csrf-token"]');
+            if (metaToken) return metaToken.getAttribute('content');
+
+            // Способ 3: из формы (если есть)
+            const formToken = document.querySelector('[name=csrfmiddlewaretoken]');
+            if (formToken) return formToken.value;
+
+            return null;
         }
 
-        // API helper
         async function apiFetch(url, options = {}) {
             try {
-                // Базовые заголовки
+                const csrfToken = getCSRFToken();
+                
                 const headers = {
-                    'X-CSRFToken': getCSRFToken(),
+                    'X-Requested-With': 'XMLHttpRequest',
                     ...options.headers,
                 };
-
-                // Добавляем Content-Type только если это не FormData
+                
+                // Добавляем CSRF токен только для небезопасных методов
+                const method = (options.method || 'GET').toUpperCase();
+                if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
+                    if (csrfToken) {
+                        headers['X-CSRFToken'] = csrfToken;
+                    }
+                }
+            
                 if (!(options.body instanceof FormData)) {
                     headers['Content-Type'] = 'application/json';
                 }
-
-                const response = await fetch(url, {
+            
+                const response = await fetch(url, { 
+                    ...options, 
                     headers,
-                    ...options,
+                    credentials: 'same-origin'  // Важно для отправки cookies
                 });
-
-                // Проверяем статус
+            
+                if (response.status === 204) return null;
+            
+                const contentType = response.headers.get('content-type') || '';
+                
+                if (!contentType.includes('application/json')) {
+                    if (!response.ok) {
+                        const text = await response.text();
+                        console.error(`Server Error [${response.status}]:`, url);
+                        showAlert(`Ошибка сервера: ${response.status}`, 'error');
+                        return null;
+                    }
+                    return response;
+                }
+            
+                const data = await response.json();
+            
                 if (!response.ok) {
-                    const errorText = await response.text();
-                    console.error('API Error:', response.status, errorText);
-                    throw new Error(`HTTP ${response.status}: ${errorText}`);
+                    let errorMsg = `Ошибка ${response.status}`;
+                    if (data && typeof data === 'object') {
+                        if (data.detail) {
+                            errorMsg = data.detail;
+                        } else {
+                            const errors = [];
+                            for (const [key, value] of Object.entries(data)) {
+                                if (Array.isArray(value)) errors.push(`${key}: ${value.join(', ')}`);
+                                else if (typeof value === 'string') errors.push(value);
+                            }
+                            if (errors.length) errorMsg = errors.join('; ');
+                        }
+                    }
+                    console.error(`API Error [${response.status}]:`, url, errorMsg);
+                    showAlert(errorMsg, 'error');
+                    return null;
                 }
-
-                // Пытаемся распарсить JSON
-                const contentType = response.headers.get('content-type');
-                if (contentType && contentType.includes('application/json')) {
-                    return await response.json();
-                }
-
-                return null;
+            
+                return data;
             } catch (error) {
-                console.error('API Error:', error);
-                if (error.message.includes('403')) {
-                    showAlert('Ошибка доступа. Обновите страницу и попробуйте снова.', 'error');
-                } else {
-                    showAlert('Ошибка загрузки данных: ' + error.message, 'error');
+                console.error(`Network Error [${url}]:`, error);
+                if (error.name !== 'AbortError') {
+                    showAlert('Ошибка сети. Проверьте подключение к серверу.', 'error');
                 }
                 return null;
             }
         }
 
-        // Load dashboard stats
-        async function loadStats() {
-            // Загрузка количества владельцев
-            const ownersData = await apiFetch('/api/owners/?limit=1');
-            if (ownersData) {
-                document.getElementById('stat-owners').textContent = ownersData.count || '—';
-                document.getElementById('owners-count').textContent = ownersData.count || '0';
-            }
-        
-            // Загрузка количества участков
-            const plotsData = await apiFetch('/api/plots/stats/');
-            if (plotsData) {
-                document.getElementById('stat-plots').textContent = plotsData.total || '—';
-            }
-        
-            // Загрузка статистики звонков
-            const callsData = await apiFetch('/api/calls/stats/');
-            if (callsData) {
-                document.getElementById('stat-calls-today').textContent = callsData.total || '—';
-                const newCalls = callsData.by_status ? (callsData.by_status.new || 0) : 0;
-                document.getElementById('stat-calls-new').textContent = newCalls;
-                document.getElementById('calls-new-count').textContent = newCalls;
-            }
-        
-            // Загрузка статистики платежей
-            try {
-                const paymentsData = await apiFetch('/api/assessments/stats/');
-                if (paymentsData) {
-                    document.getElementById('stat-debt').textContent = 
-                        (paymentsData.total_debt || 0).toLocaleString('ru-RU') + ' ₽';
-                    document.getElementById('stat-paid').textContent = 
-                        (paymentsData.total_paid || 0).toLocaleString('ru-RU') + ' ₽';
-                    document.getElementById('payments-debt-count').textContent = 
-                        paymentsData.by_status?.pending || '0';
-                }
-            } catch(e) {
-                console.log('Статистика платежей недоступна');
-            }
-        }
 
-        
+        // ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
 
-        // Форматирование даты
         function formatDate(dateString) {
             if (!dateString) return '—';
-            const date = new Date(dateString);
-            return date.toLocaleDateString('ru-RU', {
-                day: '2-digit',
-                month: '2-digit',
-                year: 'numeric',
-            });
+            try {
+                const date = new Date(dateString);
+                return date.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+            } catch (e) { return dateString; }
         }
 
         function formatDateTime(dateString) {
             if (!dateString) return '—';
-            const date = new Date(dateString);
-            return date.toLocaleString('ru-RU', {
-                day: '2-digit',
-                month: '2-digit',
-                year: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit',
-            });
+            try {
+                const date = new Date(dateString);
+                return date.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+            } catch (e) { return dateString; }
         }
 
-        // Загрузка при старте
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function pluralize(n, one, few, many) {
+            const mod10 = n % 10;
+            const mod100 = n % 100;
+            if (mod10 === 1 && mod100 !== 11) return one;
+            if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return few;
+            return many;
+        }
+
+        function safeSetText(id, text) {
+            const el = document.getElementById(id);
+            if (el) el.textContent = text;
+        }
+
+        function safeSetHTML(id, html) {
+            const el = document.getElementById(id);
+            if (el) el.innerHTML = html;
+        }
+
+        // ==================== ИНИЦИАЛИЗАЦИЯ ====================
+
         document.addEventListener('DOMContentLoaded', function() {
-            loadStats();
-            // Автообновление каждые 60 секунд
-            setInterval(loadStats, 60000);
+            // Авто-скрытие сообщений Django
+            const messages = document.querySelectorAll('.alert');
+            messages.forEach(msg => {
+                setTimeout(() => {
+                    msg.style.opacity = '0';
+                    msg.style.transition = 'opacity 0.3s';
+                    setTimeout(() => msg.remove(), 300);
+                }, 5000);
+            });
         });
     </script>
+    
     {% block extra_js %}{% endblock %}
 </body>
 </html>

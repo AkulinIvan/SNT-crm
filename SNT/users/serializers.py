@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from django.core.validators import RegexValidator
 from .models import Owner, Ownership, ContactInfo
 from land.serializers import LandPlotListSerializer
 
@@ -6,33 +7,78 @@ from land.serializers import LandPlotListSerializer
 class ContactInfoSerializer(serializers.ModelSerializer):
     """Сериализатор контактных данных."""
     type_display = serializers.CharField(source='get_type_display', read_only=True)
+    owner_name = serializers.CharField(source='owner.full_name', read_only=True)
+    
+    owner = serializers.PrimaryKeyRelatedField(
+        queryset=Owner.objects.all(),
+        required=False,
+        allow_null=True
+    )
 
     class Meta:
         model = ContactInfo
         fields = [
-            'id', 'type', 'type_display', 'value',
+            'id', 'owner', 'owner_name', 'type', 'type_display', 'value',
             'is_active', 'is_verified', 'note', 'created_at',
         ]
-        read_only_fields = ['created_at']
+        read_only_fields = ['created_at', 'owner_name']
+
+    def validate_value(self, value):
+        """Дополнительная валидация в зависимости от типа"""
+        # Получаем тип из разных источников
+        contact_type = None
+        if hasattr(self, 'initial_data') and self.initial_data.get('type'):
+            contact_type = self.initial_data.get('type')
+        elif self.instance:
+            contact_type = self.instance.type
+        
+        if contact_type == ContactInfo.PHONE:
+            # Очищаем номер от лишних символов
+            cleaned = ''.join(c for c in value if c.isdigit() or c in '+()- ')
+            digits = ''.join(c for c in cleaned if c.isdigit())
+            if len(digits) < 10:
+                raise serializers.ValidationError('Номер телефона должен содержать не менее 10 цифр')
+            return cleaned
+        elif contact_type == ContactInfo.EMAIL:
+            from django.core.validators import EmailValidator
+            validator = EmailValidator()
+            try:
+                validator(value)
+            except:
+                raise serializers.ValidationError('Введите корректный email-адрес')
+        
+        return value
 
     def validate(self, data):
-        """
-        Если создаётся новый активный контакт того же типа,
-        деактивируем старые автоматически (опциональное поведение).
-        """
-        request = self.context.get('request')
-        if request and request.method == 'POST':
-            owner = data.get('owner') or (self.instance.owner if self.instance else None)
-            ctype = data.get('type')
-            if owner and ctype and data.get('is_active', True):
-                ContactInfo.objects.filter(
-                    owner=owner,
-                    type=ctype,
-                    is_active=True,
-                ).exclude(pk=self.instance.pk if self.instance else None).update(
-                    is_active=False,
-                    note='Заменён новым контактом',
-                )
+        """Валидация контакта"""
+        # Получаем owner
+        owner = data.get('owner')
+        if not owner and self.instance:
+            owner = self.instance.owner
+        
+        # Получаем тип и значение
+        contact_type = data.get('type')
+        if not contact_type and self.instance:
+            contact_type = self.instance.type
+        
+        value = data.get('value')
+        if not value and self.instance:
+            value = self.instance.value
+        
+        if owner and contact_type and value and data.get('is_active', True):
+            # Проверяем дубликаты
+            duplicate = ContactInfo.objects.filter(
+                owner=owner,
+                type=contact_type,
+                value=value,
+                is_active=True
+            ).exclude(pk=self.instance.pk if self.instance else None).exists()
+            
+            if duplicate:
+                raise serializers.ValidationError({
+                    'value': 'Такой контакт уже существует и активен.'
+                })
+        
         return data
 
 
@@ -40,29 +86,55 @@ class OwnershipSerializer(serializers.ModelSerializer):
     """Сериализатор права собственности."""
     land_plot_detail = LandPlotListSerializer(source='land_plot', read_only=True)
     owner_name = serializers.CharField(source='owner.full_name', read_only=True)
+    share_display = serializers.SerializerMethodField()
 
     class Meta:
         model = Ownership
         fields = [
             'id', 'owner', 'owner_name', 'land_plot', 'land_plot_detail',
-            'share', 'ownership_since', 'document_basis',
+            'share', 'share_display', 'ownership_since', 'document_basis',
         ]
         read_only_fields = ['owner_name', 'land_plot_detail']
+
+    def get_share_display(self, obj):
+        """Красивое отображение доли"""
+        if obj.share == '1/1':
+            return 'Полная собственность'
+        try:
+            num, den = obj.share.split('/')
+            percent = int(num) / int(den) * 100
+            return f'{obj.share} ({percent:.0f}%)'
+        except:
+            return obj.share
+
+    def validate_share(self, value):
+        """Валидация доли"""
+        try:
+            parts = value.split('/')
+            if len(parts) == 2:
+                num = int(parts[0])
+                den = int(parts[1])
+                if num > 0 and den > 0 and num <= den:
+                    return value
+        except:
+            pass
+        raise serializers.ValidationError(
+            'Неверный формат доли. Используйте формат "числитель/знаменатель", например: 1/2'
+        )
 
 
 class OwnerListSerializer(serializers.ModelSerializer):
     """Краткий сериализатор для списка владельцев."""
     primary_phone = serializers.CharField(read_only=True)
-    plots_count = serializers.SerializerMethodField()
+    primary_email = serializers.CharField(read_only=True)
+    plots_count = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = Owner
         fields = [
-            'id', 'full_name', 'primary_phone', 'plots_count', 'created_at',
+            'id', 'full_name', 'primary_phone', 'primary_email', 
+            'plots_count', 'created_at',
         ]
-
-    def get_plots_count(self, obj):
-        return obj.land_plots.count()
 
 
 class OwnerDetailSerializer(serializers.ModelSerializer):
@@ -76,8 +148,10 @@ class OwnerDetailSerializer(serializers.ModelSerializer):
     ownerships = OwnershipSerializer(many=True, read_only=True)
     primary_phone = serializers.CharField(read_only=True)
     primary_email = serializers.CharField(read_only=True)
-    created_at = serializers.DateTimeField(read_only=True)
-    updated_at = serializers.DateTimeField(read_only=True)
+    created_at = serializers.DateTimeField(read_only=True, format='%d.%m.%Y %H:%M')
+    updated_at = serializers.DateTimeField(read_only=True, format='%d.%m.%Y %H:%M')
+    total_debt = serializers.SerializerMethodField()
+    is_debtor = serializers.SerializerMethodField()
 
     class Meta:
         model = Owner
@@ -85,8 +159,15 @@ class OwnerDetailSerializer(serializers.ModelSerializer):
             'id', 'full_name',
             'primary_phone', 'primary_email',
             'contacts', 'ownerships',
+            'total_debt', 'is_debtor',
             'created_at', 'updated_at',
         ]
+
+    def get_total_debt(self, obj):
+        return float(obj.total_debt)
+
+    def get_is_debtor(self, obj):
+        return obj.is_debtor
 
 
 class OwnerCreateUpdateSerializer(serializers.ModelSerializer):
@@ -94,6 +175,23 @@ class OwnerCreateUpdateSerializer(serializers.ModelSerializer):
     Сериализатор для создания и редактирования владельца.
     Не включает связи — они управляются отдельными эндпоинтами.
     """
+    full_name = serializers.CharField(
+        max_length=150,
+        validators=[
+            RegexValidator(
+                regex=r'^[а-яА-ЯёЁa-zA-Z\s\-]+$',
+                message='ФИО может содержать только буквы, пробелы и дефисы'
+            )
+        ]
+    )
+
     class Meta:
         model = Owner
         fields = ['id', 'full_name']
+
+    def validate_full_name(self, value):
+        """Нормализация ФИО"""
+        # Убираем лишние пробелы
+        value = ' '.join(value.split())
+        # Приводим к заглавным буквам
+        return value.title()

@@ -19,6 +19,9 @@
         <div class="stat-value" id="stat-plots">—</div>
         <div class="stat-change positive" id="stat-plots-active">—</div>
     </div>
+    
+    {% comment %}
+    <!-- Временно отключено до интеграции модуля calls -->
     <div class="stat-card" style="cursor: pointer;" onclick="window.location.href='/calls/'">
         <div class="stat-label">📞 Звонков всего</div>
         <div class="stat-value" id="stat-calls-total">—</div>
@@ -37,6 +40,7 @@
         <div class="stat-label">📁 Архивных записей</div>
         <div class="stat-value" id="stat-calls-archived">—</div>
     </div>
+    {% endcomment %}
 </div>
 
 <!-- Последние владельцы -->
@@ -46,7 +50,7 @@
             <span style="font-weight: 600;">👤 Последние добавленные владельцы</span>
             <a href="/owners/" style="font-size: 0.85rem; color: var(--primary);">Все →</a>
         </div>
-        <table>
+        </table>
             <thead>
                 <tr>
                     <th>ФИО</th>
@@ -60,13 +64,14 @@
         </table>
     </div>
 
-    <!-- Последние звонки -->
+    {% comment %}
+    <!-- Временно отключено до интеграции модуля calls -->
     <div class="table-container">
         <div class="table-toolbar">
             <span style="font-weight: 600;">📞 Последние звонки</span>
             <a href="/calls/" style="font-size: 0.85rem; color: var(--primary);">Все →</a>
         </div>
-        <table>
+        </table>
             <thead>
                 <tr>
                     <th>Номер</th>
@@ -79,6 +84,7 @@
             </tbody>
         </table>
     </div>
+    {% endcomment %}
 </div>
 {% endblock %}
 
@@ -99,7 +105,8 @@
                 `Активных: ${plotsData.active || 0}`;
         }
 
-        // Статистика звонков
+        {% comment %}
+        // Статистика звонков (временно отключено)
         const callsData = await apiFetch('/api/calls/stats/');
         if (callsData) {
             document.getElementById('stat-calls-total').textContent = callsData.total || 0;
@@ -112,6 +119,7 @@
             document.getElementById('stat-calls-recent').textContent = 
                 `Сегодня: загрузка...`;
         }
+        {% endcomment %}
 
         // Последние владельцы
         const recentOwners = await apiFetch('/api/owners/?ordering=-created_at&limit=5');
@@ -130,7 +138,8 @@
                 `).join('');
         }
 
-        // Последние звонки
+        {% comment %}
+        // Последние звонки (временно отключено)
         const recentCalls = await apiFetch('/api/calls/?ordering=-started_at&limit=5');
         if (recentCalls && recentCalls.results) {
             document.getElementById('recent-calls-body').innerHTML = 
@@ -146,9 +155,11 @@
                     </tr>
                 `).join('');
         }
+        {% endcomment %}
     }
 
     function escapeHtml(text) {
+        if (!text) return '';
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;

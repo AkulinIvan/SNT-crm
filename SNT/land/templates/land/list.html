@@ -85,7 +85,6 @@
     let statusFilter = '';
     let currentSort = 'plot_number';
 
-    let searchTimeout;
     function debounceSearch() {
         clearTimeout(searchTimeout);
         searchTimeout = setTimeout(() => {
@@ -249,6 +248,9 @@
             <div class="form-group">
                 <label>Кадастровый номер *</label>
                 <input type="text" id="plot-cadastral" placeholder="50:20:0010101:123" required>
+                <small style="color: var(--gray-500); font-size: 0.75rem;">
+                    Формат: XX:XX:XXXXXXX:X... (например: 50:20:0010101:123)
+                </small>
             </div>
             <div class="form-group">
                 <label>Адрес / расположение</label>
@@ -265,11 +267,11 @@
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
                 <div class="form-group">
                     <label>Широта</label>
-                    <input type="number" id="plot-lat" placeholder="55.123456" step="any">
+                    <input type="number" id="plot-lat" placeholder="55.123456" step="any" min="-90" max="90">
                 </div>
                 <div class="form-group">
                     <label>Долгота</label>
-                    <input type="number" id="plot-lon" placeholder="37.654321" step="any">
+                    <input type="number" id="plot-lon" placeholder="37.654321" step="any" min="-180" max="180">
                 </div>
             </div>
             <div class="form-group">
@@ -279,12 +281,37 @@
         `, 'Добавить', async () => {
             const plotNumber = document.getElementById('plot-number').value.trim();
             const area = parseFloat(document.getElementById('plot-area').value);
-            const cadastral = document.getElementById('plot-cadastral').value.trim();
+            const cadastral = document.getElementById('plot-cadastral').value.trim();   
 
-            if (!plotNumber || !area || !cadastral) {
-                showAlert('Заполните обязательные поля: номер, площадь, кадастровый номер', 'error');
+            // Базовая валидация на клиенте
+            if (!plotNumber) {
+                showAlert('Введите номер участка', 'error');
                 return;
             }
+
+            if (!area || area <= 0) {
+                showAlert('Введите корректную площадь', 'error');
+                return;
+            }
+
+            if (!cadastral) {
+                showAlert('Введите кадастровый номер', 'error');
+                return;
+            }
+
+            // Простая проверка формата кадастрового номера
+            const cadastralParts = cadastral.split(':');
+            if (cadastralParts.length !== 4) {
+                showAlert('Кадастровый номер должен состоять из 4 групп, разделённых двоеточием', 'error');
+                return;
+            }
+
+            for (const part of cadastralParts) {
+                if (!/^\d+$/.test(part)) {
+                    showAlert('Все группы кадастрового номера должны содержать только цифры', 'error');
+                    return;
+                }
+            }   
 
             const payload = {
                 plot_number: plotNumber,
@@ -293,24 +320,26 @@
                 address: document.getElementById('plot-address').value.trim(),
                 status: document.getElementById('plot-status').value,
                 notes: document.getElementById('plot-notes').value.trim(),
-            };
+            };  
 
             const lat = document.getElementById('plot-lat').value.trim();
             const lon = document.getElementById('plot-lon').value.trim();
             if (lat && lon) {
                 payload.latitude = parseFloat(lat);
                 payload.longitude = parseFloat(lon);
-            }
+            }   
 
+            // Показываем ошибки валидации
             const result = await apiFetch('/api/plots/', {
                 method: 'POST',
                 body: JSON.stringify(payload),
-            });
+                showValidationErrors: true,  // Показывать ошибки валидации
+            }); 
 
             if (result) {
                 showAlert('Участок успешно добавлен', 'success');
+                closeModal();
                 loadPlots();
-                if (typeof loadStats === 'function') loadStats();
             }
         });
     }

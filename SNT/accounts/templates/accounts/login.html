@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+
+{% block title %}Вход в систему | CRM СНТ{% endblock %}
+
+{% block content %}
+<div style="display: flex; justify-content: center; align-items: center; min-height: 80vh;">
+    <div style="width: 100%; max-width: 400px;">
+        <div class="table-container">
+            <div class="table-toolbar" style="border-radius: 8px 8px 0 0;">
+                <span style="font-weight: 600;">🔐 Вход в систему</span>
+            </div>
+            <div style="padding: 24px;">
+                <div id="login-error" style="display: none; margin-bottom: 16px;"></div>
+                
+                <div class="form-group" style="margin-bottom: 16px;">
+                    <label>Логин</label>
+                    <input type="text" id="login-username" placeholder="Введите логин" style="width: 100%; padding: 10px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                </div>
+                
+                <div class="form-group" style="margin-bottom: 16px;">
+                    <label>Пароль</label>
+                    <input type="password" id="login-password" placeholder="Введите пароль" style="width: 100%; padding: 10px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                </div>
+                
+                <div style="margin-bottom: 16px;">
+                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                        <input type="checkbox" id="login-remember">
+                        <span style="font-size: 0.85rem;">Запомнить меня</span>
+                    </label>
+                </div>
+                
+                <button class="btn btn-primary" onclick="handleLogin()" style="width: 100%; padding: 12px;">
+                    Войти
+                </button>
+                
+                <p style="text-align: center; margin-top: 16px; font-size: 0.85rem; color: var(--gray-500);">
+                    CRM для управления СНТ
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    async function handleLogin() {
+        const username = document.getElementById('login-username').value.trim();
+        const password = document.getElementById('login-password').value;
+        const remember = document.getElementById('login-remember').checked;
+        
+        if (!username || !password) {
+            showAlert('Введите логин и пароль', 'error');
+            return;
+        }
+        
+        const result = await apiFetch('/api/auth/login/', {
+            method: 'POST',
+            body: JSON.stringify({ username, password, remember_me: remember }),
+        });
+        
+        if (result) {
+            window.location.href = '/';
+        }
+    }
+    
+    // Вход по Enter
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+            handleLogin();
+        }
+    });
+    
+    // Фокус на поле ввода
+    document.getElementById('login-username').focus();
+</script>
+{% endblock %}

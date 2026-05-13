@@ -1,0 +1,506 @@
+{% extends "base.html" %}
+
+{% block title %}Управление пользователями | CRM СНТ{% endblock %}
+
+{% block breadcrumb %}
+<a href="/">Главная</a> <span>/</span> <span>Пользователи</span>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div>
+            <h2>👥 Пользователи системы</h2>
+            <p>Управление учётными записями и правами доступа</p>
+        </div>
+        <div style="display: flex; gap: 8px;">
+            <button class="btn btn-primary" onclick="openAddUserModal()">+ Добавить пользователя</button>
+        </div>
+    </div>
+</div>
+
+<!-- Фильтры -->
+<div class="filters-bar">
+    <div class="filter-group">
+        <label>🔍 Поиск:</label>
+        <input type="text" id="search-input" placeholder="Имя, логин, email..." onkeyup="debounceSearch()">
+    </div>
+    <div class="filter-group">
+        <label>Роль:</label>
+        <select id="role-filter" onchange="changeFilter()">
+            <option value="">Все роли</option>
+            <option value="admin">Администратор</option>
+            <option value="manager">Председатель</option>
+            <option value="accountant">Бухгалтер</option>
+            <option value="viewer">Наблюдатель</option>
+        </select>
+    </div>
+    <div class="filter-group">
+        <label>Статус:</label>
+        <select id="status-filter" onchange="changeFilter()">
+            <option value="">Все</option>
+            <option value="true">Активные</option>
+            <option value="false">Неактивные</option>
+        </select>
+    </div>
+    <div class="filter-group">
+        <label>Сортировка:</label>
+        <select id="sort-select" onchange="changeFilter()">
+            <option value="last_name">По фамилии</option>
+            <option value="role">По роли</option>
+            <option value="-date_joined">Сначала новые</option>
+            <option value="last_activity">По активности</option>
+        </select>
+    </div>
+    <button class="btn btn-secondary btn-sm" onclick="resetFilters()">Сбросить</button>
+    <span style="margin-left: auto; font-size: 0.85rem; color: var(--gray-600);" id="results-count">Загрузка...</span>
+</div>
+
+<!-- Таблица пользователей -->
+<div class="table-container">
+    <table>
+        <thead>
+            <tr>
+                <th>Пользователь</th>
+                <th>Логин</th>
+                <th>Email</th>
+                <th>Телефон</th>
+                <th>Роль</th>
+                <th>Статус</th>
+                <th>Посл. активность</th>
+                <th>Действия</th>
+            </tr>
+        </thead>
+        <tbody id="users-table-body">
+            <tr>
+                <td colspan="8">
+                    <div class="empty-state">
+                        <div class="empty-icon">⏳</div>
+                        <h3>Загрузка данных...</h3>
+                    </div>
+                </td>
+            </tr>
+        </tbody>
+    </table>
+    <div class="pagination" id="pagination"></div>
+</div>
+
+<!-- Статистика -->
+<div class="stats-grid" style="margin-top: 24px;">
+    <div class="stat-card">
+        <div class="stat-label">👥 Всего пользователей</div>
+        <div class="stat-value" id="stat-total-users">—</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">✅ Активных</div>
+        <div class="stat-value" id="stat-active-users" style="color: var(--primary);">—</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">👑 Администраторов</div>
+        <div class="stat-value" id="stat-admin-users" style="color: var(--danger);">—</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">🕐 Онлайн (за 15 мин)</div>
+        <div class="stat-value" id="stat-online-users" style="color: #2563eb;">—</div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let currentPage = 1;
+    let searchQuery = '';
+    let roleFilter = '';
+    let statusFilter = '';
+    let currentSort = 'last_name';
+
+    function debounceSearch() {
+        clearTimeout(searchTimeout);
+        searchTimeout = setTimeout(() => {
+            searchQuery = document.getElementById('search-input').value.trim();
+            currentPage = 1;
+            loadUsers();
+        }, 300);
+    }
+
+    function changeFilter() {
+        roleFilter = document.getElementById('role-filter').value;
+        statusFilter = document.getElementById('status-filter').value;
+        currentSort = document.getElementById('sort-select').value;
+        currentPage = 1;
+        loadUsers();
+    }
+
+    function resetFilters() {
+        document.getElementById('search-input').value = '';
+        document.getElementById('role-filter').value = '';
+        document.getElementById('status-filter').value = '';
+        document.getElementById('sort-select').value = 'last_name';
+        searchQuery = '';
+        roleFilter = '';
+        statusFilter = '';
+        currentSort = 'last_name';
+        currentPage = 1;
+        loadUsers();
+    }
+
+    async function loadUsers() {
+        const params = new URLSearchParams({
+            page: currentPage,
+            ordering: currentSort,
+        });
+        if (searchQuery) params.append('search', searchQuery);
+        if (roleFilter) params.append('role', roleFilter);
+        if (statusFilter) params.append('is_active', statusFilter);
+
+        const data = await apiFetch(`/api/users/?${params}`);
+        if (!data) return;
+
+        document.getElementById('results-count').textContent = 
+            `Найдено: ${data.count || 0} ${pluralize(data.count || 0, 'пользователь', 'пользователя', 'пользователей')}`;
+
+        const tbody = document.getElementById('users-table-body');
+
+        if (!data.results || data.results.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="8">
+                        <div class="empty-state">
+                            <div class="empty-icon">👥</div>
+                            <h3>Пользователи не найдены</h3>
+                            <p>Попробуйте изменить параметры фильтрации</p>
+                        </div>
+                    </td>
+                </tr>`;
+            document.getElementById('pagination').innerHTML = '';
+            return;
+        }
+
+        tbody.innerHTML = data.results.map(user => `
+            <tr>
+                <td>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <div style="width: 36px; height: 36px; border-radius: 8px; background: linear-gradient(135deg, #2c7a47, #1e5c32); display: flex; align-items: center; justify-content: center; color: white; font-weight: 600; font-size: 0.85rem; flex-shrink: 0;">
+                            ${(user.first_name || '?')[0].toUpperCase()}${(user.last_name || '?')[0].toUpperCase()}
+                        </div>
+                        <strong>${escapeHtml(user.full_name || user.username)}</strong>
+                    </div>
+                </td>
+                <td><code style="font-size: 0.8rem;">${escapeHtml(user.username)}</code></td>
+                <td>${escapeHtml(user.email || '—')}</td>
+                <td>${escapeHtml(user.phone || '—')}</td>
+                <td>${getRoleBadge(user.role)}</td>
+                <td>${user.is_active 
+                    ? '<span class="badge-status badge-active">Активен</span>' 
+                    : '<span class="badge-status badge-inactive">Неактивен</span>'}</td>
+                <td><span style="font-size: 0.8rem; color: var(--gray-500);">${formatDateTime(user.last_activity)}</span></td>
+                <td>
+                    <div class="table-actions">
+                        <button class="btn-icon" onclick="openEditUserModal(${user.id})" title="Редактировать">✏️</button>
+                        ${user.is_active 
+                            ? `<button class="btn-icon danger" onclick="toggleUserStatus(${user.id}, false, '${escapeHtml(user.full_name || user.username)}')" title="Деактивировать">🚫</button>`
+                            : `<button class="btn-icon" onclick="toggleUserStatus(${user.id}, true, '${escapeHtml(user.full_name || user.username)}')" title="Активировать">✅</button>`}
+                        <button class="btn-icon" onclick="resetUserPassword(${user.id}, '${escapeHtml(user.full_name || user.username)}')" title="Сбросить пароль">🔑</button>
+                    </div>
+                </td>
+            </tr>
+        `).join('');
+
+        renderPagination(data);
+        updateStats(data);
+    }
+
+    function getRoleBadge(role) {
+        const badges = {
+            'admin': '<span class="badge-status badge-danger">👑 Администратор</span>',
+            'manager': '<span class="badge-status badge-active">👔 Председатель</span>',
+            'accountant': '<span class="badge-status badge-info">💰 Бухгалтер</span>',
+            'viewer': '<span class="badge-status badge-inactive">👁️ Наблюдатель</span>',
+        };
+        return badges[role] || `<span class="badge-status badge-inactive">${role}</span>`;
+    }
+
+    function renderPagination(data) {
+        const paginationDiv = document.getElementById('pagination');
+        if (!data.next && !data.previous) {
+            paginationDiv.innerHTML = '';
+            return;
+        }
+
+        const totalPages = Math.ceil(data.count / 25);
+        let html = '';
+        
+        html += `<button onclick="currentPage=1;loadUsers()" ${currentPage === 1 ? 'disabled' : ''}>«</button>`;
+        html += `<button onclick="currentPage=${currentPage-1};loadUsers()" ${!data.previous ? 'disabled' : ''}>‹</button>`;
+        
+        for (let i = 1; i <= totalPages; i++) {
+            if (i === 1 || i === totalPages || (i >= currentPage - 2 && i <= currentPage + 2)) {
+                html += `<button class="${i === currentPage ? 'active' : ''}" onclick="currentPage=${i};loadUsers()">${i}</button>`;
+            } else if (i === currentPage - 3 || i === currentPage + 3) {
+                html += `<button disabled>…</button>`;
+            }
+        }
+        
+        html += `<button onclick="currentPage=${currentPage+1};loadUsers()" ${!data.next ? 'disabled' : ''}>›</button>`;
+        html += `<button onclick="currentPage=${totalPages};loadUsers()" ${currentPage === totalPages ? 'disabled' : ''}>»</button>`;
+        
+        paginationDiv.innerHTML = html;
+    }
+
+    function updateStats(data) {
+        if (!data.stats) {
+            // Если нет stats в ответе, считаем сами
+            const results = data.results || [];
+            document.getElementById('stat-total-users').textContent = data.count || 0;
+            document.getElementById('stat-active-users').textContent = results.filter(u => u.is_active).length;
+            document.getElementById('stat-admin-users').textContent = results.filter(u => u.role === 'admin').length;
+            document.getElementById('stat-online-users').textContent = results.filter(u => {
+                if (!u.last_activity) return false;
+                const diff = Date.now() - new Date(u.last_activity).getTime();
+                return diff < 15 * 60 * 1000; // 15 минут
+            }).length;
+        }
+    }
+
+    // ==================== ДОБАВЛЕНИЕ ПОЛЬЗОВАТЕЛЯ ====================
+
+    function openAddUserModal() {
+        openModal('Добавить пользователя', `
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                <div class="form-group">
+                    <label>Логин *</label>
+                    <input type="text" id="add-username" placeholder="ivanov" required>
+                </div>
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" id="add-email" placeholder="user@example.com">
+                </div>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px;">
+                <div class="form-group">
+                    <label>Фамилия</label>
+                    <input type="text" id="add-last-name" placeholder="Иванов">
+                </div>
+                <div class="form-group">
+                    <label>Имя</label>
+                    <input type="text" id="add-first-name" placeholder="Иван">
+                </div>
+                <div class="form-group">
+                    <label>Отчество</label>
+                    <input type="text" id="add-middle-name" placeholder="Иванович">
+                </div>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                <div class="form-group">
+                    <label>Пароль *</label>
+                    <input type="password" id="add-password" placeholder="Минимум 8 символов" required>
+                </div>
+                <div class="form-group">
+                    <label>Подтверждение *</label>
+                    <input type="password" id="add-confirm-password" placeholder="Повторите пароль" required>
+                </div>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                <div class="form-group">
+                    <label>Роль *</label>
+                    <select id="add-role">
+                        <option value="viewer">👁️ Наблюдатель</option>
+                        <option value="manager">👔 Председатель</option>
+                        <option value="accountant">💰 Бухгалтер</option>
+                        <option value="admin">👑 Администратор</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Телефон</label>
+                    <input type="text" id="add-phone" placeholder="+79161234567">
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Должность</label>
+                <input type="text" id="add-position" placeholder="Председатель">
+            </div>
+        `, 'Добавить', async () => {
+            const username = document.getElementById('add-username').value.trim();
+            const password = document.getElementById('add-password').value;
+            const confirm = document.getElementById('add-confirm-password').value;
+
+            if (!username || !password || !confirm) {
+                showAlert('Заполните обязательные поля', 'error');
+                return;
+            }
+
+            if (password !== confirm) {
+                showAlert('Пароли не совпадают', 'error');
+                return;
+            }
+
+            if (password.length < 8) {
+                showAlert('Пароль должен содержать не менее 8 символов', 'error');
+                return;
+            }
+
+            const payload = {
+                username,
+                password,
+                confirm_password: confirm,
+                first_name: document.getElementById('add-first-name').value.trim(),
+                last_name: document.getElementById('add-last-name').value.trim(),
+                middle_name: document.getElementById('add-middle-name').value.trim(),
+                email: document.getElementById('add-email').value.trim(),
+                phone: document.getElementById('add-phone').value.trim(),
+                position: document.getElementById('add-position').value.trim(),
+                role: document.getElementById('add-role').value,
+            };
+
+            const result = await apiFetch('/api/users/', {
+                method: 'POST',
+                body: JSON.stringify(payload),
+            });
+
+            if (result) {
+                showAlert('Пользователь создан', 'success');
+                closeModal();
+                loadUsers();
+            }
+        });
+    }
+
+    // ==================== РЕДАКТИРОВАНИЕ ПОЛЬЗОВАТЕЛЯ ====================
+
+    async function openEditUserModal(userId) {
+        const user = await apiFetch(`/api/users/${userId}/`);
+        if (!user) return;
+
+        openModal(`Редактировать: ${escapeHtml(user.full_name || user.username)}`, `
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px;">
+                <div class="form-group">
+                    <label>Фамилия</label>
+                    <input type="text" id="edit-last-name" value="${escapeHtml(user.last_name || '')}">
+                </div>
+                <div class="form-group">
+                    <label>Имя</label>
+                    <input type="text" id="edit-first-name" value="${escapeHtml(user.first_name || '')}">
+                </div>
+                <div class="form-group">
+                    <label>Отчество</label>
+                    <input type="text" id="edit-middle-name" value="${escapeHtml(user.middle_name || '')}">
+                </div>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" id="edit-email" value="${escapeHtml(user.email || '')}">
+                </div>
+                <div class="form-group">
+                    <label>Телефон</label>
+                    <input type="text" id="edit-phone" value="${escapeHtml(user.phone || '')}">
+                </div>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                <div class="form-group">
+                    <label>Роль</label>
+                    <select id="edit-role">
+                        <option value="viewer" ${user.role === 'viewer' ? 'selected' : ''}>👁️ Наблюдатель</option>
+                        <option value="manager" ${user.role === 'manager' ? 'selected' : ''}>👔 Председатель</option>
+                        <option value="accountant" ${user.role === 'accountant' ? 'selected' : ''}>💰 Бухгалтер</option>
+                        <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>👑 Администратор</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Должность</label>
+                    <input type="text" id="edit-position" value="${escapeHtml(user.position || '')}">
+                </div>
+            </div>
+            <div class="form-group">
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                    <input type="checkbox" id="edit-is-active" ${user.is_active ? 'checked' : ''}>
+                    Пользователь активен
+                </label>
+            </div>
+        `, 'Сохранить', async () => {
+            const payload = {
+                first_name: document.getElementById('edit-first-name').value.trim(),
+                last_name: document.getElementById('edit-last-name').value.trim(),
+                middle_name: document.getElementById('edit-middle-name').value.trim(),
+                email: document.getElementById('edit-email').value.trim(),
+                phone: document.getElementById('edit-phone').value.trim(),
+                position: document.getElementById('edit-position').value.trim(),
+                role: document.getElementById('edit-role').value,
+                is_active: document.getElementById('edit-is-active').checked,
+            };
+
+            const result = await apiFetch(`/api/users/${userId}/`, {
+                method: 'PATCH',
+                body: JSON.stringify(payload),
+            });
+
+            if (result) {
+                showAlert('Пользователь обновлён', 'success');
+                closeModal();
+                loadUsers();
+            }
+        });
+    }
+
+    // ==================== АКТИВАЦИЯ / ДЕАКТИВАЦИЯ ====================
+
+    function toggleUserStatus(userId, activate, userName) {
+        const action = activate ? 'активировать' : 'деактивировать';
+        openModal(`${activate ? 'Активация' : 'Деактивация'} пользователя`, `
+            <p>Вы действительно хотите ${action} пользователя <strong>${escapeHtml(userName)}</strong>?</p>
+        `, activate ? 'Активировать' : 'Деактивировать', async () => {
+            const endpoint = activate ? 'activate' : 'deactivate';
+            const result = await apiFetch(`/api/users/${userId}/${endpoint}/`, {
+                method: 'POST',
+            });
+            if (result) {
+                showAlert(`Пользователь ${activate ? 'активирован' : 'деактивирован'}`, 'success');
+                closeModal();
+                loadUsers();
+            }
+        });
+    }
+
+    // ==================== СБРОС ПАРОЛЯ ====================
+
+    function resetUserPassword(userId, userName) {
+        openModal('Сброс пароля', `
+            <p>Вы действительно хотите сбросить пароль для <strong>${escapeHtml(userName)}</strong>?</p>
+            <p style="color: var(--warning); font-size: 0.85rem;">
+                Будет сгенерирован новый пароль. Пользователю придётся сменить его при следующем входе.
+            </p>
+        `, 'Сбросить пароль', async () => {
+            const result = await apiFetch(`/api/users/${userId}/reset-password/`, {
+                method: 'POST',
+            });
+            if (result) {
+                openModal('Новый пароль', `
+                    <p>Пароль для <strong>${escapeHtml(userName)}</strong> сброшен.</p>
+                    <div style="background: var(--gray-100); padding: 12px; border-radius: 8px; margin: 12px 0; text-align: center;">
+                        <code style="font-size: 1.2rem; font-weight: 700; letter-spacing: 2px;">${result.new_password}</code>
+                    </div>
+                    <p style="color: var(--danger); font-size: 0.85rem;">
+                        ⚠️ Сохраните этот пароль. Он больше не будет показан.
+                    </p>
+                    <button class="btn btn-secondary btn-sm" onclick="copyToClipboard('${result.new_password}')">📋 Копировать</button>
+                `, 'OK', () => {
+                    closeModal();
+                    loadUsers();
+                });
+            }
+        });
+    }
+
+    function copyToClipboard(text) {
+        navigator.clipboard.writeText(text).then(() => {
+            showAlert('Пароль скопирован', 'success');
+        });
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        loadUsers();
+        // Автообновление каждые 30 секунд
+        setInterval(loadUsers, 30000);
+    });
+</script>
+{% endblock %}

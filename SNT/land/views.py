@@ -1,3 +1,4 @@
+# SNT\land\views.py
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -5,6 +6,13 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django.shortcuts import render
 from django.views import View
+from django.db.models import Count, Q, Avg, Sum
+from django.db import transaction
+from django.utils import timezone
+import logging
+from rest_framework import permissions
+
+from accounts.permissions import IsManagerOrAbove
 
 from .models import LandPlot
 from .serializers import (
@@ -12,6 +20,8 @@ from .serializers import (
     LandPlotDetailSerializer,
     LandPlotGeoSerializer,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class LandPlotViewSet(viewsets.ModelViewSet):
@@ -27,15 +37,30 @@ class LandPlotViewSet(viewsets.ModelViewSet):
     
     Дополнительные action'ы:
     geo/      — получение координат всех активных участков для карты
-    stats/    — статистика по участкам
+    stats/    — расширенная статистика по участкам
+    near/     — поиск ближайших участков
+    export/   — экспорт данных в CSV
+    bulk-update/ — массовое обновление статусов
     """
-    queryset = LandPlot.objects.all()
+    queryset = LandPlot.objects.prefetch_related('ownerships__owner').all()
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['status']
     search_fields = ['plot_number', 'cadastral_number', 'address']
-    ordering_fields = ['plot_number', 'area_sqm', 'cadastral_number', 'created_at']
+    ordering_fields = [
+        'plot_number', 'area_sqm', 'cadastral_number', 
+        'created_at', 'status'
+    ]
     ordering = ['plot_number']
-
+    def get_permissions(self):
+        """
+        Права доступа:
+        - Чтение (list, retrieve): все авторизованные
+        - Создание, изменение, удаление: только менеджеры и выше
+        """
+        if self.action in ('create', 'update', 'partial_update', 'destroy', 'deactivate', 'activate'):
+            return [permissions.IsAuthenticated(), IsManagerOrAbove()]
+        return [permissions.IsAuthenticated()]
+                
     def get_serializer_class(self):
         """
         Для списка — краткий сериализатор, для детального просмотра — полный,
@@ -47,23 +72,157 @@ class LandPlotViewSet(viewsets.ModelViewSet):
             return LandPlotGeoSerializer
         return LandPlotDetailSerializer
 
+    def get_queryset(self):
+        """Расширенная фильтрация с аннотациями"""
+        # Базовый queryset с предзагрузкой связей
+        queryset = LandPlot.objects.prefetch_related(
+            'ownerships__owner'
+        ).all()
+        
+        # Аннотируем количество владельцев ТОЛЬКО для чтения
+        queryset = queryset.annotate(
+            _owners_count=Count('ownerships', distinct=True)
+        )
+        
+        # Фильтрация по наличию владельцев
+        has_owners = self.request.query_params.get('has_owners')
+        if has_owners is not None:
+            if has_owners.lower() == 'true':
+                queryset = queryset.filter(_owners_count__gt=0)
+            else:
+                queryset = queryset.filter(_owners_count=0)
+        
+        # Фильтрация по наличию координат
+        has_coordinates = self.request.query_params.get('has_coordinates')
+        if has_coordinates is not None:
+            if has_coordinates.lower() == 'true':
+                queryset = queryset.filter(
+                    latitude__isnull=False, 
+                    longitude__isnull=False
+                )
+            else:
+                queryset = queryset.filter(
+                    Q(latitude__isnull=True) | Q(longitude__isnull=True)
+                )
+        
+        # Фильтрация по диапазону площади
+        area_min = self.request.query_params.get('area_min')
+        area_max = self.request.query_params.get('area_max')
+        if area_min:
+            queryset = queryset.filter(area_sqm__gte=float(area_min))
+        if area_max:
+            queryset = queryset.filter(area_sqm__lte=float(area_max))
+        
+        # Поиск по владельцам
+        owner_search = self.request.query_params.get('owner_search')
+        if owner_search:
+            queryset = queryset.filter(
+                ownerships__owner__full_name__icontains=owner_search
+            ).distinct()
+        
+        return queryset
+
+    def list(self, request, *args, **kwargs):
+        """Расширенный list с дополнительной статистикой"""
+        queryset = self.filter_queryset(self.get_queryset())
+        
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            response = self.get_paginated_response(serializer.data)
+            
+            # Статистика по отфильтрованным участкам
+            # Используем _owners_count (аннотация) вместо owners_count (property)
+            total_area = queryset.aggregate(total=Sum('area_sqm'))['total'] or 0
+            
+            response.data['stats'] = {
+                'total': queryset.count(),
+                'total_area': round(total_area, 2),
+                'with_owners': queryset.filter(_owners_count__gt=0).count(),  # ← _owners_count
+                'without_owners': queryset.filter(_owners_count=0).count(),   # ← _owners_count
+                'by_status': {
+                    'active': queryset.filter(status='active').count(),
+                    'abandoned': queryset.filter(status='abandoned').count(),
+                    'disputed': queryset.filter(status='disputed').count(),
+                }
+            }
+            return response
+        
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
+
+    def destroy(self, request, *args, **kwargs):
+        """Безопасное удаление с проверками"""
+        land_plot = self.get_object()
+        
+        # Проверяем наличие активных начислений на участок
+        try:
+            from payments.models import Assessment
+            has_active_assessments = Assessment.objects.filter(
+                land_plot=land_plot,
+                status__in=['pending', 'partial', 'overdue']
+            ).exists()
+        except ImportError:
+            has_active_assessments = False
+        
+        if has_active_assessments:
+            return Response(
+                {
+                    'detail': 'Невозможно удалить участок с неоплаченными начислениями.',
+                    'code': 'has_active_assessments'
+                },
+                status=status.HTTP_409_CONFLICT
+            )
+        
+        # Проверяем наличие владельцев (предупреждение, но не блокировка)
+        owners_count = land_plot.ownerships.count()
+        
+        # Логируем удаление
+        logger.warning(
+            f'Удаление участка #{land_plot.plot_number} '
+            f'(ID: {land_plot.id}) с {owners_count} владельцами'
+        )
+        
+        return super().destroy(request, *args, **kwargs)
+
     @action(detail=False, methods=['get'], url_path='geo')
     def geo(self, request):
         """
         GET /api/plots/geo/
         
-        Возвращает координаты участков, у которых заданы latitude и longitude.
-        Дополнительные фильтры: ?status=active
+        Возвращает координаты участков для карты.
+        Дополнительные фильтры:
+        ?status=active - фильтр по статусу
+        ?has_owners=true - только с владельцами
         """
-        status_filter = request.query_params.get('status', None)
+        status_filter = request.query_params.get('status')
+        has_owners = request.query_params.get('has_owners')
+        
         queryset = LandPlot.objects.filter(
             latitude__isnull=False,
             longitude__isnull=False,
         )
+        
         if status_filter:
             queryset = queryset.filter(status=status_filter)
+        
+        if has_owners is not None:
+            queryset = queryset.annotate(
+                owners_count=Count('ownerships')
+            )
+            if has_owners.lower() == 'true':
+                queryset = queryset.filter(owners_count__gt=0)
+            else:
+                queryset = queryset.filter(owners_count=0)
+        
+        # Добавляем информацию о владельцах для всплывающих подсказок
+        queryset = queryset.prefetch_related('ownerships__owner')
+        
         serializer = LandPlotGeoSerializer(queryset, many=True)
-        return Response(serializer.data)
+        return Response({
+            'count': queryset.count(),
+            'results': serializer.data
+        })
 
     @action(detail=True, methods=['post'], url_path='set-coordinates')
     def set_coordinates(self, request, pk=None):
@@ -76,21 +235,46 @@ class LandPlotViewSet(viewsets.ModelViewSet):
         land_plot = self.get_object()
         lat = request.data.get('latitude')
         lon = request.data.get('longitude')
+        
         if lat is None or lon is None:
             return Response(
                 {'detail': 'Необходимо передать latitude и longitude'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        
         try:
-            land_plot.latitude = float(lat)
-            land_plot.longitude = float(lon)
+            lat = float(lat)
+            lon = float(lon)
+            
+            # Валидация диапазонов
+            if not (-90 <= lat <= 90):
+                return Response(
+                    {'detail': 'Широта должна быть от -90 до 90'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if not (-180 <= lon <= 180):
+                return Response(
+                    {'detail': 'Долгота должна быть от -180 до 180'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            
+            land_plot.latitude = lat
+            land_plot.longitude = lon
             land_plot.full_clean()
             land_plot.save(update_fields=['latitude', 'longitude', 'updated_at'])
+            
+            logger.info(
+                f'Обновлены координаты участка #{land_plot.plot_number}: '
+                f'{lat:.6f}, {lon:.6f}'
+            )
+            
         except Exception as e:
+            logger.error(f'Ошибка обновления координат: {str(e)}')
             return Response(
                 {'detail': str(e)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        
         serializer = LandPlotDetailSerializer(land_plot)
         return Response(serializer.data)
 
@@ -99,19 +283,232 @@ class LandPlotViewSet(viewsets.ModelViewSet):
         """
         GET /api/plots/stats/
         
-        Простейшая статистика по участкам.
+        Расширенная статистика по участкам.
         """
         total = LandPlot.objects.count()
-        active = LandPlot.objects.filter(status='active').count()
-        abandoned = LandPlot.objects.filter(status='abandoned').count()
-        disputed = LandPlot.objects.filter(status='disputed').count()
-        return Response({
+        queryset = LandPlot.objects.all()
+        
+        stats = {
             'total': total,
-            'active': active,
-            'abandoned': abandoned,
-            'disputed': disputed,
+            'active': queryset.filter(status='active').count(),
+            'abandoned': queryset.filter(status='abandoned').count(),
+            'disputed': queryset.filter(status='disputed').count(),
+            'total_area': round(queryset.aggregate(total=Sum('area_sqm'))['total'] or 0, 2),
+            'with_coordinates': queryset.filter(
+                latitude__isnull=False, 
+                longitude__isnull=False
+            ).count(),
+            'without_coordinates': queryset.filter(
+                Q(latitude__isnull=True) | Q(longitude__isnull=True)
+            ).count(),
+            'with_owners': queryset.annotate(
+                owners_count=Count('ownerships')
+            ).filter(owners_count__gt=0).count(),
+            'without_owners': queryset.annotate(
+                owners_count=Count('ownerships')
+            ).filter(owners_count=0).count(),
+            'average_area': round(
+                queryset.aggregate(avg=Avg('area_sqm'))['avg'] or 0, 2
+            ),
+            'average_owners_per_plot': round(
+                queryset.annotate(
+                    owners_count=Count('ownerships')
+                ).aggregate(avg=Avg('owners_count'))['avg'] or 0, 1
+            ),
+            'last_added': LandPlot.objects.order_by('-created_at').first().plot_number 
+                if LandPlot.objects.exists() else None,
+        }
+        
+        return Response(stats)
+
+    @action(detail=False, methods=['get'], url_path='near')
+    def near_plots(self, request):
+        """
+        GET /api/plots/near/?lat=55.75&lon=37.62&radius=0.01
+        
+        Поиск участков рядом с указанными координатами.
+        """
+        lat = request.query_params.get('lat')
+        lon = request.query_params.get('lon')
+        radius = float(request.query_params.get('radius', 0.01))
+        
+        if not lat or not lon:
+            return Response(
+                {'detail': 'Укажите lat и lon'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        
+        try:
+            lat = float(lat)
+            lon = float(lon)
+        except ValueError:
+            return Response(
+                {'detail': 'Некорректные координаты'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        
+        # Простой поиск по прямоугольной области
+        queryset = LandPlot.objects.filter(
+            latitude__isnull=False,
+            longitude__isnull=False,
+            latitude__gte=lat - radius,
+            latitude__lte=lat + radius,
+            longitude__gte=lon - radius,
+            longitude__lte=lon + radius,
+        )
+        
+        serializer = LandPlotGeoSerializer(queryset, many=True)
+        return Response({
+            'center': {'lat': lat, 'lon': lon},
+            'radius': radius,
+            'count': queryset.count(),
+            'results': serializer.data
         })
 
+    @action(detail=False, methods=['get'], url_path='export')
+    def export_plots(self, request):
+        """
+        GET /api/plots/export/?format=csv
+        
+        Экспорт списка участков в CSV.
+        """
+        import csv
+        from django.http import HttpResponse
+        
+        plots = self.filter_queryset(self.get_queryset())
+        
+        response = HttpResponse(content_type='text/csv')
+        timestamp = timezone.now().strftime('%Y%m%d_%H%M%S')
+        response['Content-Disposition'] = f'attachment; filename="land_plots_{timestamp}.csv"'
+        
+        writer = csv.writer(response)
+        writer.writerow([
+            'ID', 'Номер участка', 'Кадастровый номер', 'Площадь (м²)',
+            'Адрес', 'Статус', 'Широта', 'Долгота', 
+            'Кол-во владельцев', 'Примечания', 'Дата добавления'
+        ])
+        
+        for plot in plots:
+            writer.writerow([
+                plot.id,
+                plot.plot_number,
+                plot.cadastral_number,
+                plot.area_sqm,
+                plot.address or '',
+                plot.get_status_display(),
+                plot.latitude or '',
+                plot.longitude or '',
+                plot.ownerships.count(),
+                plot.notes or '',
+                plot.created_at.strftime('%d.%m.%Y'),
+            ])
+        
+        return response
+
+    @action(detail=False, methods=['post'], url_path='bulk-update-status')
+    def bulk_update_status(self, request):
+        """
+        POST /api/plots/bulk-update-status/
+        
+        Массовое обновление статусов.
+        Тело: {"plot_ids": [1,2,3], "status": "active"}
+        """
+        plot_ids = request.data.get('plot_ids', [])
+        new_status = request.data.get('status')
+        
+        if not plot_ids:
+            return Response(
+                {'detail': 'Укажите plot_ids'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        
+        valid_statuses = [s[0] for s in LandPlot.STATUS_CHOICES]
+        if new_status not in valid_statuses:
+            return Response(
+                {'detail': f'Недопустимый статус. Допустимые: {", ".join(valid_statuses)}'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        
+        updated_count = LandPlot.objects.filter(
+            id__in=plot_ids
+        ).update(
+            status=new_status,
+            updated_at=timezone.now()
+        )
+        
+        logger.info(
+            f'Массовое обновление статуса на "{new_status}": '
+            f'{updated_count} участков из {len(plot_ids)}'
+        )
+        
+        return Response({
+            'detail': f'Обновлено участков: {updated_count}',
+            'updated_count': updated_count,
+            'requested_count': len(plot_ids),
+            'new_status': new_status,
+        })
+
+    @action(detail=False, methods=['post'], url_path='bulk-set-coordinates')
+    def bulk_set_coordinates(self, request):
+        """
+        POST /api/plots/bulk-set-coordinates/
+        
+        Массовое обновление координат.
+        Тело: [{"id": 1, "latitude": 55.75, "longitude": 37.62}, ...]
+        """
+        coordinates_data = request.data
+        
+        if not isinstance(coordinates_data, list):
+            return Response(
+                {'detail': 'Ожидается массив объектов с id, latitude, longitude'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        
+        updated = []
+        errors = []
+        
+        with transaction.atomic():
+            for item in coordinates_data:
+                try:
+                    plot_id = item.get('id')
+                    lat = float(item.get('latitude'))
+                    lon = float(item.get('longitude'))
+                    
+                    if not (-90 <= lat <= 90) or not (-180 <= lon <= 180):
+                        errors.append({
+                            'id': plot_id,
+                            'error': 'Координаты вне допустимого диапазона'
+                        })
+                        continue
+                    
+                    plot = LandPlot.objects.filter(id=plot_id).first()
+                    if not plot:
+                        errors.append({
+                            'id': plot_id,
+                            'error': 'Участок не найден'
+                        })
+                        continue
+                    
+                    plot.latitude = lat
+                    plot.longitude = lon
+                    plot.save(update_fields=['latitude', 'longitude', 'updated_at'])
+                    updated.append(plot_id)
+                    
+                except Exception as e:
+                    errors.append({
+                        'id': item.get('id'),
+                        'error': str(e)
+                    })
+        
+        logger.info(f'Массовое обновление координат: {len(updated)} успешно')
+        
+        return Response({
+            'updated': len(updated),
+            'errors': len(errors),
+            'error_details': errors[:10],  # Первые 10 ошибок
+        })
+
+    
 
 class LandPlotListView(View):
     """Страница со списком участков."""
@@ -132,3 +529,9 @@ class LandPlotMapView(View):
     """Страница с картой СНТ."""
     def get(self, request):
         return render(request, 'land/map.html', {'active_page': 'map'})
+    
+
+class DashboardView(View):
+    """Главная страница дашборда (если ещё не создана)."""
+    def get(self, request):
+        return render(request, 'users/dashboard.html', {'active_page': 'dashboard'})

@@ -1,5 +1,7 @@
 from django.urls import path
-from .views import DashboardView, OwnerListView, OwnerDetailView
+
+from land.views import DashboardView
+from .views import OwnerListView, OwnerDetailView
 
 urlpatterns = [
     path('', DashboardView.as_view(), name='dashboard'),

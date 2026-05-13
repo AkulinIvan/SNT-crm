@@ -1,0 +1,275 @@
+{% extends "base.html" %}
+
+{% block title %}Профиль пользователя | CRM СНТ{% endblock %}
+
+{% block breadcrumb %}
+<a href="/">Главная</a> <span>/</span> <span>Профиль</span>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+        <div style="display: flex; align-items: center; gap: 16px;">
+            <div style="width: 64px; height: 64px; border-radius: 16px; background: linear-gradient(135deg, #2c7a47, #1e5c32); display: flex; align-items: center; justify-content: center; font-size: 1.5rem; font-weight: 700; color: white;">
+                {{ user.first_name|first|upper }}{{ user.last_name|first|upper }}
+            </div>
+            <div>
+                <h2 id="profile-name">👤 Загрузка...</h2>
+                <p id="profile-role" style="color: var(--gray-500);">...</p>
+            </div>
+        </div>
+        <div style="display: flex; gap: 8px;">
+            <button class="btn btn-secondary" onclick="window.location.href='/'">← На главную</button>
+            <button class="btn btn-primary" onclick="openEditProfileModal()">✏️ Редактировать</button>
+        </div>
+    </div>
+</div>
+
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
+    <!-- Основная информация -->
+    <div class="table-container">
+        <div class="table-toolbar">
+            <span style="font-weight: 600;">📋 Основная информация</span>
+        </div>
+        <table>
+            <tbody>
+                <tr>
+                    <td style="color: var(--gray-500); width: 40%; font-size: 0.85rem;">Имя пользователя</td>
+                    <td id="info-username" style="font-weight: 500;">—</td>
+                </tr>
+                <tr>
+                    <td style="color: var(--gray-500); font-size: 0.85rem;">Фамилия</td>
+                    <td id="info-last-name">—</td>
+                </tr>
+                <tr>
+                    <td style="color: var(--gray-500); font-size: 0.85rem;">Имя</td>
+                    <td id="info-first-name">—</td>
+                </tr>
+                <tr>
+                    <td style="color: var(--gray-500); font-size: 0.85rem;">Отчество</td>
+                    <td id="info-middle-name">—</td>
+                </tr>
+                <tr>
+                    <td style="color: var(--gray-500); font-size: 0.85rem;">Email</td>
+                    <td id="info-email">—</td>
+                </tr>
+                <tr>
+                    <td style="color: var(--gray-500); font-size: 0.85rem;">Телефон</td>
+                    <td id="info-phone">—</td>
+                </tr>
+                <tr>
+                    <td style="color: var(--gray-500); font-size: 0.85rem;">Должность</td>
+                    <td id="info-position">—</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Системная информация -->
+    <div class="table-container">
+        <div class="table-toolbar">
+            <span style="font-weight: 600;">⚙️ Системная информация</span>
+        </div>
+        <table>
+            <tbody>
+                <tr>
+                    <td style="color: var(--gray-500); width: 40%; font-size: 0.85rem;">Роль</td>
+                    <td><span id="info-role-badge"></span></td>
+                </tr>
+                <tr>
+                    <td style="color: var(--gray-500); font-size: 0.85rem;">Статус</td>
+                    <td><span id="info-status-badge"></span></td>
+                </tr>
+                <tr>
+                    <td style="color: var(--gray-500); font-size: 0.85rem;">Администратор</td>
+                    <td id="info-is-superuser">—</td>
+                </tr>
+                <tr>
+                    <td style="color: var(--gray-500); font-size: 0.85rem;">Последний вход</td>
+                    <td id="info-last-login">—</td>
+                </tr>
+                <tr>
+                    <td style="color: var(--gray-500); font-size: 0.85rem;">Последняя активность</td>
+                    <td id="info-last-activity">—</td>
+                </tr>
+                <tr>
+                    <td style="color: var(--gray-500); font-size: 0.85rem;">Дата регистрации</td>
+                    <td id="info-date-joined">—</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Безопасность -->
+<div class="table-container" style="margin-top: 24px;">
+    <div class="table-toolbar">
+        <span style="font-weight: 600;">🔒 Безопасность</span>
+    </div>
+    <div style="padding: 20px; display: flex; gap: 12px; align-items: center;">
+        <button class="btn btn-primary" onclick="openChangePasswordModal()">🔑 Сменить пароль</button>
+        <button class="btn btn-secondary" onclick="handleLogout()">🚪 Выйти из системы</button>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let userData = null;
+
+    async function loadProfile() {
+        userData = await apiFetch('/api/auth/me/');
+        if (!userData) {
+            showAlert('Не удалось загрузить профиль', 'error');
+            return;
+        }
+
+        // Заголовок
+        document.getElementById('profile-name').textContent = 
+            '👤 ' + (userData.full_name || userData.username);
+        document.getElementById('profile-role').textContent = 
+            userData.role_display + (userData.position ? ' — ' + userData.position : '');
+
+        // Основная информация
+        document.getElementById('info-username').textContent = userData.username;
+        document.getElementById('info-last-name').textContent = userData.last_name || '—';
+        document.getElementById('info-first-name').textContent = userData.first_name || '—';
+        document.getElementById('info-middle-name').textContent = userData.middle_name || '—';
+        document.getElementById('info-email').textContent = userData.email || '—';
+        document.getElementById('info-phone').textContent = userData.phone || '—';
+        document.getElementById('info-position').textContent = userData.position || '—';
+
+        // Системная информация
+        document.getElementById('info-role-badge').innerHTML = getRoleBadge(userData.role);
+        document.getElementById('info-status-badge').innerHTML = userData.is_active 
+            ? '<span class="badge-status badge-active">Активен</span>' 
+            : '<span class="badge-status badge-inactive">Неактивен</span>';
+        document.getElementById('info-is-superuser').textContent = userData.is_superuser ? '✅ Да' : '❌ Нет';
+        document.getElementById('info-last-login').textContent = formatDateTime(userData.last_login);
+        document.getElementById('info-last-activity').textContent = formatDateTime(userData.last_activity);
+        document.getElementById('info-date-joined').textContent = formatDate(userData.date_joined);
+    }
+
+    function getRoleBadge(role) {
+        const badges = {
+            'admin': '<span class="badge-status badge-danger">👑 Администратор</span>',
+            'manager': '<span class="badge-status badge-active">👔 Председатель</span>',
+            'accountant': '<span class="badge-status badge-info">💰 Бухгалтер</span>',
+            'viewer': '<span class="badge-status badge-inactive">👁️ Наблюдатель</span>',
+        };
+        return badges[role] || `<span class="badge-status badge-inactive">${role}</span>`;
+    }
+
+    // Редактирование профиля
+    function openEditProfileModal() {
+        if (!userData) return;
+
+        openModal('Редактировать профиль', `
+            <div class="form-group">
+                <label>Имя</label>
+                <input type="text" id="edit-first-name" value="${escapeHtml(userData.first_name || '')}" placeholder="Иван">
+            </div>
+            <div class="form-group">
+                <label>Фамилия</label>
+                <input type="text" id="edit-last-name" value="${escapeHtml(userData.last_name || '')}" placeholder="Иванов">
+            </div>
+            <div class="form-group">
+                <label>Отчество</label>
+                <input type="text" id="edit-middle-name" value="${escapeHtml(userData.middle_name || '')}" placeholder="Иванович">
+            </div>
+            <div class="form-group">
+                <label>Email</label>
+                <input type="email" id="edit-email" value="${escapeHtml(userData.email || '')}" placeholder="user@example.com">
+            </div>
+            <div class="form-group">
+                <label>Телефон</label>
+                <input type="text" id="edit-phone" value="${escapeHtml(userData.phone || '')}" placeholder="+79161234567">
+            </div>
+            <div class="form-group">
+                <label>Должность</label>
+                <input type="text" id="edit-position" value="${escapeHtml(userData.position || '')}" placeholder="Председатель">
+            </div>
+        `, 'Сохранить', async () => {
+            const payload = {
+                first_name: document.getElementById('edit-first-name').value.trim(),
+                last_name: document.getElementById('edit-last-name').value.trim(),
+                middle_name: document.getElementById('edit-middle-name').value.trim(),
+                email: document.getElementById('edit-email').value.trim(),
+                phone: document.getElementById('edit-phone').value.trim(),
+                position: document.getElementById('edit-position').value.trim(),
+            };
+
+            // Обновляем профиль через API пользователей
+            const result = await apiFetch(`/api/users/${userData.id}/`, {
+                method: 'PATCH',
+                body: JSON.stringify(payload),
+            });
+
+            if (result) {
+                showAlert('Профиль обновлён', 'success');
+                closeModal();
+                loadProfile();
+            }
+        });
+    }
+
+    // Смена пароля
+    function openChangePasswordModal() {
+        openModal('Сменить пароль', `
+            <div class="form-group">
+                <label>Текущий пароль</label>
+                <input type="password" id="old-password" placeholder="Введите текущий пароль">
+            </div>
+            <div class="form-group">
+                <label>Новый пароль</label>
+                <input type="password" id="new-password" placeholder="Минимум 8 символов">
+                <small>Пароль должен содержать не менее 8 символов, включать буквы и цифры</small>
+            </div>
+            <div class="form-group">
+                <label>Подтверждение пароля</label>
+                <input type="password" id="confirm-password" placeholder="Повторите новый пароль">
+            </div>
+        `, 'Сменить', async () => {
+            const oldPassword = document.getElementById('old-password').value;
+            const newPassword = document.getElementById('new-password').value;
+            const confirmPassword = document.getElementById('confirm-password').value;
+
+            if (!oldPassword || !newPassword || !confirmPassword) {
+                showAlert('Заполните все поля', 'error');
+                return;
+            }
+
+            if (newPassword !== confirmPassword) {
+                showAlert('Пароли не совпадают', 'error');
+                return;
+            }
+
+            if (newPassword.length < 8) {
+                showAlert('Пароль должен содержать не менее 8 символов', 'error');
+                return;
+            }
+
+            const result = await apiFetch('/api/auth/change-password/', {
+                method: 'POST',
+                body: JSON.stringify({
+                    old_password: oldPassword,
+                    new_password: newPassword,
+                    confirm_password: confirmPassword,
+                }),
+            });
+
+            if (result) {
+                showAlert('Пароль успешно изменён', 'success');
+                closeModal();
+            }
+        });
+    }
+
+    async function handleLogout() {
+        await apiFetch('/api/auth/logout/', { method: 'POST' });
+        window.location.href = '/login/';
+    }
+
+    document.addEventListener('DOMContentLoaded', loadProfile);
+</script>
+{% endblock %}
