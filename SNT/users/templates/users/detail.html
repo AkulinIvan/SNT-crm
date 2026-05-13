@@ -436,6 +436,7 @@
             });
             if (result) {
                 showAlert('Контакт добавлен', 'success');
+                closeModal();
                 loadOwnerDetail();
             }
         });
@@ -532,6 +533,7 @@
             });
             if (result) {
                 showAlert('Участок привязан', 'success');
+                closeModal();
                 loadOwnerDetail();
             }
         });
