@@ -183,14 +183,14 @@ ASTERISK_RECORDING_PATH = os.environ.get(
 )
 
 # Реквизиты СНТ
-SNT_NAME = 'СНТ "Садовод"'
-SNT_INN = '1234567890'
+SNT_NAME = 'СНТ "Строитель-43"'
+SNT_INN = '2462039398'
 SNT_KPP = '123001001'
-SNT_ACCOUNT = '40703810938000000123'
-SNT_BANK_NAME = 'ПАО Сбербанк'
-SNT_BANK_BIK = '044525225'
-SNT_BANK_CORR = '30101810400000000225'
-SNT_CHAIRMAN = 'Иванов И. И.'
+SNT_ACCOUNT = '40703810500600004095'
+SNT_BANK_NAME = 'ВТБ'
+SNT_BANK_BIK = '044525411'
+SNT_BANK_CORR = '30101810145250000411'
+SNT_CHAIRMAN = 'Председатель правления'
 
 # CSRF настройки
 CSRF_COOKIE_NAME = 'csrftoken'
@@ -208,3 +208,25 @@ CSRF_FAILURE_VIEW = 'django.views.csrf.csrf_failure'
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
+
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+        },
+    },
+    'loggers': {
+        'payments': {
+            'handlers': ['console'],
+            'level': 'DEBUG',
+            'propagate': True,
+        },
+        'django': {
+            'handlers': ['console'],
+            'level': 'INFO',
+        },
+    },
+}

@@ -11,6 +11,7 @@ urlpatterns = [
     path('api/', include('users.urls_api')),
     path('api/', include('calls.urls_api')),
     path('api/', include('payments.urls_api')),
+    path('api/generate-combined-pdf/', include('payments.urls_web')),
     path('api/', include('accounts.urls_api')),
     
     # Веб-интерфейс

@@ -173,7 +173,7 @@
             .filter(c => c.is_active)
             .map(c => {
                 const label = c.unit === 'сотка' 
-                    ? `${c.name} (${c.default_amount || c.rate_per_unit} ₽/сотка)` 
+                    ? `${c.name} (${c.rate_per_unit} ₽/сотка)` 
                     : `${c.name} (${c.default_amount} ₽)`;
                 return `<option value="${c.id}" data-unit="${c.unit}" data-rate="${c.default_amount || c.rate_per_unit}">${escapeHtml(label)}</option>`;
             })

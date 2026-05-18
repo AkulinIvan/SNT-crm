@@ -1,3 +1,5 @@
+from datetime import date
+
 from django.db import models
 from django.utils import timezone
 from land.models import LandPlot
@@ -39,7 +41,43 @@ class PaymentCategory(models.Model):
         ordering = ['name']
 
     def __str__(self):
+        if self.unit == 'сотка' and self.rate_per_unit:
+            return f"{self.name} ({self.rate_per_unit} ₽/сотка)"
         return self.name
+    
+    def calculate_amount(self, land_plot=None, quantity=None):
+        """
+        Рассчитать сумму начисления в зависимости от категории.
+        
+        Args:
+            land_plot: объект участка LandPlot
+            quantity: ручное количество (для электричества)
+        
+        Returns:
+            tuple: (amount, description)
+        """
+        from decimal import Decimal
+        
+        if self.unit == 'сотка' and self.rate_per_unit and land_plot:
+            # Расчёт по площади в сотках
+            area_sotka = Decimal(str(land_plot.area_sqm)) / 100
+            amount = (area_sotka * self.rate_per_unit).quantize(Decimal('0.01'))
+            description = f"{self.name}: {area_sotka:.2f} соток × {self.rate_per_unit} ₽/сотка = {amount} ₽"
+            return amount, description
+        
+        elif self.unit == 'кВт·ч' and self.rate_per_unit and quantity:
+            # Расчёт по потреблению электроэнергии
+            amount = (Decimal(str(quantity)) * self.rate_per_unit).quantize(Decimal('0.01'))
+            description = f"{self.name}: {quantity} кВт·ч × {self.rate_per_unit} ₽/кВт·ч = {amount} ₽"
+            return amount, description
+        
+        elif self.default_amount:
+            # Фиксированная сумма
+            amount = self.default_amount
+            description = f"{self.name}: {amount} ₽ (фиксированная сумма)"
+            return amount, description
+        
+        return Decimal('0'), f"{self.name}: сумма не определена"
 
 
 class PaymentPeriod(models.Model):
@@ -152,23 +190,40 @@ class Assessment(models.Model):
     def save(self, *args, **kwargs):
         if not self.payment_uid:
             self.payment_uid = self.generate_uid()
+        # Автоматический расчёт статуса при сохранении
+        from datetime import date
+        if self.paid_amount >= self.amount:
+            self.status = self.STATUS_PAID
+        elif self.paid_amount > 0:
+            self.status = self.STATUS_PARTIAL
+        elif self.period and self.period.due_date and date.today() > self.period.due_date:
+            self.status = self.STATUS_OVERDUE
+        else:
+            self.status = self.STATUS_PENDING
         super().save(*args, **kwargs)
     
     @classmethod
     def generate_uid(cls):
-        """Генерация уникального UID для массового создания"""
-        # Получаем последний ID в таблице
-        last = cls.objects.order_by('-id').first()
-        if last:
-            next_id = last.id + 1
+        """
+        Генерация уникального UID для квитанции.
+        Использует максимальный существующий ID + 1 вместо последовательности.
+        """
+        # Получаем максимальный существующий ID
+        max_id = cls.objects.aggregate(models.Max('id'))['id__max']
+        
+        if max_id is not None:
+            next_id = max_id + 1
         else:
             next_id = 1
         
-        # Проверяем, не занят ли UID (на случай параллельных запросов)
-        while cls.objects.filter(payment_uid=f"SNT-{next_id:06d}").exists():
+        # Проверяем, что UID не занят (на случай параллельных запросов)
+        uid = f"SNT-{next_id:06d}"
+        while cls.objects.filter(payment_uid=uid).exists():
             next_id += 1
+            uid = f"SNT-{next_id:06d}"
         
-        return f"SNT-{next_id:06d}"
+        return uid
+
 
     def __str__(self):
         return f"{self.owner.full_name} — {self.category.name} ({self.period}) [{self.payment_uid}]"
@@ -263,22 +318,13 @@ class Payment(models.Model):
             self.update_assessment()
 
     def update_assessment(self):
-        """Пересчитать оплаченную сумму в начислении и обновить статус"""
+        """Пересчёт оплаченной суммы"""
         total_paid = self.assessment.payments.filter(
             status=self.STATUS_PROCESSED
-        ).aggregate(
-            total=models.Sum('amount')
-        )['total'] or 0
+        ).aggregate(total=models.Sum('amount'))['total'] or 0
 
         self.assessment.paid_amount = total_paid
-
-        if total_paid >= self.assessment.amount:
-            self.assessment.status = Assessment.STATUS_PAID
-        elif total_paid > 0:
-            self.assessment.status = Assessment.STATUS_PARTIAL
-
-        self.assessment.save(update_fields=['paid_amount', 'status', 'updated_at'])
-
+        self.assessment.save()
 
 class BankStatement(models.Model):
     """Банковская выписка — импортированные данные из банка"""
@@ -461,8 +507,8 @@ class ConsolidatedAssessment(models.Model):
     @classmethod
     def generate_uid(cls):
         """Генерация уникального UID для составного начисления"""
-        last = cls.objects.order_by('-id').first()
-        next_id = (last.id + 1) if last else 1
+        max_id = cls.objects.aggregate(models.Max('id'))['id__max']
+        next_id = (max_id + 1) if max_id else 1
         return f"SNT-C-{next_id:06d}"
 
     @property

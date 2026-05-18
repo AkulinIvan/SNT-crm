@@ -1,16 +1,22 @@
+# SNT/payments/views.py - ПОЛНАЯ РАБОЧАЯ ВЕРСИЯ
+
 from datetime import date
 from decimal import Decimal
-from django.shortcuts import render
+from django.shortcuts import render, get_object_or_404
 from django.views import View
-from rest_framework import viewsets
+from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django.db import transaction as db_transaction
-from django.db.models import Sum
+from django.db.models import Sum, Q
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
+from django.http import HttpResponse, JsonResponse
+from django.template.loader import render_to_string
+import json
+import logging
 
 from land.models import LandPlot
 from users.models import Owner
@@ -27,10 +33,32 @@ from .serializers import (
 )
 from .bank_parser import BankStatementParser, PaymentMatcher
 
+logger = logging.getLogger(__name__)
+
 
 class PaymentCategoryViewSet(viewsets.ModelViewSet):
     queryset = PaymentCategory.objects.all()
     serializer_class = PaymentCategorySerializer
+    
+    @action(detail=False, methods=['get'], url_path='check-membership')
+    def check_membership(self, request):
+        """Проверка настроек членских взносов"""
+        categories = PaymentCategory.objects.filter(code='membership')
+        
+        result = []
+        for cat in categories:
+            result.append({
+                'id': cat.id,
+                'name': cat.name,
+                'code': cat.code,
+                'unit': cat.unit,
+                'rate_per_unit': float(cat.rate_per_unit) if cat.rate_per_unit else 0,
+                'default_amount': float(cat.default_amount) if cat.default_amount else 0,
+                'is_active': cat.is_active,
+                'can_calculate_by_area': cat.unit == 'сотка' and cat.rate_per_unit and cat.rate_per_unit > 0,
+            })
+        
+        return Response(result)
 
 
 class PaymentPeriodViewSet(viewsets.ModelViewSet):
@@ -41,104 +69,80 @@ class PaymentPeriodViewSet(viewsets.ModelViewSet):
     ordering = ['-year', '-quarter']
 
 
-
-    
-def generate_receipts_pdf(receipts_data, owner_name):
+def generate_receipts_pdf(receipts_data, owner_name, period=None, category=None):
     """Генерация PDF с несколькими квитанциями"""
     from weasyprint import HTML
     from django.http import HttpResponse
-    from datetime import date
     
     # Собираем все HTML квитанции
-    combined_html = """
+    receipts_html = []
+    for receipt in receipts_data:
+        if isinstance(receipt, dict) and 'html' in receipt:
+            receipts_html.append(receipt['html'])
+        elif isinstance(receipt, str):
+            receipts_html.append(receipt)
+    
+    combined_html = f"""
     <!DOCTYPE html>
     <html>
     <head>
         <meta charset="UTF-8">
         <title>Квитанции для {owner_name}</title>
         <style>
-            @page {{
-                size: A4;
-                margin: 1cm;
-            }}
-            body {{
-                font-family: Arial, sans-serif;
-            }}
-            .receipt {{
-                page-break-after: always;
-                margin-bottom: 20px;
-            }}
-            .receipt:last-child {{
-                page-break-after: auto;
-            }}
+            @page {{ size: A4; margin: 1cm; }}
+            body {{ font-family: Arial, sans-serif; }}
+            .receipt {{ page-break-after: always; margin-bottom: 20px; }}
+            .receipt:last-child {{ page-break-after: auto; }}
         </style>
     </head>
     <body>
-    {receipts}
+        {''.join(receipts_html)}
     </body>
     </html>
-    """.format(
-        owner_name=owner_name,
-        receipts='\n<div class="receipt">\n'.join([r['html'] for r in receipts_data]) + '\n</div>'
-    )
+    """
     
-    # Генерируем PDF
     pdf_file = HTML(string=combined_html).write_pdf()
-    
     response = HttpResponse(pdf_file, content_type='application/pdf')
-    response['Content-Disposition'] = f'attachment; filename="квитанции_{owner_name}_{date.today()}.pdf"'
+    filename = f"квитанции_{owner_name}_{date.today()}.pdf"
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
     return response
+
 
 def generate_mass_receipts_pdf(receipts_html, period, category):
     """Генерация PDF для массовых квитанций"""
     from weasyprint import HTML
     from django.http import HttpResponse
-    from datetime import date
     
-    combined_html = """
+    combined_html = f"""
     <!DOCTYPE html>
     <html>
     <head>
         <meta charset="UTF-8">
-        <title>Массовые квитанции - {period} - {category}</title>
+        <title>Массовые квитанции - {period} - {category.name}</title>
         <style>
-            @page {{
-                size: A4;
-                margin: 1cm;
-            }}
-            body {{
-                font-family: Arial, sans-serif;
-            }}
-            .receipt-page {{
-                page-break-after: always;
-                margin-bottom: 20px;
-            }}
-            .receipt-page:last-child {{
-                page-break-after: auto;
-            }}
+            @page {{ size: A4; margin: 1cm; }}
+            body {{ font-family: Arial, sans-serif; }}
+            .receipt-page {{ page-break-after: always; margin-bottom: 20px; }}
+            .receipt-page:last-child {{ page-break-after: auto; }}
         </style>
     </head>
     <body>
-    {receipts}
+        {''.join([f'<div class="receipt-page">{html}</div>' for html in receipts_html])}
     </body>
     </html>
-    """.format(
-        period=str(period),
-        category=category.name,
-        receipts='\n<div class="receipt-page">\n'.join(receipts_html) + '\n</div>'
-    )
+    """
     
     pdf_file = HTML(string=combined_html).write_pdf()
-    
     response = HttpResponse(pdf_file, content_type='application/pdf')
     response['Content-Disposition'] = f'attachment; filename="массовые_квитанции_{period.year}_{date.today()}.pdf"'
     return response
+
 
 class AssessmentViewSet(viewsets.ModelViewSet):
     queryset = Assessment.objects.select_related('owner', 'land_plot', 'category', 'period')
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['owner', 'land_plot', 'category', 'period', 'status']
-    search_fields = ['owner__full_name', 'land_plot__plot_number', 'notes']
+    search_fields = ['owner__full_name', 'land_plot__plot_number', 'notes', 'payment_uid']
     ordering_fields = ['amount', 'created_at', 'period__year']
     ordering = ['-created_at']
 
@@ -149,61 +153,94 @@ class AssessmentViewSet(viewsets.ModelViewSet):
             return AssessmentCreateSerializer  
         return AssessmentDetailSerializer
 
+    def create(self, request, *args, **kwargs):
+        """Создание начисления с автоматическим расчётом суммы если amount=0"""
+        data = request.data.copy()
+        
+        # Если сумма не указана или 0 - рассчитываем автоматически
+        if not data.get('amount') or Decimal(str(data.get('amount'))) == 0:
+            category_id = data.get('category')
+            land_plot_id = data.get('land_plot')
+            
+            if category_id and land_plot_id:
+                try:
+                    category = PaymentCategory.objects.get(id=category_id)
+                    land_plot = LandPlot.objects.get(id=land_plot_id)
+                    
+                    if category.unit == 'сотка' and category.rate_per_unit:
+                        area_sotka = land_plot.area_sqm / 100
+                        amount = Decimal(str(area_sotka * float(category.rate_per_unit))).quantize(Decimal('0.01'))
+                        data['amount'] = str(amount)
+                        data['notes'] = f"Авторасчёт: {area_sotka:.2f} соток × {category.rate_per_unit} ₽/сотка"
+                    elif category.default_amount:
+                        data['amount'] = str(category.default_amount)
+                except Exception as e:
+                    pass
+        
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
     @action(detail=False, methods=['post'], url_path='mass-generate')
     def mass_generate_assessments(self, request):
-        """
-        POST /api/assessments/mass-generate/
-        Массовое создание начислений для выбранных владельцев.
-
-        Тело: {
-            "owner_ids": [1, 2, 3],  // массив ID владельцев
-            "period_id": 1,
-            "category_id": 1,
-            "generate_receipts": true,  // опционально
-            "format": "pdf"  // опционально
-        }
-        """
-        from django.db import transaction as db_transaction
-        from users.models import Owner
-        from land.models import LandPlot
-        from django.template.loader import render_to_string
-        from django.http import HttpResponse
-        from datetime import date
-
+        """Массовое создание начислений для выбранных владельцев"""
+        
+        logger.info("=" * 50)
+        logger.info("MASS GENERATE ASSESSMENTS CALLED")
+        logger.info(f"Request data: {request.data}")
+        
         owner_ids = request.data.get('owner_ids', [])
         period_id = request.data.get('period_id')
         category_id = request.data.get('category_id')
         generate_receipts = request.data.get('generate_receipts', False)
         output_format = request.data.get('format', 'json')
+        skip_existing = request.data.get('skip_existing', True) 
+
+        logger.info(f"Params: owner_ids={owner_ids}, period_id={period_id}, category_id={category_id}")
+        logger.info(f"generate_receipts={generate_receipts}, output_format={output_format}")    
 
         if not owner_ids or not period_id or not category_id:
+            logger.error("Missing required parameters")
             return Response(
                 {'detail': 'Укажите owner_ids, period_id и category_id'},
-                status=400
-            )
+                status=status.HTTP_400_BAD_REQUEST
+            )   
 
         try:
             period = PaymentPeriod.objects.get(id=period_id)
             category = PaymentCategory.objects.get(id=category_id)
             owners = Owner.objects.filter(id__in=owner_ids)
+            
+            logger.info(f"Period found: {period}")
+            logger.info(f"Category found: id={category.id}, name={category.name}")
+            logger.info(f"Category unit={category.unit}, rate_per_unit={category.rate_per_unit}, default_amount={category.default_amount}")
+            logger.info(f"Owners count: {owners.count()}")
+            
         except PaymentPeriod.DoesNotExist:
-            return Response({'detail': 'Период не найден'}, status=404)
+            logger.error(f"Period {period_id} not found")
+            return Response({'detail': 'Период не найден'}, status=status.HTTP_404_NOT_FOUND)
         except PaymentCategory.DoesNotExist:
-            return Response({'detail': 'Категория не найдена'}, status=404)
+            logger.error(f"Category {category_id} not found")
+            return Response({'detail': 'Категория не найдена'}, status=status.HTTP_404_NOT_FOUND)   
 
         if not owners.exists():
-            return Response({'detail': 'Владельцы не найдены'}, status=404)
+            logger.error("No owners found")
+            return Response({'detail': 'Владельцы не найдены'}, status=status.HTTP_404_NOT_FOUND)   
 
         results = []
         total_created = 0
-        all_receipts_html = []
+        all_receipts_html = []  
 
         qr_gen = QRCodeGenerator()
         snt_gen = SNTDetailsGenerator()
-        snt_details = snt_gen.get_details()
+        snt_details = snt_gen.get_details() 
 
         with db_transaction.atomic():
             for owner in owners:
+                logger.info(f"Processing owner: {owner.id} - {owner.full_name}")
+                
                 owner_result = {
                     'owner_id': owner.id,
                     'owner_name': owner.full_name,
@@ -211,25 +248,38 @@ class AssessmentViewSet(viewsets.ModelViewSet):
                     'skipped': 0,
                     'assessments': [],
                     'receipts': []
-                }
+                }   
 
                 plots = owner.land_plots.all()
-
-                if not plots.exists():
-                    owner_result['error'] = 'Нет привязанных участков'
-                    results.append(owner_result)
-                    continue
+                logger.info(f"Plots count: {plots.count()}")
                 
                 for plot in plots:
-                    # Расчёт суммы
-                    if category.unit == 'сотка' and category.rate_per_unit:
-                        area_sotka = plot.area_sqm / 100
-                        amount = Decimal(str(area_sotka * float(category.rate_per_unit))).quantize(Decimal('0.01'))
-                        notes = f"Площадь: {plot.area_sqm} м² ({area_sotka:.2f} соток) × {category.rate_per_unit} ₽/сотка"
-                    elif category.default_amount:
+                    logger.info(f"Processing plot: {plot.id} - {plot.plot_number}, area: {plot.area_sqm} sqm")
+                    
+                    # РАСЧЁТ СУММЫ
+                    amount = Decimal('0')
+                    notes = ''
+                    
+                    # Проверяем, как считаем
+                    if category.rate_per_unit and category.rate_per_unit > 0 and category.unit == 'сотка':
+                        area_sotka = Decimal(str(plot.area_sqm)) / Decimal('100')
+                        amount = (area_sotka * category.rate_per_unit).quantize(Decimal('0.01'))
+                        notes = f"{category.name}: {area_sotka:.2f} соток × {category.rate_per_unit} ₽/сотка = {amount} ₽"
+                        logger.info(f"Calculated by area: {area_sotka} * {category.rate_per_unit} = {amount}")
+                        
+                    elif category.default_amount and category.default_amount > 0:
                         amount = category.default_amount
-                        notes = f"Фиксированная сумма: {category.default_amount} ₽"
+                        notes = f"{category.name}: {amount} ₽ (фиксированная сумма)"
+                        logger.info(f"Fixed amount: {amount}")
+                        
                     else:
+                        logger.warning(f"Cannot calculate: rate_per_unit={category.rate_per_unit}, unit={category.unit}, default={category.default_amount}")
+                        owner_result['skipped'] += 1
+                        continue
+                    
+                    if amount <= 0:
+                        logger.warning(f"Amount <= 0, skipping")
+                        owner_result['skipped'] += 1
                         continue
                     
                     # Проверяем существование
@@ -239,64 +289,77 @@ class AssessmentViewSet(viewsets.ModelViewSet):
                         category=category,
                         period=period,
                     ).exists()
-
-                    if not exists and amount > 0:
-                        assessment = Assessment.objects.create(
-                            owner=owner,
-                            land_plot=plot,
-                            category=category,
-                            period=period,
-                            amount=amount,
-                            payment_uid=Assessment.generate_uid(),
-                            notes=notes
-                        )
-
-                        assessment_data = {
-                            'id': assessment.id,
-                            'payment_uid': assessment.payment_uid,
-                            'amount': str(assessment.amount),
-                            'plot_number': plot.plot_number,
-                            'area_sqm': str(plot.area_sqm)
-                        }
-                        owner_result['assessments'].append(assessment_data)
-                        owner_result['created'] += 1
-                        total_created += 1
-
-                        # Генерируем квитанцию
-                        if generate_receipts:
-                            qr_data = qr_gen.generate_qr_data(
-                                owner_name=owner.full_name,
-                                plot_number=plot.plot_number,
-                                amount=assessment.debt,
-                                assessment_id=assessment.id,
-                                period=str(period),
-                                category_name=category.name,
-                            )
-                            qr_image = qr_gen.get_qr_data_uri(qr_data)
-
-                            receipt_html = render_to_string('payments/receipt.html', {
-                                'assessment': assessment,
-                                'assessment_id': assessment.id,
-                                'qr_code': qr_image,
-                                'snt_details': snt_details,
-                                'owner_name': owner.full_name,
-                                'plot_number': plot.plot_number,
-                                'amount': str(assessment.debt),
-                                'uid': assessment.payment_uid,
-                                'due_date': str(period.due_date) if period.due_date else '',
-                            })
-
-                            owner_result['receipts'].append({
-                                'assessment_id': assessment.id,
-                                'payment_uid': assessment.payment_uid,
-                                'plot_number': plot.plot_number,
-                                'html': receipt_html
-                            })
-                            all_receipts_html.append(receipt_html)
-                    else:
+                    
+                    if skip_existing and exists:
+                        logger.info(f"Assessment already exists, skipping")
                         owner_result['skipped'] += 1
+                        continue    
+
+                    # Создаём начисление
+                    logger.info(f"Creating assessment with amount {amount}")
+                    assessment = Assessment.objects.create(
+                        owner=owner,
+                        land_plot=plot,
+                        category=category,
+                        period=period,
+                        amount=amount,
+                        notes=notes
+                    )
+                    # Генерируем UID после создания (чтобы был ID)
+                    assessment.payment_uid = f"SNT-{assessment.id:06d}"
+                    assessment.save(update_fields=['payment_uid'])
+                    
+                    logger.info(f"Created assessment #{assessment.id} with UID {assessment.payment_uid}")   
+
+                    assessment_data = {
+                        'id': assessment.id,
+                        'payment_uid': assessment.payment_uid,
+                        'amount': str(assessment.amount),
+                        'plot_number': plot.plot_number,
+                        'area_sqm': str(plot.area_sqm),
+                        'area_sotka': str(plot.area_sqm / 100),
+                        'calculation': notes,
+                    }
+                    owner_result['assessments'].append(assessment_data)
+                    owner_result['created'] += 1
+                    total_created += 1  
+
+                    # Генерируем квитанцию если нужно
+                    if generate_receipts:
+                        qr_data = qr_gen.generate_qr_data(
+                            owner_name=owner.full_name,
+                            plot_number=plot.plot_number,
+                            amount=assessment.debt,
+                            assessment_id=assessment.id,
+                            period=str(period),
+                            category_name=category.name,
+                        )
+                        qr_image = qr_gen.get_qr_data_uri(qr_data)  
+
+                        receipt_html = render_to_string('payments/receipt.html', {
+                            'assessment': assessment,
+                            'assessment_id': assessment.id,
+                            'qr_code': qr_image,
+                            'snt_details': snt_details,
+                            'owner_name': owner.full_name,
+                            'plot_number': plot.plot_number,
+                            'amount': str(assessment.debt),
+                            'uid': assessment.payment_uid,
+                            'due_date': str(period.due_date) if period.due_date else '',
+                            'purpose': qr_data.split('Purpose=')[-1].split('|')[0] if 'Purpose=' in qr_data else '',
+                            'calculation_details': notes,
+                        })  
+
+                        owner_result['receipts'].append({
+                            'assessment_id': assessment.id,
+                            'payment_uid': assessment.payment_uid,
+                            'plot_number': plot.plot_number,
+                            'html': receipt_html
+                        })
+                        all_receipts_html.append(receipt_html)  
 
                 results.append(owner_result)
+                logger.info(f"Owner result: created={owner_result['created']}, skipped={owner_result['skipped']}")  
 
         response_data = {
             'detail': f'Создано {total_created} начислений',
@@ -304,29 +367,21 @@ class AssessmentViewSet(viewsets.ModelViewSet):
             'owners_processed': len(owners),
             'results': results
         }
+        
+        logger.info(f"Final response: {response_data}") 
 
-        # Если запрошена генерация PDF с квитанциями
         if generate_receipts and output_format == 'pdf' and all_receipts_html:
-            return generate_mass_receipts_pdf(all_receipts_html, period, category)
+            return generate_mass_receipts_pdf(all_receipts_html, period, category)  
 
         if generate_receipts:
             response_data['receipts_count'] = len(all_receipts_html)
-            response_data['receipts_html'] = all_receipts_html if output_format == 'html' else None
+            response_data['receipts_html'] = all_receipts_html if output_format == 'html' else None 
 
         return Response(response_data)
 
     @action(detail=False, methods=['post'], url_path='generate')
     def generate_assessments(self, request):
-        """
-        POST /api/assessments/generate/
-        Генерирует начисления для всех участков за указанный период.
-
-        Тело: {
-            "period_id": 1, 
-            "category_id": 1,
-            "custom_amount": null  // опционально, переопределяет сумму
-        }
-        """
+        """Генерирует начисления для всех участков за указанный период"""
         period_id = request.data.get('period_id')
         category_id = request.data.get('category_id')
         custom_amount = request.data.get('custom_amount')
@@ -334,17 +389,14 @@ class AssessmentViewSet(viewsets.ModelViewSet):
         if not period_id or not category_id:
             return Response(
                 {'detail': 'Укажите period_id и category_id'},
-                status=400
+                status=status.HTTP_400_BAD_REQUEST
             )
 
         try:
             period = PaymentPeriod.objects.get(id=period_id)
             category = PaymentCategory.objects.get(id=category_id)
         except (PaymentPeriod.DoesNotExist, PaymentCategory.DoesNotExist):
-            return Response({'detail': 'Период или категория не найдены'}, status=404)
-
-        from land.models import LandPlot
-        from django.db import transaction
+            return Response({'detail': 'Период или категория не найдены'}, status=status.HTTP_404_NOT_FOUND)
 
         created_count = 0
         assessments_to_create = []
@@ -352,35 +404,19 @@ class AssessmentViewSet(viewsets.ModelViewSet):
         # Получаем все активные участки с владельцами
         plots = LandPlot.objects.filter(status='active').prefetch_related('owners')
 
-        with transaction.atomic():
+        with db_transaction.atomic():
             for plot in plots:
-                owners = plot.owners.all()
-                for owner in owners:
-                    # ======== РАСЧЁТ СУММЫ В ЗАВИСИМОСТИ ОТ КАТЕГОРИИ ========
-
+                owners_list = plot.owners.all()
+                for owner in owners_list:
+                    # ИСПРАВЛЕНО: используем calculate_amount
                     if custom_amount:
-                        # Если переопределена сумма — используем её
                         amount = Decimal(str(custom_amount))
-
-                    elif category.code == 'membership' and category.unit == 'сотка':
-                        # Членские взносы: тариф × площадь в сотках
-                        area_sotka = plot.area_sqm / 100  # Переводим м² в сотки
-                        rate = category.default_amount or category.rate_per_unit
-                        amount = Decimal(str(area_sotka * float(rate))).quantize(Decimal('0.01'))
-
-                    elif category.unit == 'сотка' and category.rate_per_unit:
-                        # Любая другая категория с тарифом за сотку
-                        area_sotka = plot.area_sqm / 100
-                        amount = Decimal(str(area_sotka * float(category.rate_per_unit))).quantize(Decimal('0.01'))
-
-                    elif category.unit == 'кВт·ч' and category.rate_per_unit:
-                        # Электроэнергия — нужно передавать показания отдельно
-                        # Пока пропускаем, т.к. нет данных о потреблении
-                        continue
-
+                        notes = f"Ручная установка: {custom_amount} ₽"
                     else:
-                        # Фиксированная сумма
-                        amount = category.default_amount
+                        amount, notes = category.calculate_amount(land_plot=plot)
+                    
+                    if amount == 0:
+                        continue
 
                     # Проверяем, нет ли уже начисления
                     exists = Assessment.objects.filter(
@@ -390,8 +426,7 @@ class AssessmentViewSet(viewsets.ModelViewSet):
                         period=period,
                     ).exists()
 
-                    if not exists and amount > 0:
-                        # Используем generate_uid для массового создания
+                    if not exists:
                         assessments_to_create.append(
                             Assessment(
                                 owner=owner,
@@ -399,13 +434,12 @@ class AssessmentViewSet(viewsets.ModelViewSet):
                                 category=category,
                                 period=period,
                                 amount=amount,
-                                payment_uid=Assessment.generate_uid(),  # Явно генерируем UID
-                                notes=f"Площадь: {plot.area_sqm} м² ({plot.area_sqm/100:.2f} соток) × {category.default_amount or category.rate_per_unit} ₽/сотка",
+                                payment_uid=Assessment.generate_uid(),
+                                notes=notes,
                             )
                         )
                         created_count += 1
 
-            # Массовое создание (один запрос к БД вместо многих)
             if assessments_to_create:
                 Assessment.objects.bulk_create(assessments_to_create)
 
@@ -417,41 +451,46 @@ class AssessmentViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'], url_path='stats')
     def stats(self, request):
         """Статистика по начислениям"""
-        data = {
-            'total_amount': Assessment.objects.aggregate(s=Sum('amount'))['s'] or 0,
-            'total_paid': Assessment.objects.aggregate(s=Sum('paid_amount'))['s'] or 0,
-            'total_debt': 0,  # Будет рассчитано ниже
-            'by_status': {},
-            'by_category': {},
-        }
-        
-        debt_sum = 0
-        for a in Assessment.objects.filter(status__in=['pending', 'partial', 'overdue']):
-            debt_sum += a.debt
-        data['total_debt'] = debt_sum
-        
         from django.db.models import Count
-        data['by_status'] = dict(
-            Assessment.objects.values_list('status').annotate(c=Count('id'))
-        )
-        data['by_category'] = dict(
-            Assessment.objects.values_list('category__name').annotate(c=Count('id'))
-        )
+        
+        total_amount = Assessment.objects.aggregate(s=Sum('amount'))['s'] or 0
+        total_paid = Assessment.objects.aggregate(s=Sum('paid_amount'))['s'] or 0
+        
+        # Расчёт общей задолженности
+        total_debt = 0
+        for a in Assessment.objects.filter(status__in=['pending', 'partial', 'overdue']):
+            total_debt += a.debt
+        
+        data = {
+            'total_amount': float(total_amount),
+            'total_paid': float(total_paid),
+            'total_debt': float(total_debt),
+            'by_status': dict(
+                Assessment.objects.values_list('status').annotate(c=Count('id'))
+            ),
+            'by_category': dict(
+                Assessment.objects.values_list('category__name').annotate(c=Count('id'))
+            ),
+        }
         
         return Response(data)
 
     @action(detail=True, methods=['post'], url_path='add-payment')
     def add_payment(self, request, pk=None):
-        """
-        POST /api/assessments/{id}/add-payment/
-        Добавить платёж к начислению.
-        Тело: {"amount": 5000, "payment_method": "cash"}
-        """
+        """Добавить платёж к начислению"""
         assessment = self.get_object()
         amount = request.data.get('amount')
         
         if not amount:
-            return Response({'detail': 'Укажите сумму'}, status=400)
+            return Response({'detail': 'Укажите сумму'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            amount = Decimal(str(amount))
+        except:
+            return Response({'detail': 'Неверный формат суммы'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        if amount <= 0:
+            return Response({'detail': 'Сумма должна быть больше 0'}, status=status.HTTP_400_BAD_REQUEST)
         
         payment = Payment.objects.create(
             assessment=assessment,
@@ -459,22 +498,16 @@ class AssessmentViewSet(viewsets.ModelViewSet):
             payment_method=request.data.get('payment_method', 'cash'),
             payment_date=request.data.get('payment_date', date.today()),
             notes=request.data.get('notes', ''),
+            status=Payment.STATUS_PROCESSED,
         )
         
-        return Response(PaymentSerializer(payment).data, status=201)
+        return Response(PaymentSerializer(payment).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['get'], url_path='receipt')
     def get_receipt(self, request, pk=None):
-        """
-        GET /api/assessments/{id}/receipt/
-        Получить данные для квитанции с QR-кодом.
-        
-        Query params:
-        - format: json (по умолчанию) или html
-        """
+        """Получить данные для квитанции с QR-кодом"""
         assessment = self.get_object()
         
-        # Генерируем данные для QR-кода
         qr_gen = QRCodeGenerator()
         qr_data = qr_gen.generate_qr_data(
             owner_name=assessment.owner.full_name,
@@ -485,10 +518,8 @@ class AssessmentViewSet(viewsets.ModelViewSet):
             category_name=assessment.category.name,
         )
         
-        # Генерируем QR-код в base64
         qr_image_data = qr_gen.get_qr_data_uri(qr_data)
         
-        # Получаем реквизиты СНТ
         snt_gen = SNTDetailsGenerator()
         snt_details = snt_gen.get_details()
         
@@ -503,17 +534,21 @@ class AssessmentViewSet(viewsets.ModelViewSet):
             'amount': str(assessment.debt),
             'purpose': qr_data.split('Purpose=')[-1].split('|')[0] if 'Purpose=' in qr_data else '',
             'due_date': str(assessment.period.due_date) if assessment.period.due_date else '',
+            'uid': assessment.payment_uid,
         }
         
         return Response(data)
 
     @action(detail=True, methods=['get'], url_path='receipt-html')
     def get_receipt_html(self, request, pk=None):
-        """Получить HTML-квитанцию"""
+        """Получить HTML-квитанцию с QR-кодом"""
         assessment = self.get_object()
 
+        # Инициализируем генераторы
         qr_gen = QRCodeGenerator()
-        # Правильно генерируем данные для QR
+        snt_gen = SNTDetailsGenerator()
+
+        # Генерируем данные для QR-кода
         qr_data = qr_gen.generate_qr_data(
             owner_name=assessment.owner.full_name,
             plot_number=assessment.land_plot.plot_number,
@@ -522,34 +557,86 @@ class AssessmentViewSet(viewsets.ModelViewSet):
             period=str(assessment.period),
             category_name=assessment.category.name,
         )
+
+        # Генерируем QR-код в base64
         qr_image = qr_gen.get_qr_data_uri(qr_data)
 
-        snt_gen = SNTDetailsGenerator()
+        # Получаем реквизиты СНТ
         snt_details = snt_gen.get_details()
 
-        data = {
+        # Формируем purpose для отображения
+        purpose = (
+            f"Оплата {assessment.category.name} за {assessment.period}. "
+            f"Уч.№{assessment.land_plot.plot_number}, "
+            f"Владелец: {assessment.owner.full_name}, "
+            f"UID:{assessment.payment_uid}. Без НДС."
+        )
+
+        context = {
             'assessment': assessment,
             'assessment_id': assessment.id,
-            'qr_code': qr_image,
+            'qr_code': qr_image,  # Убедитесь, что это не пустая строка
+            'qr_data': qr_data,
             'snt_details': snt_details,
             'owner_name': assessment.owner.full_name,
             'plot_number': assessment.land_plot.plot_number,
             'amount': str(assessment.debt),
             'uid': assessment.payment_uid,
             'due_date': str(assessment.period.due_date) if assessment.period.due_date else '',
+            'purpose': purpose,
         }
 
-        return render(request, 'payments/receipt.html', data)
-    
+        # Добавим отладочную информацию в консоль
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"QR Code generated for assessment {assessment.id}")
+        logger.info(f"QR data length: {len(qr_data)}")
+        logger.info(f"QR image data URI length: {len(qr_image) if qr_image else 0}")
+
+        return render(request, 'payments/receipt.html', context)
+
     @action(detail=True, methods=['get'], url_path='receipt-pdf')
     def get_receipt_pdf(self, request, pk=None):
-        """
-        GET /api/assessments/{id}/receipt-pdf/
-        Скачать квитанцию в PDF (для печати).
-        """
+        """Скачать квитанцию в PDF с использованием reportlab и поддержкой кириллицы"""
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.units import mm
+        from reportlab.pdfgen import canvas
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        from reportlab.lib.utils import ImageReader
+        from io import BytesIO
+        import os
+
         assessment = self.get_object()
-        
-        # Генерируем данные
+
+        # Регистрируем шрифт с поддержкой кириллицы
+        # Ищем системные шрифты
+        font_paths = [
+            "C:/Windows/Fonts/arial.ttf",           # Windows
+            "C:/Windows/Fonts/times.ttf",           # Windows
+            "C:/Windows/Fonts/calibri.ttf",         # Windows
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",  # Linux
+            "/System/Library/Fonts/Arial.ttf",      # macOS
+            "/Library/Fonts/Arial.ttf",             # macOS
+        ]
+
+        font_registered = False
+        for font_path in font_paths:
+            if os.path.exists(font_path):
+                try:
+                    pdfmetrics.registerFont(TTFont('RussianFont', font_path))
+                    font_registered = True
+                    print(f"Font loaded from: {font_path}")
+                    break
+                except Exception as e:
+                    print(f"Failed to load font from {font_path}: {e}")
+                    continue
+                
+        if not font_registered:
+            # Если не нашли шрифт, используем стандартный но с предупреждением
+            print("WARNING: No Cyrillic font found, using default (may show squares)")
+
+        # Генерируем QR-код
         qr_gen = QRCodeGenerator()
         qr_data = qr_gen.generate_qr_data(
             owner_name=assessment.owner.full_name,
@@ -559,52 +646,111 @@ class AssessmentViewSet(viewsets.ModelViewSet):
             period=str(assessment.period),
             category_name=assessment.category.name,
         )
-        qr_image_data = qr_gen.get_qr_data_uri(qr_data)
-        
+
+        # Получаем изображение QR-кода
+        qr_image_bytes = qr_gen.generate_qr_image(qr_data)
+
+        # Создаём PDF
+        buffer = BytesIO()
+        c = canvas.Canvas(buffer, pagesize=A4)
+        width, height = A4
+
+        # Устанавливаем шрифт с поддержкой кириллицы
+        if font_registered:
+            c.setFont("RussianFont", 16)
+        else:
+            c.setFont("Helvetica", 16)
+
+        # Заголовок
+        c.drawString(50, height - 50, f"Квитанция № {assessment.payment_uid}")
+
+        if font_registered:
+            c.setFont("RussianFont", 12)
+        else:
+            c.setFont("Helvetica", 12)
+
+        c.drawString(50, height - 80, f'СНТ "Строитель-43"')
+        c.drawString(50, height - 100, f"Дата: {date.today().strftime('%d.%m.%Y')}")
+
+        # Плательщик
+        if font_registered:
+            c.setFont("RussianFont", 12)
+        else:
+            c.setFont("Helvetica-Bold", 12)
+        c.drawString(50, height - 140, "Плательщик:")
+
+        if font_registered:
+            c.setFont("RussianFont", 11)
+        else:
+            c.setFont("Helvetica", 11)
+        c.drawString(50, height - 160, f"ФИО: {assessment.owner.full_name}")
+        c.drawString(50, height - 175, f"Участок: №{assessment.land_plot.plot_number}")
+        c.drawString(50, height - 190, f"Период: {assessment.period}")
+
+        # Реквизиты получателя
         snt_gen = SNTDetailsGenerator()
         snt_details = snt_gen.get_details()
-        
-        # Рендерим HTML шаблон
-        from django.shortcuts import render
-        from django.http import HttpResponse
-        
-        html = render(request, 'payments/receipt_pdf.html', {
-            'assessment': assessment,
-            'qr_code': qr_image_data,
-            'snt_details': snt_details,
-            'owner_name': assessment.owner.full_name,
-            'plot_number': assessment.land_plot.plot_number,
-            'amount': str(assessment.debt),
-            'due_date': str(assessment.period.due_date) if assessment.period.due_date else '',
-        }).content.decode('utf-8')
-        
-        try:
-            # Пробуем использовать WeasyPrint для PDF
-            from weasyprint import HTML
-            pdf_file = HTML(string=html).write_pdf()
-            
-            response = HttpResponse(pdf_file, content_type='application/pdf')
-            response['Content-Disposition'] = f'attachment; filename="квитанция_{assessment.id}.pdf"'
-            return response
-            
-        except ImportError:
-            # Если WeasyPrint не установлен, возвращаем HTML
-            response = HttpResponse(html)
-            response['Content-Type'] = 'text/html'
-            response['Content-Disposition'] = f'attachment; filename="квитанция_{assessment.id}.html"'
-            return response
+
+        if font_registered:
+            c.setFont("RussianFont", 12)
+        else:
+            c.setFont("Helvetica-Bold", 12)
+        c.drawString(50, height - 230, "Получатель платежа:")
+
+        if font_registered:
+            c.setFont("RussianFont", 10)
+        else:
+            c.setFont("Helvetica", 10)
+        c.drawString(50, height - 250, f"Получатель: {snt_details['name']}")
+        c.drawString(50, height - 265, f"ИНН: {snt_details['inn']}")
+        c.drawString(50, height - 280, f"Счёт: {snt_details['account']}")
+        c.drawString(50, height - 295, f"Банк: {snt_details['bank_name']}")
+        c.drawString(50, height - 310, f"БИК: {snt_details['bank_bik']}")
+        c.drawString(50, height - 325, f"Корр. счёт: {snt_details['bank_corr']}")
+
+        # Сумма
+        if font_registered:
+            c.setFont("RussianFont", 14)
+        else:
+            c.setFont("Helvetica-Bold", 14)
+        c.setFillColorRGB(0.2, 0.5, 0.2)
+        c.drawString(50, height - 370, f"Сумма к оплате: {assessment.debt} ₽")
+        c.setFillColorRGB(0, 0, 0)
+
+        # QR-код
+        if qr_image_bytes:
+            qr_buffer = BytesIO(qr_image_bytes)
+            qr_img = ImageReader(qr_buffer)
+            c.drawImage(qr_img, width - 150, height - 200, width=100, height=100)
+            if font_registered:
+                c.setFont("RussianFont", 8)
+            else:
+                c.setFont("Helvetica", 8)
+            c.drawString(width - 140, height - 215, "Отсканируйте для оплаты")
+
+        # Подпись
+        if font_registered:
+            c.setFont("RussianFont", 10)
+        else:
+            c.setFont("Helvetica", 10)
+        c.drawString(50, 80, f"{snt_details['chairman']} _________________")
+        c.drawString(50, 50, "При оплате через Сбербанк Онлайн сканируйте QR-код")
+
+        c.save()
+        buffer.seek(0)
+
+        response = HttpResponse(buffer, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="квитанция_{assessment.payment_uid}.pdf"'
+        return response
 
     @action(detail=False, methods=['get'], url_path='owner-receipts')
     def get_owner_receipts(self, request):
-        """
-        GET /api/assessments/owner-receipts/?owner_id=1&period_id=1
-        Получить все квитанции владельца за период (для личного кабинета).
-        """
+        """Получить все квитанции владельца за период"""
         owner_id = request.query_params.get('owner_id')
         period_id = request.query_params.get('period_id')
         
         if not owner_id:
-            return Response({'detail': 'Укажите owner_id'}, status=400)
+            return Response({'detail': 'Укажите owner_id'}, status=status.HTTP_400_BAD_REQUEST)
         
         assessments = Assessment.objects.filter(owner_id=owner_id)
         if period_id:
@@ -638,27 +784,14 @@ class AssessmentViewSet(viewsets.ModelViewSet):
                 'qr_data': qr_data,
                 'snt_details': snt_details,
                 'due_date': str(assessment.period.due_date) if assessment.period.due_date else '',
+                'payment_uid': assessment.payment_uid,
             })
         
         return Response(receipts)
 
     @action(detail=False, methods=['post'], url_path='generate-for-owner')
     def generate_for_owner(self, request):
-        """
-        POST /api/assessments/generate-for-owner/
-        Генерирует начисления для конкретного владельца и возвращает квитанции.
-
-        Тело: {
-            "owner_id": 1,
-            "period_id": 1,
-            "category_id": 1,
-            "generate_receipts": true  // опционально, сразу сгенерировать квитанции
-        }
-        """
-        from django.db import transaction as db_transaction
-        from users.models import Owner
-        from django.template.loader import render_to_string
-        
+        """Генерирует начисления для конкретного владельца"""
         owner_id = request.data.get('owner_id')
         period_id = request.data.get('period_id')
         category_id = request.data.get('category_id')
@@ -667,7 +800,7 @@ class AssessmentViewSet(viewsets.ModelViewSet):
         if not all([owner_id, period_id, category_id]):
             return Response(
                 {'detail': 'Укажите owner_id, period_id и category_id'}, 
-                status=400
+                status=status.HTTP_400_BAD_REQUEST
             )
 
         try:
@@ -675,11 +808,11 @@ class AssessmentViewSet(viewsets.ModelViewSet):
             period = PaymentPeriod.objects.get(id=period_id)
             category = PaymentCategory.objects.get(id=category_id)
         except Owner.DoesNotExist:
-            return Response({'detail': 'Владелец не найден'}, status=404)
+            return Response({'detail': 'Владелец не найден'}, status=status.HTTP_404_NOT_FOUND)
         except PaymentPeriod.DoesNotExist:
-            return Response({'detail': 'Период не найден'}, status=404)
+            return Response({'detail': 'Период не найден'}, status=status.HTTP_404_NOT_FOUND)
         except PaymentCategory.DoesNotExist:
-            return Response({'detail': 'Категория не найдена'}, status=404)
+            return Response({'detail': 'Категория не найдена'}, status=status.HTTP_404_NOT_FOUND)
 
         assessments_created = []
         plots = owner.land_plots.all()
@@ -688,28 +821,19 @@ class AssessmentViewSet(viewsets.ModelViewSet):
             return Response({
                 'detail': f'У владельца {owner.full_name} нет привязанных участков',
                 'assessments': []
-            }, status=200)
+            }, status=status.HTTP_200_OK)
 
         qr_gen = QRCodeGenerator()
         snt_gen = SNTDetailsGenerator()
         snt_details = snt_gen.get_details()
-
         receipts_data = []
 
         with db_transaction.atomic():
             for plot in plots:
-                # Расчёт суммы в зависимости от категории
-                if category.unit == 'сотка' and category.rate_per_unit:
-                    # Тариф за сотку
-                    area_sotka = plot.area_sqm / 100
-                    amount = Decimal(str(area_sotka * float(category.rate_per_unit))).quantize(Decimal('0.01'))
-                    notes = f"Площадь: {plot.area_sqm} м² ({area_sotka:.2f} соток) × {category.rate_per_unit} ₽/сотка"
-                elif category.default_amount:
-                    # Фиксированная сумма
-                    amount = category.default_amount
-                    notes = f"Фиксированная сумма: {category.default_amount} ₽"
-                else:
-                    # Пропускаем, если сумма не определена
+                # ИСПРАВЛЕНО: используем calculate_amount
+                amount, notes = category.calculate_amount(land_plot=plot)
+                
+                if amount == 0:
                     continue
                 
                 # Проверяем, нет ли уже начисления
@@ -720,7 +844,7 @@ class AssessmentViewSet(viewsets.ModelViewSet):
                     period=period,
                 ).exists()
 
-                if not exists and amount > 0:
+                if not exists:
                     assessment = Assessment.objects.create(
                         owner=owner,
                         land_plot=plot,
@@ -736,13 +860,13 @@ class AssessmentViewSet(viewsets.ModelViewSet):
                         'payment_uid': assessment.payment_uid,
                         'amount': str(assessment.amount),
                         'plot_number': plot.plot_number,
-                        'area_sqm': str(plot.area_sqm)
+                        'area_sqm': str(plot.area_sqm),
+                        'area_sotka': str(plot.area_sqm / 100),
+                        'calculation': notes,
                     }
                     assessments_created.append(assessment_data)
 
-                    # Генерируем квитанцию, если нужно
                     if generate_receipts:
-                        # Генерируем QR-код
                         qr_data = qr_gen.generate_qr_data(
                             owner_name=owner.full_name,
                             plot_number=plot.plot_number,
@@ -763,6 +887,8 @@ class AssessmentViewSet(viewsets.ModelViewSet):
                             'amount': str(assessment.debt),
                             'uid': assessment.payment_uid,
                             'due_date': str(period.due_date) if period.due_date else '',
+                            'purpose': qr_data.split('Purpose=')[-1].split('|')[0] if 'Purpose=' in qr_data else '',
+                            'calculation_details': notes,
                         })
 
                         receipts_data.append({
@@ -780,34 +906,33 @@ class AssessmentViewSet(viewsets.ModelViewSet):
 
         if generate_receipts:
             response_data['receipts'] = receipts_data
-
-            # Если запрошен PDF, генерируем его
             if request.data.get('format') == 'pdf':
                 return generate_receipts_pdf(receipts_data, owner.full_name)
 
         return Response(response_data)
 
+
 @csrf_exempt
 @require_http_methods(["POST"])
 def generate_combined_pdf(request):
     """Генерация объединённого PDF из HTML"""
-    import json
-    from weasyprint import HTML
-    from django.http import HttpResponse
-    from datetime import date
-    
     try:
         data = json.loads(request.body)
         html_content = data.get('html', '')
         
+        if not html_content:
+            return JsonResponse({'error': 'HTML content is empty'}, status=400)
+        
+        from weasyprint import HTML
         pdf_file = HTML(string=html_content).write_pdf()
         
         response = HttpResponse(pdf_file, content_type='application/pdf')
         response['Content-Disposition'] = f'attachment; filename="combined_receipts_{date.today()}.pdf"'
         return response
+    except ImportError:
+        return JsonResponse({'error': 'WeasyPrint not installed'}, status=500)
     except Exception as e:
-        return HttpResponse(json.dumps({'error': str(e)}), status=500, content_type='application/json')
-    
+        return JsonResponse({'error': str(e)}, status=500)
     
     
 class PaymentViewSet(viewsets.ModelViewSet):
@@ -819,14 +944,10 @@ class PaymentViewSet(viewsets.ModelViewSet):
     serializer_class = PaymentSerializer
     filter_backends = [DjangoFilterBackend, OrderingFilter, SearchFilter]
     filterset_fields = [
-        'assessment', 
-        'payment_method', 
-        'status', 
-        'payment_date',
-        'assessment__owner',      
-        'assessment__land_plot',  
+        'assessment', 'payment_method', 'status', 'payment_date',
+        'assessment__owner', 'assessment__land_plot',
     ]
-    search_fields = ['assessment__owner__full_name', 'payment_purpose']
+    search_fields = ['assessment__owner__full_name', 'payment_purpose', 'matched_uid']
     ordering = ['-payment_date']
 
 
@@ -839,18 +960,12 @@ class BankStatementViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'], url_path='import')
     def import_statement(self, request):
-        """
-        POST /api/bank-statements/import/
-        Импорт банковской выписки из файла.
-        """
-        import logging
-        logger = logging.getLogger('payments')
-        
+        """Импорт банковской выписки из файла"""
         file = request.FILES.get('file')
         if not file:
-            return Response({'detail': 'Загрузите файл'}, status=400)
+            return Response({'detail': 'Загрузите файл'}, status=status.HTTP_400_BAD_REQUEST)
         
-        logger.info(f'Получен файл: {file.name}, размер: {file.size} байт, тип: {file.content_type}')
+        logger.info(f'Получен файл: {file.name}, размер: {file.size} байт')
         
         # Сохраняем файл
         bank_name = request.data.get('bank_name', '')
@@ -859,9 +974,8 @@ class BankStatementViewSet(viewsets.ModelViewSet):
             account_number=request.data.get('account_number', ''),
             statement_date=date.today(),
             file_original=file,
+            status=BankStatement.STATUS_IMPORTED,
         )
-        
-        logger.info(f'Создана запись выписки #{statement.id}, путь: {statement.file_original.path}')
         
         # Парсим файл
         parser = BankStatementParser(bank_name if bank_name else None)
@@ -869,75 +983,26 @@ class BankStatementViewSet(viewsets.ModelViewSet):
         try:
             transactions_data = parser.parse_file(statement.file_original.path)
             logger.info(f'Распарсено транзакций: {len(transactions_data)}')
-            
-            # Логируем первые 3 транзакции
-            for i, t in enumerate(transactions_data[:3]):
-                logger.info(f'Транзакция #{i}: дата={t.get("transaction_date")}, сумма={t.get("amount")}, плательщик={t.get("payer_name", "")[:50]}')
-                
         except Exception as e:
             logger.error(f'Ошибка парсинга: {e}', exc_info=True)
             statement.status = BankStatement.STATUS_ERROR
             statement.notes = str(e)
             statement.save()
-            
-            # Пробуем извлечь текст для отладки
-            debug_text = ""
-            try:
-                import pdfplumber
-                with pdfplumber.open(statement.file_original.path) as pdf:
-                    for page in pdf.pages:
-                        t = page.extract_text()
-                        if t:
-                            debug_text += t + "\n"
-            except:
-                try:
-                    from PyPDF2 import PdfReader
-                    reader = PdfReader(statement.file_original.path)
-                    for page in reader.pages:
-                        t = page.extract_text()
-                        if t:
-                            debug_text += t + "\n"
-                except:
-                    debug_text = "Не удалось извлечь текст"
-            
             return Response({
                 'detail': f'Ошибка парсинга: {str(e)}',
                 'statement_id': statement.id,
                 'matched': 0,
-                'debug_text': debug_text[:500] if debug_text else 'Текст не извлечён',
-            }, status=400)
+            }, status=status.HTTP_400_BAD_REQUEST)
         
         if not transactions_data:
-            # Пробуем извлечь текст для отладки
-            debug_text = ""
-            try:
-                import pdfplumber
-                with pdfplumber.open(statement.file_original.path) as pdf:
-                    for page in pdf.pages:
-                        t = page.extract_text()
-                        if t:
-                            debug_text += t + "\n"
-            except:
-                try:
-                    from PyPDF2 import PdfReader
-                    reader = PdfReader(statement.file_original.path)
-                    for page in reader.pages:
-                        t = page.extract_text()
-                        if t:
-                            debug_text += t + "\n"
-                except:
-                    debug_text = "Не удалось извлечь текст"
-            
             statement.status = BankStatement.STATUS_ERROR
             statement.notes = 'Не удалось извлечь транзакции из файла'
             statement.save()
-            
             return Response({
-                'detail': 'Не найдено транзакций в файле. Проверьте формат выписки.',
+                'detail': 'Не найдено транзакций в файле',
                 'statement_id': statement.id,
                 'matched': 0,
-                'debug_text': debug_text[:1000] if debug_text else 'Текст не извлечён',
-            }, status=400)
+            }, status=status.HTTP_400_BAD_REQUEST)
         
         # Создаём транзакции
         matcher = PaymentMatcher()
@@ -961,13 +1026,14 @@ class BankStatementViewSet(viewsets.ModelViewSet):
                     owner, confidence = match
                     bank_trans.matched_owner = owner
                     bank_trans.match_confidence = confidence
-                    bank_trans.is_matched = confidence >= 50
                     
                     if confidence >= 50:
+                        bank_trans.is_matched = True
                         assessment = matcher.match_assessment(
                             owner, trans_data['amount'], trans_data.get('payment_purpose', '')
                         )
                         if assessment:
+                            # Проверяем, не создан ли уже платёж для этой транзакции
                             payment = Payment.objects.create(
                                 assessment=assessment,
                                 amount=trans_data['amount'],
@@ -980,7 +1046,6 @@ class BankStatementViewSet(viewsets.ModelViewSet):
                                 status=Payment.STATUS_PROCESSED,
                             )
                             bank_trans.matched_payment = payment
-                            bank_trans.is_matched = True
                             matched_count += 1
                     
                     bank_trans.save()
@@ -990,8 +1055,6 @@ class BankStatementViewSet(viewsets.ModelViewSet):
         statement.status = BankStatement.STATUS_PROCESSED
         statement.save()
         
-        logger.info(f'Импорт завершён: {len(transactions_data)} транзакций, {matched_count} сопоставлено')
-        
         return Response({
             'detail': f'Импортировано {len(transactions_data)} транзакций',
             'statement_id': statement.id,
@@ -1000,63 +1063,57 @@ class BankStatementViewSet(viewsets.ModelViewSet):
 
 
 class BankTransactionViewSet(viewsets.ModelViewSet):
-    queryset = BankTransaction.objects.select_related('statement', 'matched_owner')
+    queryset = BankTransaction.objects.select_related('statement', 'matched_owner', 'matched_payment')
     serializer_class = BankTransactionSerializer
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_fields = ['statement', 'is_matched', 'matched_owner']
     ordering = ['-transaction_date']
 
+
 class QuickPaymentViewSet(viewsets.ViewSet):
     """ViewSet для быстрой оплаты через QR"""
     
-    permission_classes = []  # Доступно всем
+    permission_classes = []
     
     @action(detail=False, methods=['get'], url_path='verify/(?P<assessment_id>\\d+)')
     def verify_payment(self, request, assessment_id=None):
-        """
-        GET /api/quick-payment/verify/{assessment_id}/
-        Проверить статус оплаты по ID начисления.
-        Используется после оплаты через банк.
-        """
+        """Проверить статус оплаты по ID начисления"""
         try:
             assessment = Assessment.objects.get(id=assessment_id)
         except Assessment.DoesNotExist:
-            return Response({'status': 'not_found'}, status=404)
+            return Response({'status': 'not_found'}, status=status.HTTP_404_NOT_FOUND)
         
         return Response({
             'assessment_id': assessment.id,
             'status': assessment.status,
+            'status_display': assessment.get_status_display(),
             'amount': str(assessment.amount),
             'paid': str(assessment.paid_amount),
             'debt': str(assessment.debt),
+            'payment_uid': assessment.payment_uid,
         })
     
     @action(detail=False, methods=['post'], url_path='match-payment')
     def match_payment(self, request):
-        """
-        POST /api/quick-payment/match-payment/
-        Ручное сопоставление платежа (если автоматика не сработала).
-        
-        Тело: {
-            "transaction_id": "12345",
-            "assessment_id": 1,
-            "amount": 5000
-        }
-        """
-        from .models import BankTransaction, Payment
-        
+        """Ручное сопоставление платежа"""
         transaction_id = request.data.get('transaction_id')
         assessment_id = request.data.get('assessment_id')
         amount = request.data.get('amount')
         
         if not all([transaction_id, assessment_id, amount]):
-            return Response({'detail': 'Все поля обязательны'}, status=400)
+            return Response({'detail': 'Все поля обязательны'}, status=status.HTTP_400_BAD_REQUEST)
         
         try:
             assessment = Assessment.objects.get(id=assessment_id)
             bank_trans = BankTransaction.objects.get(id=transaction_id)
-        except (Assessment.DoesNotExist, BankTransaction.DoesNotExist):
-            return Response({'detail': 'Начисление или транзакция не найдены'}, status=404)
+        except Assessment.DoesNotExist:
+            return Response({'detail': 'Начисление не найдено'}, status=status.HTTP_404_NOT_FOUND)
+        except BankTransaction.DoesNotExist:
+            return Response({'detail': 'Транзакция не найдена'}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Проверяем, не создан ли уже платёж
+        if bank_trans.matched_payment:
+            return Response({'detail': 'К этой транзакции уже привязан платёж'}, status=status.HTTP_400_BAD_REQUEST)
         
         # Создаём платёж
         payment = Payment.objects.create(
@@ -1081,8 +1138,29 @@ class QuickPaymentViewSet(viewsets.ViewSet):
         return Response({
             'detail': 'Платёж успешно сопоставлен',
             'payment_id': payment.id,
+            'payment': PaymentSerializer(payment).data,
         })
+    
+    @action(detail=False, methods=['get'], url_path='by-uid/(?P<uid>[^/.]+)')
+    def get_by_uid(self, request, uid=None):
+        """Поиск начисления по UID из квитанции"""
+        try:
+            assessment = Assessment.objects.get(payment_uid=uid)
+        except Assessment.DoesNotExist:
+            return Response({'detail': 'Начисление не найдено'}, status=status.HTTP_404_NOT_FOUND)
         
+        return Response({
+            'assessment_id': assessment.id,
+            'payment_uid': assessment.payment_uid,
+            'owner_name': assessment.owner.full_name,
+            'plot_number': assessment.land_plot.plot_number,
+            'amount': str(assessment.amount),
+            'debt': str(assessment.debt),
+            'status': assessment.status,
+            'status_display': assessment.get_status_display(),
+        })
+
+
 # Веб-представления
 class PaymentsDashboardView(View):
     def get(self, request):
@@ -1097,7 +1175,7 @@ class AssessmentsListView(View):
 class BankImportView(View):
     def get(self, request):
         return render(request, 'payments/bank_import.html', {'active_page': 'payments'})
-    
+
 
 class ReceiptTemplateViewSet(viewsets.ModelViewSet):
     queryset = ReceiptTemplate.objects.prefetch_related('lines__category')
@@ -1117,25 +1195,14 @@ class ConsolidatedAssessmentViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'], url_path='generate-from-template')
     def generate_from_template(self, request):
-        """
-        POST /api/consolidated/generate-from-template/
-        Создаёт составную квитанцию по шаблону.
-        
-        Тело: {
-            "template_id": 1,
-            "owner_id": 1,
-            "land_plot_id": 5,
-            "period_id": 1,
-            "electricity_quantity": 200  // опционально
-        }
-        """
+        """Создаёт составную квитанцию по шаблону"""
         template_id = request.data.get('template_id')
         owner_id = request.data.get('owner_id')
         land_plot_id = request.data.get('land_plot_id')
         period_id = request.data.get('period_id')
 
         if not all([template_id, owner_id, land_plot_id, period_id]):
-            return Response({'detail': 'Все поля обязательны'}, status=400)
+            return Response({'detail': 'Все поля обязательны'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
             template = ReceiptTemplate.objects.prefetch_related('lines__category').get(id=template_id)
@@ -1143,7 +1210,7 @@ class ConsolidatedAssessmentViewSet(viewsets.ModelViewSet):
             land_plot = LandPlot.objects.get(id=land_plot_id)
             period = PaymentPeriod.objects.get(id=period_id)
         except Exception as e:
-            return Response({'detail': str(e)}, status=404)
+            return Response({'detail': str(e)}, status=status.HTTP_404_NOT_FOUND)
 
         # Создаём составное начисление
         consolidated = ConsolidatedAssessment.objects.create(
@@ -1154,26 +1221,25 @@ class ConsolidatedAssessmentViewSet(viewsets.ModelViewSet):
         )
 
         total = 0
-        lines_data = request.data.get('manual_lines', {})  # {"category_id": quantity}
+        lines_data = request.data.get('manual_lines', {})
 
         for line_template in template.lines.all():
             category = line_template.category
+            quantity = Decimal('1')
+            rate = line_template.amount
 
             if line_template.calc_type == 'fixed':
                 quantity = 1
-                rate = line_template.amount
                 description = f"{category.name}"
             else:  # per_unit
                 if line_template.auto_quantity:
                     if category.unit == 'сотка':
-                        quantity = land_plot.area_sqm / 100
+                        quantity = Decimal(str(land_plot.area_sqm / 100))
                     else:
                         quantity = 1
                 else:
-                    # Ручной ввод количества
                     quantity = Decimal(str(lines_data.get(str(category.id), line_template.manual_quantity)))
                 
-                rate = line_template.amount
                 description = f"{category.name} ({quantity} {category.unit})"
 
             line_amount = quantity * rate
@@ -1193,7 +1259,7 @@ class ConsolidatedAssessmentViewSet(viewsets.ModelViewSet):
         consolidated.total_amount = total
         consolidated.save()
 
-        return Response(ConsolidatedAssessmentSerializer(consolidated).data, status=201)
+        return Response(ConsolidatedAssessmentSerializer(consolidated).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['get'], url_path='receipt')
     def get_consolidated_receipt(self, request, pk=None):
@@ -1202,7 +1268,6 @@ class ConsolidatedAssessmentViewSet(viewsets.ModelViewSet):
 
         qr_gen = QRCodeGenerator()
 
-        # Формируем назначение платежа со всеми строками
         lines_desc = []
         for line in consolidated.lines.all():
             lines_desc.append(f"{line.description}: {line.amount} ₽")
@@ -1215,11 +1280,10 @@ class ConsolidatedAssessmentViewSet(viewsets.ModelViewSet):
             + f"UID:{consolidated.payment_uid}. Без НДС."
         )[:210]
 
-        # Генерируем QR вручную для составного
         snt_gen = SNTDetailsGenerator()
         snt_details = snt_gen.get_details()
 
-        # Ручной QR
+        # Генерируем QR
         fields = [
             "ST00012",
             f"Name={snt_details['name'][:160]}",
@@ -1266,11 +1330,10 @@ class ConsolidatedAssessmentViewSet(viewsets.ModelViewSet):
             ],
             'qr_code': qr_code,
             'snt_details': snt_details,
+            'purpose': purpose,
         }
 
         if request.query_params.get('format') == 'html':
             return render(request, 'payments/consolidated_receipt.html', data)
 
         return Response(data)
-    
-    
