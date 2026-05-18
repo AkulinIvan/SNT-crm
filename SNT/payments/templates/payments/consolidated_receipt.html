@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Квитанция №{{ uid }}</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; background: #f5f5f5; padding: 20px; }
+        .receipt { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .receipt-header { text-align: center; border-bottom: 2px solid #2c7a47; padding-bottom: 15px; margin-bottom: 20px; }
+        .receipt-header h2 { color: #2c7a47; }
+        .section { margin-bottom: 20px; }
+        .section h3 { font-size: 1rem; margin-bottom: 10px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 15px; }
+        table th, table td { padding: 8px; text-align: left; border-bottom: 1px solid #eee; font-size: 0.9rem; }
+        table th { color: #666; font-weight: 600; }
+        table td { font-weight: 500; }
+        .total { font-size: 1.2rem; font-weight: 700; color: #2c7a47; text-align: right; }
+        .qr-section { text-align: center; padding: 20px; }
+        .qr-section img { max-width: 200px; }
+        .field { display: flex; justify-content: space-between; padding: 6px 0; font-size: 0.9rem; }
+        .field-label { color: #666; }
+        .field-value { font-weight: 600; }
+        .actions { text-align: center; margin-top: 20px; }
+        .btn { display: inline-block; padding: 10px 20px; background: #2c7a47; color: white; text-decoration: none; border-radius: 5px; margin: 0 5px; cursor: pointer; }
+        @media print { body { background: white; padding: 0; } .receipt { box-shadow: none; } .actions { display: none; } }
+    </style>
+</head>
+<body>
+    <div class="receipt">
+        <div class="receipt-header">
+            <h2>{{ snt_details.name }}</h2>
+            <p>Квитанция № {{ uid }}</p>
+            <p>Период: {{ period }}</p>
+        </div>
+
+        <div class="section">
+            <h3>Плательщик</h3>
+            <div class="field"><span class="field-label">ФИО:</span><span class="field-value">{{ owner_name }}</span></div>
+            <div class="field"><span class="field-label">Участок:</span><span class="field-value">№{{ plot_number }}</span></div>
+        </div>
+
+        <div class="section">
+            <h3>Расчёт</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Наименование</th>
+                        <th>Кол-во</th>
+                        <th>Ед.</th>
+                        <th>Тариф</th>
+                        <th>Сумма</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for line in lines %}
+                    <tr>
+                        <td>{{ line.description }}</td>
+                        <td>{{ line.quantity }}</td>
+                        <td>{{ line.unit }}</td>
+                        <td>{{ line.rate }} ₽</td>
+                        <td><strong>{{ line.amount }} ₽</strong></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            <div class="total">Итого к оплате: {{ debt }} ₽</div>
+        </div>
+
+        <div class="section">
+            <h3>Реквизиты</h3>
+            <div class="field"><span>Получатель:</span><span class="field-value">{{ snt_details.name }}</span></div>
+            <div class="field"><span>ИНН:</span><span class="field-value">{{ snt_details.inn }}</span></div>
+            <div class="field"><span>Счёт:</span><span class="field-value">{{ snt_details.account }}</span></div>
+            <div class="field"><span>Банк:</span><span class="field-value">{{ snt_details.bank_name }}</span></div>
+            <div class="field"><span>БИК:</span><span class="field-value">{{ snt_details.bank_bik }}</span></div>
+        </div>
+
+        <div class="qr-section">
+            {% if qr_code %}
+                <img src="{{ qr_code }}" alt="QR-код">
+                <p>Отсканируйте для оплаты через банк</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="actions">
+        <button class="btn" onclick="window.print()">🖨️ Распечатать</button>
+        <a href="/" class="btn" style="background: #666;">↩ Назад</a>
+    </div>
+</body>
+</html>

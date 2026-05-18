@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from .models import (
-    PaymentCategory, PaymentPeriod, Assessment,
-    Payment, BankStatement, BankTransaction
+    ConsolidatedAssessment, ConsolidatedAssessmentLine, PaymentCategory, PaymentPeriod, Assessment,
+    Payment, BankStatement, BankTransaction, ReceiptTemplate, ReceiptTemplateLine
 )
 
 
@@ -101,3 +101,42 @@ class AssessmentCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Assessment
         fields = ['owner', 'land_plot', 'category', 'period', 'amount', 'notes']
+        
+
+class ReceiptTemplateLineSerializer(serializers.ModelSerializer):
+    category_name = serializers.CharField(source='category.name', read_only=True)
+
+    class Meta:
+        model = ReceiptTemplateLine
+        fields = ['id', 'category', 'category_name', 'calc_type', 'amount', 
+                  'auto_quantity', 'manual_quantity', 'order']
+
+
+class ReceiptTemplateSerializer(serializers.ModelSerializer):
+    lines = ReceiptTemplateLineSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = ReceiptTemplate
+        fields = ['id', 'name', 'description', 'is_active', 'lines', 'created_at']
+
+
+class ConsolidatedAssessmentLineSerializer(serializers.ModelSerializer):
+    category_name = serializers.CharField(source='category.name', read_only=True)
+
+    class Meta:
+        model = ConsolidatedAssessmentLine
+        fields = ['id', 'category', 'category_name', 'description', 
+                  'quantity', 'unit', 'rate', 'amount', 'order']
+
+
+class ConsolidatedAssessmentSerializer(serializers.ModelSerializer):
+    owner_name = serializers.CharField(source='owner.full_name', read_only=True)
+    plot_number = serializers.CharField(source='land_plot.plot_number', read_only=True)
+    lines = ConsolidatedAssessmentLineSerializer(many=True, read_only=True)
+    debt = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+
+    class Meta:
+        model = ConsolidatedAssessment
+        fields = ['id', 'owner', 'owner_name', 'land_plot', 'plot_number',
+                  'period', 'total_amount', 'paid_amount', 'debt', 'status',
+                  'payment_uid', 'lines', 'created_at']

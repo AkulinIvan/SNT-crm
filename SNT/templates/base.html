@@ -914,7 +914,19 @@
                         <span class="icon">🗺️</span> Карта СНТ
                     </a>
                 </div>
-
+                <!-- РАЗДЕЛ "ФИНАНСЫ" -->
+                <div class="nav-section">
+                    <div class="nav-section-title">Финансы</div>
+                    <a href="/payments/" class="nav-link {% if active_page == 'payments' %}active{% endif %}">
+                        <span class="icon">💰</span> Платежи
+                    </a>
+                    <a href="/payments/assessments/" class="nav-link {% if active_page == 'assessments' %}active{% endif %}">
+                        <span class="icon">📋</span> Начисления
+                    </a>
+                    <a href="/payments/import/" class="nav-link {% if active_page == 'bank-import' %}active{% endif %}">
+                        <span class="icon">🏦</span> Импорт из банка
+                    </a>
+                </div>
                 {% if user.is_authenticated and user.is_admin %}
                 <div class="nav-section">
                     <div class="nav-section-title">Администрирование</div>

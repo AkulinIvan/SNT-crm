@@ -182,13 +182,15 @@ ASTERISK_RECORDING_PATH = os.environ.get(
     '/var/spool/asterisk/monitor/',
 )
 
-SNT_NAME = 'СНТ "Строитель-43"'
+# Реквизиты СНТ
+SNT_NAME = 'СНТ "Садовод"'
 SNT_INN = '1234567890'
 SNT_KPP = '123001001'
 SNT_ACCOUNT = '40703810938000000123'
 SNT_BANK_NAME = 'ПАО Сбербанк'
 SNT_BANK_BIK = '044525225'
 SNT_BANK_CORR = '30101810400000000225'
+SNT_CHAIRMAN = 'Иванов И. И.'
 
 # CSRF настройки
 CSRF_COOKIE_NAME = 'csrftoken'

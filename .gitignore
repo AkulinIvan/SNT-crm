@@ -7,3 +7,4 @@ migrations/
 **/migrations/
 .env
 create_users.py
+debug.log

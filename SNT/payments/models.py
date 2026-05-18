@@ -1,5 +1,4 @@
 from django.db import models
-from django.core.validators import MinValueValidator
 from django.utils import timezone
 from land.models import LandPlot
 from users.models import Owner
@@ -73,7 +72,7 @@ class Assessment(models.Model):
     STATUS_PARTIAL = 'partial'
     STATUS_OVERDUE = 'overdue'
     STATUS_CANCELLED = 'cancelled'
-    
+
     STATUS_CHOICES = [
         (STATUS_PENDING, 'Ожидает оплаты'),
         (STATUS_PAID, 'Оплачено'),
@@ -115,6 +114,16 @@ class Assessment(models.Model):
         default=STATUS_PENDING,
         db_index=True
     )
+
+    # Уникальный идентификатор для квитанции
+    payment_uid = models.CharField(
+        'Уникальный ID квитанции',
+        max_length=20,
+        unique=True,
+        blank=True,
+        help_text='UID для идентификации платежа: SNT-000001'
+    )
+
     # Для расчёта пени
     penalty_rate = models.DecimalField(
         'Ставка пени (% в день)',
@@ -137,10 +146,32 @@ class Assessment(models.Model):
             models.Index(fields=['land_plot', 'status']),
             models.Index(fields=['period', 'status']),
             models.Index(fields=['category', 'status']),
+            models.Index(fields=['payment_uid']),
         ]
 
+    def save(self, *args, **kwargs):
+        if not self.payment_uid:
+            self.payment_uid = self.generate_uid()
+        super().save(*args, **kwargs)
+    
+    @classmethod
+    def generate_uid(cls):
+        """Генерация уникального UID для массового создания"""
+        # Получаем последний ID в таблице
+        last = cls.objects.order_by('-id').first()
+        if last:
+            next_id = last.id + 1
+        else:
+            next_id = 1
+        
+        # Проверяем, не занят ли UID (на случай параллельных запросов)
+        while cls.objects.filter(payment_uid=f"SNT-{next_id:06d}").exists():
+            next_id += 1
+        
+        return f"SNT-{next_id:06d}"
+
     def __str__(self):
-        return f"{self.owner.full_name} — {self.category.name} ({self.period})"
+        return f"{self.owner.full_name} — {self.category.name} ({self.period}) [{self.payment_uid}]"
 
     @property
     def debt(self):
@@ -151,7 +182,7 @@ class Assessment(models.Model):
         """Рассчитать пеню на текущую дату"""
         if self.status == self.STATUS_PAID or self.penalty_rate == 0:
             return 0
-        if self.status == self.STATUS_PENDING and self.period.due_date:
+        if self.status in [self.STATUS_PENDING, self.STATUS_PARTIAL, self.STATUS_OVERDUE] and self.period.due_date:
             days_overdue = (timezone.now().date() - self.period.due_date).days
             if days_overdue > 0:
                 return round(float(self.debt) * float(self.penalty_rate) * days_overdue / 100, 2)
@@ -166,11 +197,11 @@ class Payment(models.Model):
         ('terminal', 'Терминал'),
         ('online', 'Онлайн-платёж'),
     ]
-    
+
     STATUS_PROCESSED = 'processed'
     STATUS_PENDING = 'pending'
     STATUS_REJECTED = 'rejected'
-    
+
     PAYMENT_STATUS = [
         (STATUS_PROCESSED, 'Проведён'),
         (STATUS_PENDING, 'В обработке'),
@@ -197,13 +228,16 @@ class Payment(models.Model):
         choices=PAYMENT_STATUS,
         default=STATUS_PROCESSED
     )
-    
+
     # Банковские реквизиты
     bank_name = models.CharField('Банк', max_length=100, blank=True)
     bank_account = models.CharField('Счёт плательщика', max_length=30, blank=True)
-    transaction_id = models.CharField('ID транзакции', max_length=100, blank=True, unique=True)
+    transaction_id = models.CharField('ID транзакции', max_length=100, blank=True, unique=True, null=True)
     payment_purpose = models.TextField('Назначение платежа', blank=True)
-    
+
+    # Идентификатор из квитанции
+    matched_uid = models.CharField('UID из назначения', max_length=20, blank=True, db_index=True)
+
     # Служебные поля
     receipt_file = models.FileField('Квитанция', upload_to='receipts/%Y/%m/', blank=True, null=True)
     notes = models.TextField('Примечания', blank=True)
@@ -215,7 +249,7 @@ class Payment(models.Model):
         verbose_name_plural = 'Платежи'
         ordering = ['-payment_date']
         indexes = [
-            models.Index(fields=['transaction_id']),
+            models.Index(fields=['matched_uid']),
             models.Index(fields=['payment_date']),
         ]
 
@@ -223,41 +257,40 @@ class Payment(models.Model):
         return f"Платёж {self.amount} руб. от {self.payment_date}"
 
     def save(self, *args, **kwargs):
+        is_new = self.pk is None
         super().save(*args, **kwargs)
-        # Обновляем сумму оплаты в начислении
-        self.update_assessment()
+        if is_new and self.status == self.STATUS_PROCESSED:
+            self.update_assessment()
 
     def update_assessment(self):
-        """Пересчитать оплаченную сумму в начислении"""
+        """Пересчитать оплаченную сумму в начислении и обновить статус"""
         total_paid = self.assessment.payments.filter(
             status=self.STATUS_PROCESSED
         ).aggregate(
             total=models.Sum('amount')
         )['total'] or 0
-        
+
         self.assessment.paid_amount = total_paid
-        
-        # Обновляем статус начисления
+
         if total_paid >= self.assessment.amount:
             self.assessment.status = Assessment.STATUS_PAID
         elif total_paid > 0:
             self.assessment.status = Assessment.STATUS_PARTIAL
-        
+
         self.assessment.save(update_fields=['paid_amount', 'status', 'updated_at'])
 
 
 class BankStatement(models.Model):
     """Банковская выписка — импортированные данные из банка"""
     bank_name = models.CharField('Банк', max_length=100)
-    account_number = models.CharField('Номер счёта', max_length=30)
+    account_number = models.CharField('Номер счёта', max_length=30, blank=True)
     statement_date = models.DateField('Дата выписки')
     file_original = models.FileField('Файл выписки', upload_to='bank_statements/')
-    
-    # Статус обработки
+
     STATUS_IMPORTED = 'imported'
     STATUS_PROCESSED = 'processed'
     STATUS_ERROR = 'error'
-    
+
     STATUS_CHOICES = [
         (STATUS_IMPORTED, 'Импортирована'),
         (STATUS_PROCESSED, 'Обработана'),
@@ -290,7 +323,7 @@ class BankTransaction(models.Model):
     payer_account = models.CharField('Счёт плательщика', max_length=30, blank=True)
     payer_inn = models.CharField('ИНН плательщика', max_length=12, blank=True)
     payment_purpose = models.TextField('Назначение платежа')
-    
+
     # Сопоставление с CRM
     matched_owner = models.ForeignKey(
         Owner,
@@ -306,9 +339,10 @@ class BankTransaction(models.Model):
         blank=True,
         related_name='bank_transaction'
     )
+    matched_uid = models.CharField('Найденный UID', max_length=20, blank=True)
     is_matched = models.BooleanField('Сопоставлено', default=False)
     match_confidence = models.FloatField('Точность сопоставления (%)', default=0)
-    
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -317,3 +351,144 @@ class BankTransaction(models.Model):
 
     def __str__(self):
         return f"{self.payer_name} — {self.amount} руб. ({self.transaction_date})"
+    
+
+class ReceiptTemplate(models.Model):
+    """
+    Шаблон квитанции — объединяет несколько строк расчёта.
+    Например: Членские взносы (8 соток × 500 руб) + Целевые взносы (3000 руб) + Электричество (200 кВт × 5.5 руб)
+    """
+    name = models.CharField('Название шаблона', max_length=200)
+    description = models.TextField('Описание', blank=True)
+    is_active = models.BooleanField('Активен', default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Шаблон квитанции'
+        verbose_name_plural = 'Шаблоны квитанций'
+
+    def __str__(self):
+        return self.name
+
+
+class ReceiptTemplateLine(models.Model):
+    """Строка в шаблоне квитанции"""
+    template = models.ForeignKey(
+        ReceiptTemplate,
+        on_delete=models.CASCADE,
+        related_name='lines'
+    )
+    category = models.ForeignKey(
+        PaymentCategory,
+        on_delete=models.PROTECT,
+        verbose_name='Категория взноса'
+    )
+    # Тип расчёта
+    CALC_FIXED = 'fixed'          # Фиксированная сумма
+    CALC_PER_UNIT = 'per_unit'    # За единицу (сотку, кВт·ч)
+    
+    CALC_TYPE_CHOICES = [
+        (CALC_FIXED, 'Фиксированная сумма'),
+        (CALC_PER_UNIT, 'За единицу измерения'),
+    ]
+    calc_type = models.CharField(
+        'Тип расчёта',
+        max_length=10,
+        choices=CALC_TYPE_CHOICES,
+        default=CALC_FIXED
+    )
+    amount = models.DecimalField(
+        'Сумма / Тариф',
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+        help_text='Фиксированная сумма ИЛИ тариф за единицу'
+    )
+    # Для расчёта за единицу — сколько единиц (автоматически или вручную)
+    auto_quantity = models.BooleanField(
+        'Авто-количество',
+        default=True,
+        help_text='Брать площадь участка (для соток) или вводить вручную (для электричества)'
+    )
+    manual_quantity = models.DecimalField(
+        'Количество вручную',
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+        help_text='Если не авто — укажите количество единиц'
+    )
+    order = models.PositiveIntegerField('Порядок', default=0)
+
+    class Meta:
+        verbose_name = 'Строка шаблона'
+        verbose_name_plural = 'Строки шаблона'
+        ordering = ['order']
+
+    def __str__(self):
+        return f"{self.category.name} — {self.get_calc_type_display()}"
+
+
+class ConsolidatedAssessment(models.Model):
+    """
+    Составное начисление — квитанция с несколькими строками расчёта.
+    Создаётся на основе шаблона для конкретного владельца и участка.
+    """
+    owner = models.ForeignKey(Owner, on_delete=models.CASCADE, related_name='consolidated_assessments')
+    land_plot = models.ForeignKey(LandPlot, on_delete=models.CASCADE, related_name='consolidated_assessments')
+    period = models.ForeignKey(PaymentPeriod, on_delete=models.PROTECT)
+    
+    total_amount = models.DecimalField('Общая сумма', max_digits=10, decimal_places=2, default=0)
+    paid_amount = models.DecimalField('Оплачено', max_digits=10, decimal_places=2, default=0)
+    
+    STATUS_CHOICES = Assessment.STATUS_CHOICES
+    status = models.CharField('Статус', max_length=15, choices=STATUS_CHOICES, default='pending', db_index=True)
+    
+    payment_uid = models.CharField('UID квитанции', max_length=20, unique=True, blank=True)
+    notes = models.TextField('Примечания', blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Составное начисление'
+        verbose_name_plural = 'Составные начисления'
+        ordering = ['-created_at']
+
+    def save(self, *args, **kwargs):
+        if not self.payment_uid:
+            self.payment_uid = self.generate_uid()
+        super().save(*args, **kwargs)
+    
+    @classmethod
+    def generate_uid(cls):
+        """Генерация уникального UID для составного начисления"""
+        last = cls.objects.order_by('-id').first()
+        next_id = (last.id + 1) if last else 1
+        return f"SNT-C-{next_id:06d}"
+
+    @property
+    def debt(self):
+        return max(0, self.total_amount - self.paid_amount)
+
+
+class ConsolidatedAssessmentLine(models.Model):
+    """Строка в составном начислении"""
+    consolidated = models.ForeignKey(
+        ConsolidatedAssessment,
+        on_delete=models.CASCADE,
+        related_name='lines'
+    )
+    category = models.ForeignKey(PaymentCategory, on_delete=models.PROTECT)
+    description = models.CharField('Описание', max_length=255, blank=True)
+    quantity = models.DecimalField('Количество', max_digits=10, decimal_places=2, default=1)
+    unit = models.CharField('Ед. изм.', max_length=20, default='участок')
+    rate = models.DecimalField('Тариф', max_digits=10, decimal_places=2)
+    amount = models.DecimalField('Сумма', max_digits=10, decimal_places=2)
+    order = models.PositiveIntegerField('Порядок', default=0)
+
+    class Meta:
+        verbose_name = 'Строка составного начисления'
+        verbose_name_plural = 'Строки составного начисления'
+        ordering = ['order']
+
+    def __str__(self):
+        return f"{self.description}: {self.quantity} × {self.rate} = {self.amount} ₽"

@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.shortcuts import render, redirect
 from django.views import View
 from django.contrib.auth import login, logout, update_session_auth_hash
@@ -148,15 +150,21 @@ class UserViewSet(viewsets.ModelViewSet):
         return UserDetailSerializer
     
     def perform_create(self, serializer):
-        user = serializer.save()
-        UserActionLog.objects.create(
-            user=self.request.user,
-            action='create',
-            model_name='User',
-            object_id=user.id,
-            details=f'Создан пользователь: {user}',
-            ip_address=self._get_client_ip(),
-        )
+        """Автоматический расчёт суммы при создании начисления"""
+        category = serializer.validated_data.get('category')
+        land_plot = serializer.validated_data.get('land_plot')
+        amount = serializer.validated_data.get('amount', 0)
+        
+        # Если сумма не указана или = 0 — рассчитываем автоматически
+        if not amount or amount == 0:
+            if category.unit == 'сотка' and (category.rate_per_unit or category.default_amount):
+                rate = category.rate_per_unit or category.default_amount
+                area_sotka = land_plot.area_sqm / 100
+                amount = Decimal(str(area_sotka * float(rate))).quantize(Decimal('0.01'))
+            elif category.default_amount:
+                amount = category.default_amount
+        
+        serializer.save(amount=amount)
     
     def perform_update(self, serializer):
         user = serializer.save()

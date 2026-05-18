@@ -112,7 +112,7 @@
                 <td>${getStatusBadge(a.status_display)}</td>
                 <td>
                     <div class="table-actions">
-                        <button class="btn-icon" onclick="window.open('/api/assessments/${a.id}/receipt/?format=html')" title="Квитанция">🧾</button>
+                        <button class="btn-icon" onclick="window.open('/api/assessments/${a.id}/receipt-html/')" title="Квитанция">🧾</button>
                         <button class="btn-icon" onclick="openAddPaymentModal(${a.id}, ${a.debt})" title="Добавить платёж">💳</button>
                     </div>
                 </td>
