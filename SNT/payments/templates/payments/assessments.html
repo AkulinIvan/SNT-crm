@@ -31,6 +31,8 @@
             <option value="partial">Частично</option>
             <option value="overdue">Просрочено</option>
         </select>
+        <button class="btn btn-primary" onclick="openEmailModal()">📧 Отправить квитанции</button>
+        <button class="btn btn-danger" onclick="sendToDebtors()">🔔 Отправить должникам</button>
     </div>
     <div class="filter-group">
         <label>Поиск:</label>
@@ -84,42 +86,53 @@
         
         const params = new URLSearchParams({ page: currentPage });
         if (statusFilter) params.append('status', statusFilter);
-        if (searchQuery) params.append('search', searchQuery);
+        if (searchQuery) params.append('search', searchQuery);  
 
         const data = await apiFetch(`/api/assessments/?${params}`);
-        if (!data) return;
+        if (!data) return;  
 
         document.getElementById('results-count').textContent = 
-            `Найдено: ${data.count || 0}`;
+            `Найдено: ${data.count || 0}`;  
 
         const tbody = document.getElementById('assessments-table');
         if (!data.results || data.results.length === 0) {
             tbody.innerHTML = `<tr><td colspan="9"><div class="empty-state"><div class="empty-icon">📋</div><h3>Нет начислений</h3></div></td></tr>`;
             return;
-        }
+        }   
 
-        tbody.innerHTML = data.results.map(a => `
-            <tr>
-                <td><a href="/owners/${a.owner}/" style="color: var(--primary); text-decoration: none;">${escapeHtml(a.owner_name)}</a></td>
-                <td>Уч. №${escapeHtml(a.plot_number)}</td>
-                <td>${escapeHtml(a.category_name)}</td>
-                <td>${escapeHtml(a.period_display)}</td>
-                <td><strong>${a.amount} ₽</strong></td>
-                <td>${a.paid_amount} ₽</td>
-                <td style="color: ${a.debt > 0 ? 'var(--danger)' : 'var(--primary)'}; font-weight: 600;">
-                    ${a.debt} ₽
-                </td>
-                <td>${getStatusBadge(a.status_display)}</td>
-                <td>
-                    <div class="table-actions">
-                        <button class="btn-icon" onclick="window.open('/api/assessments/${a.id}/receipt-html/')" title="Квитанция">🧾</button>
-                        <button class="btn-icon" onclick="openAddPaymentModal(${a.id}, ${a.debt})" title="Добавить платёж">💳</button>
-                    </div>
-                </td>
-            </tr>
-        `).join('');
+        tbody.innerHTML = data.results.map(a => {
+            // Проверяем наличие email (owner_email может быть null или пустой строкой)
+            const hasEmail = a.owner_email && a.owner_email.trim() !== '';
+            const emailIcon = hasEmail ? '📧' : '📧❌';
+            const emailTitle = hasEmail ? 'Отправить квитанцию на email' : 'Нет email у владельца. Добавьте контакт';
+            const emailDisabled = !hasEmail ? 'disabled style="opacity: 0.5; cursor: not-allowed;"' : '';
 
-        // Пагинация
+            return `
+                <tr>
+                    <td><a href="/owners/${a.owner}/" style="color: var(--primary); text-decoration: none;">${escapeHtml(a.owner_name)}</a></td>
+                    <td>Уч. №${escapeHtml(a.plot_number)}</a></td>
+                    <td>${escapeHtml(a.category_name)}</a></td>
+                    <td>${escapeHtml(a.period_display)}</a></td>
+                    <td><strong>${a.amount} ₽</strong></td>
+                    <td>${a.paid_amount} ₽</a></td>
+                    <td style="color: ${a.debt > 0 ? 'var(--danger)' : 'var(--primary)'}; font-weight: 600;">
+                        ${a.debt} ₽
+                    </a></td>
+                    <td>${getStatusBadge(a.status_display)}</a></td>
+                    <td>
+                        <div class="table-actions">
+                            <button class="btn-icon" onclick="window.open('/api/assessments/${a.id}/receipt-html/')" title="Просмотреть квитанцию">🧾</button>
+                            <button class="btn-icon" onclick="sendReceiptEmail(${a.id}, '${escapeHtml(a.owner_name)}')" 
+                                title="${emailTitle}" ${emailDisabled}>
+                                ${emailIcon}
+                            </button>
+                            <button class="btn-icon" onclick="openAddPaymentModal(${a.id}, ${a.debt})" title="Добавить платёж">💳</button>
+                        </div>
+                    </a>
+                </tr>
+            `;
+        }).join('');    
+
         renderPagination(data);
     }
 
@@ -236,6 +249,209 @@
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
+    }
+
+    async function sendReceiptEmail(assessmentId, ownerName) {
+        // Показываем индикатор загрузки
+        showAlert('🔄 Отправка квитанции...', 'info');
+        
+        try {
+            const result = await apiFetch(`/api/assessments/${assessmentId}/send-email/`, {
+                method: 'POST',
+                body: JSON.stringify({ 
+                    attach_pdf: true,
+                    send_to_all: false  // Отправляем только на основной email
+                })
+            });
+
+            if (result && result.success) {
+                showAlert(`✅ Квитанция отправлена ${ownerName} на ${result.recipient}`, 'success');
+            } else if (result && !result.success) {
+                showAlert(`❌ Не удалось отправить: ${result.message}`, 'error');
+            } else {
+                showAlert(`❌ Ошибка отправки квитанции`, 'error');
+            }
+        } catch (error) {
+            console.error('Send email error:', error);
+            showAlert(`❌ Ошибка: ${error.message}`, 'error');
+        }
+    }
+
+    // Модальное окно массовой рассылки
+    function openEmailModal() {
+        Promise.all([
+            apiFetch('/api/payment-categories/'),
+            apiFetch('/api/payment-periods/'),
+            apiFetch('/api/assessments/owners-without-email/')
+        ]).then(([categoriesData, periodsData, ownersWithoutEmail]) => {
+            // Обрабатываем категории (могут быть массивом или объектом с пагинацией)
+            let categories = [];
+            if (categoriesData) {
+                if (Array.isArray(categoriesData)) {
+                    categories = categoriesData;
+                } else if (categoriesData.results) {
+                    categories = categoriesData.results;
+                } else if (categoriesData.data) {
+                    categories = categoriesData.data;
+                }
+            }
+
+            // Обрабатываем периоды
+            let periods = [];
+            if (periodsData) {
+                if (Array.isArray(periodsData)) {
+                    periods = periodsData;
+                } else if (periodsData.results) {
+                    periods = periodsData.results;
+                } else if (periodsData.data) {
+                    periods = periodsData.data;
+                }
+            }
+
+            // Получаем количество владельцев без email
+            const withoutEmailCount = ownersWithoutEmail?.total || 0;
+
+            const warningHtml = withoutEmailCount > 0 ? `
+                <div style="margin-bottom: 16px; padding: 12px; background: #fff3e0; border-radius: 8px; border-left: 4px solid #f57c00;">
+                    <strong>⚠️ Внимание!</strong> 
+                    <span>${withoutEmailCount} владельцев не имеют email адреса. 
+                    <a href="/owners/?without_email=1" style="color: #f57c00;">Добавьте контакты</a> перед рассылкой.</span>
+                </div>
+            ` : '';
+
+            const categoryOptions = categories.length > 0 
+                ? categories.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')
+                : '<option value="">Нет категорий</option>';
+
+            const periodOptions = periods.length > 0
+                ? periods.filter(p => p.is_active).map(p => `<option value="${p.id}">${p.year} год ${p.quarter ? 'Q' + p.quarter : ''}</option>`).join('')
+                : '<option value="">Нет периодов</option>';
+
+            openModal('📧 Массовая рассылка квитанций', `
+                ${warningHtml}
+                <div class="form-group">
+                    <label>Категория (опционально)</label>
+                    <select id="email-category">
+                        <option value="">Все категории</option>
+                        ${categoryOptions}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Период (опционально)</label>
+                    <select id="email-period">
+                        <option value="">Все периоды</option>
+                        ${periodOptions}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="email-only-debtors" checked>
+                        Только должники (с задолженностью)
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label>Минимальная сумма долга (₽)</label>
+                    <input type="number" id="email-min-debt" value="0" step="100">
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="email-attach-pdf" checked>
+                        Прикрепить PDF к письму (требуется WeasyPrint)
+                    </label>
+                </div>
+                <p style="color: var(--gray-500); font-size: 0.8rem; margin-top: 12px;">
+                    ⚠️ Рассылка будет выполнена в фоновом режиме. 
+                    Квитанции будут отправлены владельцам, у которых указан email.
+                </p>
+            `, 'Начать рассылку', async () => {
+                const categoryId = document.getElementById('email-category').value;
+                const periodId = document.getElementById('email-period').value;
+                const onlyDebtors = document.getElementById('email-only-debtors').checked;
+                const minDebt = parseFloat(document.getElementById('email-min-debt').value) || 0;
+                const attachPdf = document.getElementById('email-attach-pdf').checked;
+
+                const body = {
+                    only_debtors: onlyDebtors,
+                    min_debt: minDebt,
+                    attach_pdf: attachPdf,
+                };
+                if (categoryId) body.category_id = parseInt(categoryId);
+                if (periodId) body.period_id = parseInt(periodId);
+
+                showAlert('🔄 Запуск массовой рассылки...', 'info');
+
+                const result = await apiFetch('/api/assessments/bulk-send-email/', {
+                    method: 'POST',
+                    body: JSON.stringify(body)
+                });
+
+                if (result) {
+                    if (result.total !== undefined) {
+                        showAlert(`📧 Рассылка запущена: ${result.total} получателей`, 'success');
+                    } else {
+                        showAlert(result.detail || 'Рассылка запущена', 'success');
+                    }
+                }
+            });
+        }).catch(error => {
+            console.error('Error loading email modal data:', error);
+            showAlert('Ошибка загрузки данных для рассылки: ' + error.message, 'error');
+        });
+    }
+
+    // Отправка должникам
+    async function sendToDebtors() {
+        const confirmed = confirm('Отправить квитанции всем должникам, у которых есть email?');
+        if (!confirmed) return;
+
+        showAlert('🔄 Запуск рассылки должникам...', 'info');
+
+        try {
+            const result = await apiFetch('/api/assessments/send-to-debtors/', {
+                method: 'POST',
+                body: JSON.stringify({ 
+                    attach_pdf: false,  // Временно отключаем PDF из-за проблем с WeasyPrint
+                    only_debtors: true
+                })
+            });
+
+            if (result) {
+                if (result.total !== undefined) {
+                    showAlert(`📧 Рассылка запущена: ${result.total} должникам`, 'success');
+                } else {
+                    showAlert(result.detail || 'Рассылка должникам запущена', 'success');
+                }
+            }
+        } catch (error) {
+            console.error('Send to debtors error:', error);
+            showAlert('Ошибка запуска рассылки: ' + error.message, 'error');
+        }
+    }
+
+    // Отправка одного email
+    async function sendReceiptEmail(assessmentId, ownerName) {
+        showAlert('🔄 Отправка квитанции...', 'info');
+
+        try {
+            const result = await apiFetch(`/api/assessments/${assessmentId}/send-email/`, {
+                method: 'POST',
+                body: JSON.stringify({ 
+                    attach_pdf: false,  // Временно отключаем PDF
+                    send_to_all: false
+                })
+            });
+
+            if (result && result.success) {
+                showAlert(`✅ Квитанция отправлена ${ownerName} на ${result.recipient}`, 'success');
+            } else if (result && result.message) {
+                showAlert(`❌ ${result.message}`, 'error');
+            } else {
+                showAlert(`❌ Не удалось отправить квитанцию`, 'error');
+            }
+        } catch (error) {
+            console.error('Send email error:', error);
+            showAlert(`❌ Ошибка: ${error.message}`, 'error');
+        }
     }
 
     document.addEventListener('DOMContentLoaded', loadAssessments);

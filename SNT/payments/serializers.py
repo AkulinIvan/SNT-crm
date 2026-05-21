@@ -19,16 +19,22 @@ class PaymentPeriodSerializer(serializers.ModelSerializer):
 
 class AssessmentListSerializer(serializers.ModelSerializer):
     owner_name = serializers.CharField(source='owner.full_name', read_only=True)
+    owner_email = serializers.SerializerMethodField(read_only=True)
     plot_number = serializers.CharField(source='land_plot.plot_number', read_only=True)
     category_name = serializers.CharField(source='category.name', read_only=True)
     period_display = serializers.CharField(source='period.__str__', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     debt = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
-
+    
+    def get_owner_email(self, obj):
+        """Получить активный email владельца"""
+        email = obj.owner.contacts.filter(type='em', is_active=True).first()
+        return email.value if email else None
+    
     class Meta:
         model = Assessment
         fields = [
-            'id', 'owner', 'owner_name', 'land_plot', 'plot_number',
+            'id', 'owner', 'owner_name', 'owner_email', 'land_plot', 'plot_number',
             'category', 'category_name', 'period', 'period_display',
             'amount', 'paid_amount', 'debt', 'penalty_amount',
             'status', 'status_display', 'created_at',

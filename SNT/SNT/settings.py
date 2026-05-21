@@ -237,3 +237,17 @@ ROSREESTR_API_URL = 'https://api-cloud.ru/api/rosreestr.php'
 ROSREESTR_TIMEOUT = 120  # Таймаут ожидания ответа
 
 KADNET_API_KEY = '' 
+
+# Email настройки
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtp.yandex.ru'
+EMAIL_PORT = 465
+EMAIL_USE_SSL = True
+EMAIL_HOST_USER = 'akuliniwan@yandex.ru'
+EMAIL_HOST_PASSWORD = 'yofkosfhsmmungbx'
+DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
+
+# Для разработки (чтобы не отправлять реальные письма)
+# EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+
+# ,fhf,firf

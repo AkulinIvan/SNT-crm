@@ -1,8 +1,6 @@
-# SNT/payments/views.py - ПОЛНАЯ РАБОЧАЯ ВЕРСИЯ
-
 from datetime import date
 from decimal import Decimal
-from django.shortcuts import render, get_object_or_404
+from django.shortcuts import render
 from django.views import View
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
@@ -10,7 +8,7 @@ from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django.db import transaction as db_transaction
-from django.db.models import Sum, Q
+from django.db.models import Sum
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from django.http import HttpResponse, JsonResponse
@@ -18,6 +16,7 @@ from django.template.loader import render_to_string
 import json
 import logging
 
+from .email_service import EmailReceiptService
 from land.models import LandPlot
 from users.models import Owner
 from .qr_generator import QRCodeGenerator, SNTDetailsGenerator
@@ -183,6 +182,59 @@ class AssessmentViewSet(viewsets.ModelViewSet):
         headers = self.get_success_headers(serializer.data)
         return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
+    @action(detail=False, methods=['get'], url_path='owners-without-email')
+    def owners_without_email(self, request):
+        """
+        GET /api/assessments/owners-without-email/
+        Получить список владельцев без email
+        """
+        from users.models import ContactInfo
+
+        # Получаем всех владельцев, у которых есть начисления
+        assessments = Assessment.objects.filter(
+            status__in=['pending', 'partial', 'overdue']
+        ).select_related('owner')
+
+        category_id = request.query_params.get('category_id')
+        period_id = request.query_params.get('period_id')
+
+        if category_id:
+            assessments = assessments.filter(category_id=category_id)
+        if period_id:
+            assessments = assessments.filter(period_id=period_id)
+
+        # Находим владельцев без активного email
+        owners_without_email = []
+        owner_ids_seen = set()
+
+        for assessment in assessments:
+            owner = assessment.owner
+            if owner.id in owner_ids_seen:
+                continue
+            owner_ids_seen.add(owner.id)
+
+            # Проверяем наличие активного email в ContactInfo
+            has_email = owner.contacts.filter(type='em', is_active=True).exists()
+            if not has_email:
+                # Получаем общую задолженность владельца
+                total_debt = sum(
+                    a.debt for a in Assessment.objects.filter(
+                        owner=owner,
+                        status__in=['pending', 'partial', 'overdue']
+                    )
+                )
+                owners_without_email.append({
+                    'owner_id': owner.id,
+                    'owner_name': owner.full_name,
+                    'has_debt': total_debt > 0,
+                    'total_debt': str(total_debt),
+                })
+
+        return Response({
+            'total': len(owners_without_email),
+            'owners': owners_without_email,
+        })
+    
     @action(detail=False, methods=['post'], url_path='mass-generate')
     def mass_generate_assessments(self, request):
         """Массовое создание начислений для выбранных владельцев"""
@@ -446,6 +498,248 @@ class AssessmentViewSet(viewsets.ModelViewSet):
         return Response({
             'detail': f'Создано {created_count} начислений',
             'count': created_count,
+        })
+
+    @action(detail=True, methods=['post'], url_path='send-email')
+    def send_receipt_email(self, request, pk=None):
+        """
+        POST /api/assessments/{id}/send-email/
+        Отправить квитанцию на email владельца
+        """
+        assessment = self.get_object()
+        from .email_service import EmailReceiptService
+        email_service = EmailReceiptService()
+        
+        recipient_email = request.data.get('email')
+        send_to_all = request.data.get('send_to_all', False)  # Отправить на все email
+        
+        if send_to_all:
+            results = email_service.send_receipt_to_all_emails(
+                assessment=assessment,
+                send_pdf_attachment=request.data.get('attach_pdf', True)
+            )
+            sent_count = sum(1 for r in results if r['success'])
+            return Response({
+                'detail': f'Отправлено на {sent_count} из {len(results)} адресов',
+                'results': results,
+            })
+        else:
+            result = email_service.send_receipt_to_owner(
+                assessment=assessment,
+                recipient_email=recipient_email,
+                send_pdf_attachment=request.data.get('attach_pdf', True)
+            )
+            
+            if result['success']:
+                return Response(result)
+            else:
+                return Response(result, status=status.HTTP_400_BAD_REQUEST)
+    
+    @action(detail=False, methods=['get'], url_path='owners-without-email')
+    def owners_without_email(self, request):
+        """
+        GET /api/assessments/owners-without-email/
+        Получить список должников без email
+        """
+        category_id = request.query_params.get('category_id')
+        period_id = request.query_params.get('period_id')
+        
+        from .email_service import email_sender
+        result = email_sender.send_to_owners_without_email(
+            period_id=int(period_id) if period_id else None,
+            category_id=int(category_id) if category_id else None
+        )
+        
+        return Response({
+            'total': len(result),
+            'owners': result,
+        })
+        
+    @action(detail=False, methods=['post'], url_path='bulk-send-email')
+    def bulk_send_receipts_email(self, request):
+        """
+        POST /api/assessments/bulk-send-email/
+        
+        Тело запроса:
+        {
+            "assessment_ids": [1,2,3],  // ID начислений
+            "category_id": 1,           // или фильтр по категории
+            "period_id": 1,             // или фильтр по периоду
+            "only_debtors": true,       // только должники
+            "min_debt": 100,            // минимальная сумма долга
+            "attach_pdf": true
+        }
+        """
+        assessment_ids = request.data.get('assessment_ids', [])
+        category_id = request.data.get('category_id')
+        period_id = request.data.get('period_id')
+        only_debtors = request.data.get('only_debtors', False)
+        min_debt = Decimal(str(request.data.get('min_debt', 0)))
+        attach_pdf = request.data.get('attach_pdf', True)
+        
+        # Формируем queryset
+        if assessment_ids:
+            assessments = Assessment.objects.filter(id__in=assessment_ids)
+        else:
+            assessments = Assessment.objects.filter(
+                owner__email__isnull=False,
+                owner__email__gt='',
+            )
+            if category_id:
+                assessments = assessments.filter(category_id=category_id)
+            if period_id:
+                assessments = assessments.filter(period_id=period_id)
+            if only_debtors:
+                assessments = assessments.filter(
+                    status__in=['pending', 'partial', 'overdue']
+                )
+            if min_debt > 0:
+                assessments = assessments.filter(amount__gte=min_debt)
+        
+        if not assessments.exists():
+            return Response({
+                'detail': 'Нет начислений для отправки',
+                'total': 0,
+            }, status=status.HTTP_200_OK)
+        
+        email_service = EmailReceiptService()
+        
+        # Отправляем асинхронно в фоновом потоке
+        from threading import Thread
+        
+        def send_in_background():
+            email_service.send_bulk_receipts(
+                assessments=list(assessments),
+                send_pdf_attachment=attach_pdf
+            )
+        
+        Thread(target=send_in_background, daemon=True).start()
+        
+        return Response({
+            'detail': f'Запущена рассылка {assessments.count()} квитанций',
+            'total': assessments.count(),
+            'status': 'processing',
+        })
+    
+    @action(detail=False, methods=['post'], url_path='send-to-debtors')
+    def send_to_debtors(self, request):
+        """
+        POST /api/assessments/send-to-debtors/
+        Отправка квитанций всем должникам
+        """
+        from .email_service import email_sender
+        
+        category_id = request.data.get('category_id')
+        period_id = request.data.get('period_id')
+        min_debt = Decimal(str(request.data.get('min_debt', 0)))
+        attach_pdf = request.data.get('attach_pdf', False)  # ← по умолчанию False
+        
+        assessments = Assessment.objects.filter(
+            status__in=['pending', 'partial', 'overdue']
+        ).select_related('owner', 'category', 'period')
+        
+        if category_id:
+            assessments = assessments.filter(category_id=category_id)
+        if period_id:
+            assessments = assessments.filter(period_id=period_id)
+        if min_debt > 0:
+            assessments = assessments.filter(amount__gte=min_debt)
+        
+        # Фильтруем только тех, у кого есть email
+        assessments_with_email = []
+        for assessment in assessments:
+            has_email = assessment.owner.contacts.filter(
+                type='em', is_active=True
+            ).exists()
+            if has_email:
+                assessments_with_email.append(assessment)
+        
+        if not assessments_with_email:
+            return Response({
+                'detail': 'Нет должников с email для рассылки',
+                'total': 0,
+            })
+        
+        # Запускаем асинхронную отправку
+        from threading import Thread
+        
+        def send_in_background():
+            email_sender.email_service.send_bulk_receipts(
+                assessments=assessments_with_email,
+                send_pdf_attachment=attach_pdf
+            )
+        
+        Thread(target=send_in_background, daemon=True).start()
+        
+        return Response({
+            'detail': f'Запущена рассылка {len(assessments_with_email)} квитанций должникам',
+            'total': len(assessments_with_email),
+            'status': 'processing',
+        })
+    
+    @action(detail=False, methods=['post'], url_path='bulk-send-email')
+    def bulk_send_receipts_email(self, request):
+        """
+        POST /api/assessments/bulk-send-email/
+        
+        Массовая рассылка квитанций
+        """
+        from .email_service import email_sender
+        
+        assessment_ids = request.data.get('assessment_ids', [])
+        category_id = request.data.get('category_id')
+        period_id = request.data.get('period_id')
+        only_debtors = request.data.get('only_debtors', False)
+        min_debt = Decimal(str(request.data.get('min_debt', 0)))
+        attach_pdf = request.data.get('attach_pdf', True)
+        
+        # Формируем queryset
+        if assessment_ids:
+            assessments = Assessment.objects.filter(id__in=assessment_ids)
+        else:
+            assessments = Assessment.objects.all()
+            if category_id:
+                assessments = assessments.filter(category_id=category_id)
+            if period_id:
+                assessments = assessments.filter(period_id=period_id)
+            if only_debtors:
+                assessments = assessments.filter(
+                    status__in=['pending', 'partial', 'overdue']
+                )
+            if min_debt > 0:
+                assessments = assessments.filter(amount__gte=min_debt)
+        
+        # Фильтруем только тех, у кого есть email
+        assessments_with_email = []
+        for assessment in assessments:
+            has_email = assessment.owner.contacts.filter(
+                type='em', is_active=True
+            ).exists()
+            if has_email:
+                assessments_with_email.append(assessment)
+        
+        if not assessments_with_email:
+            return Response({
+                'detail': 'Нет начислений для отправки (у владельцев нет email)',
+                'total': 0,
+            }, status=status.HTTP_200_OK)
+        
+        # Запускаем асинхронно
+        from threading import Thread
+        
+        def send_in_background():
+            result = email_sender.email_service.send_bulk_receipts(
+                assessments=assessments_with_email,
+                send_pdf_attachment=attach_pdf
+            )
+            logger.info(f"Bulk email sent: {result}")
+        
+        Thread(target=send_in_background, daemon=True).start()
+        
+        return Response({
+            'detail': f'Запущена рассылка {len(assessments_with_email)} квитанций',
+            'total': len(assessments_with_email),
+            'status': 'processing',
         })
 
     @action(detail=False, methods=['get'], url_path='stats')
@@ -964,9 +1258,9 @@ class BankStatementViewSet(viewsets.ModelViewSet):
         file = request.FILES.get('file')
         if not file:
             return Response({'detail': 'Загрузите файл'}, status=status.HTTP_400_BAD_REQUEST)
-        
+
         logger.info(f'Получен файл: {file.name}, размер: {file.size} байт')
-        
+
         # Сохраняем файл
         bank_name = request.data.get('bank_name', '')
         statement = BankStatement.objects.create(
@@ -976,10 +1270,10 @@ class BankStatementViewSet(viewsets.ModelViewSet):
             file_original=file,
             status=BankStatement.STATUS_IMPORTED,
         )
-        
+
         # Парсим файл
         parser = BankStatementParser(bank_name if bank_name else None)
-        
+
         try:
             transactions_data = parser.parse_file(statement.file_original.path)
             logger.info(f'Распарсено транзакций: {len(transactions_data)}')
@@ -993,7 +1287,7 @@ class BankStatementViewSet(viewsets.ModelViewSet):
                 'statement_id': statement.id,
                 'matched': 0,
             }, status=status.HTTP_400_BAD_REQUEST)
-        
+
         if not transactions_data:
             statement.status = BankStatement.STATUS_ERROR
             statement.notes = 'Не удалось извлечь транзакции из файла'
@@ -1003,17 +1297,17 @@ class BankStatementViewSet(viewsets.ModelViewSet):
                 'statement_id': statement.id,
                 'matched': 0,
             }, status=status.HTTP_400_BAD_REQUEST)
-        
+
         # Создаём транзакции и обрабатываем платежи
         matcher = PaymentMatcher()
         matched_count = 0
         payment_results = []
-        
+
         with db_transaction.atomic():
             for trans_data in transactions_data:
                 # Добавляем информацию о банке
                 trans_data['bank_name'] = statement.bank_name
-                
+
                 # Создаём банковскую транзакцию
                 bank_trans = BankTransaction.objects.create(
                     statement=statement,
@@ -1024,22 +1318,22 @@ class BankStatementViewSet(viewsets.ModelViewSet):
                     payer_inn=trans_data.get('payer_inn', ''),
                     payment_purpose=trans_data.get('payment_purpose', ''),
                 )
-                
+
                 # Обрабатываем платеж с автоматическим обновлением статуса
                 result = matcher.process_and_update_payments(trans_data)
-                
+
                 if result['matched']:
                     bank_trans.matched_owner_id = result.get('matched_owner_id')
                     bank_trans.is_matched = True
                     bank_trans.match_confidence = result.get('confidence', 0)
-                    
+
                     if result.get('payment_created'):
                         from .models import Payment
                         payment = Payment.objects.get(id=result['payment_id'])
                         bank_trans.matched_payment = payment
                         bank_trans.matched_uid = payment.assessment.payment_uid
                         matched_count += 1
-                        
+
                         payment_results.append({
                             'transaction_id': bank_trans.id,
                             'payer_name': trans_data.get('payer_name', ''),
@@ -1048,14 +1342,14 @@ class BankStatementViewSet(viewsets.ModelViewSet):
                             'new_status': result['assessment_status'],
                             'debt_remaining': result['new_debt'],
                         })
-                    
+
                     bank_trans.save()
-        
+
         statement.total_transactions = len(transactions_data)
         statement.matched_transactions = matched_count
         statement.status = BankStatement.STATUS_PROCESSED
         statement.save()
-        
+
         return Response({
             'detail': f'Импортировано {len(transactions_data)} транзакций',
             'statement_id': statement.id,
