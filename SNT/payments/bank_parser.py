@@ -666,7 +666,6 @@ class BankStatementParser:
         return assessments.first()
     
     
-# PaymentMatcher остаётся без изменений
 class PaymentMatcher:
     """Сопоставление банковских транзакций с владельцами и начислениями"""
     
@@ -784,3 +783,72 @@ class PaymentMatcher:
                 return assessment
         
         return assessments.first()
+    
+    def process_and_update_payments(self, transaction: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Обработка транзакции с автоматическим обновлением статуса начисления.
+        Возвращает информацию о сопоставленном платеже.
+        """
+        from .models import Assessment, Payment
+        from decimal import Decimal
+        
+        amount = transaction.get('amount', Decimal('0'))
+        payment_purpose = transaction.get('payment_purpose', '')
+        payer_name = transaction.get('payer_name', '')
+        
+        result = {
+            'matched': False,
+            'payment_created': False,
+            'assessment_updated': False,
+            'message': ''
+        }
+        
+        # 1. Поиск владельца
+        owner_match = self.match_owner(transaction)
+        if not owner_match:
+            result['message'] = f'Не найден владелец для {payer_name}'
+            return result
+        
+        owner, confidence = owner_match
+        result['matched_owner'] = owner.full_name
+        result['confidence'] = confidence
+        
+        # 2. Поиск начисления
+        assessment = self.match_assessment(owner, amount, payment_purpose)
+        if not assessment:
+            result['message'] = f'Не найдено подходящее начисление для {owner.full_name}'
+            return result
+        
+        result['matched_assessment_id'] = assessment.id
+        result['matched_assessment_amount'] = str(assessment.amount)
+        result['current_debt'] = str(assessment.debt)
+        
+        # 3. Создаём платёж
+        payment = Payment.objects.create(
+            assessment=assessment,
+            amount=amount,
+            payment_date=transaction.get('transaction_date'),
+            payment_method='bank',
+            bank_name=transaction.get('bank_name', ''),
+            bank_account=transaction.get('payer_account', ''),
+            transaction_id=transaction.get('transaction_id', ''),
+            payment_purpose=payment_purpose[:500],
+            status=Payment.STATUS_PROCESSED,
+        )
+        
+        result['payment_created'] = True
+        result['payment_id'] = payment.id
+        result['payment_amount'] = str(amount)
+        
+        # 4. Проверяем статус начисления после оплаты
+        assessment.refresh_from_db()
+        result['new_debt'] = str(assessment.debt)
+        result['assessment_status'] = assessment.get_status_display()
+        
+        if assessment.status == Assessment.STATUS_PAID:
+            result['message'] = f'✅ Начисление полностью оплачено!'
+        else:
+            result['message'] = f'💰 Внесён платёж {amount} ₽. Остаток долга: {assessment.debt} ₽'
+        
+        result['matched'] = True
+        return result

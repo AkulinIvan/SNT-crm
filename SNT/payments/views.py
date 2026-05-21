@@ -960,7 +960,7 @@ class BankStatementViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'], url_path='import')
     def import_statement(self, request):
-        """Импорт банковской выписки из файла"""
+        """Импорт банковской выписки из файла с автоматическим обновлением статуса"""
         file = request.FILES.get('file')
         if not file:
             return Response({'detail': 'Загрузите файл'}, status=status.HTTP_400_BAD_REQUEST)
@@ -1004,12 +1004,17 @@ class BankStatementViewSet(viewsets.ModelViewSet):
                 'matched': 0,
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        # Создаём транзакции
+        # Создаём транзакции и обрабатываем платежи
         matcher = PaymentMatcher()
         matched_count = 0
+        payment_results = []
         
         with db_transaction.atomic():
             for trans_data in transactions_data:
+                # Добавляем информацию о банке
+                trans_data['bank_name'] = statement.bank_name
+                
+                # Создаём банковскую транзакцию
                 bank_trans = BankTransaction.objects.create(
                     statement=statement,
                     transaction_date=trans_data['transaction_date'],
@@ -1020,33 +1025,29 @@ class BankStatementViewSet(viewsets.ModelViewSet):
                     payment_purpose=trans_data.get('payment_purpose', ''),
                 )
                 
-                # Пытаемся сопоставить
-                match = matcher.match_owner(trans_data)
-                if match:
-                    owner, confidence = match
-                    bank_trans.matched_owner = owner
-                    bank_trans.match_confidence = confidence
+                # Обрабатываем платеж с автоматическим обновлением статуса
+                result = matcher.process_and_update_payments(trans_data)
+                
+                if result['matched']:
+                    bank_trans.matched_owner_id = result.get('matched_owner_id')
+                    bank_trans.is_matched = True
+                    bank_trans.match_confidence = result.get('confidence', 0)
                     
-                    if confidence >= 50:
-                        bank_trans.is_matched = True
-                        assessment = matcher.match_assessment(
-                            owner, trans_data['amount'], trans_data.get('payment_purpose', '')
-                        )
-                        if assessment:
-                            # Проверяем, не создан ли уже платёж для этой транзакции
-                            payment = Payment.objects.create(
-                                assessment=assessment,
-                                amount=trans_data['amount'],
-                                payment_date=trans_data['transaction_date'],
-                                payment_method='bank',
-                                bank_name=statement.bank_name,
-                                bank_account=trans_data.get('payer_account', ''),
-                                transaction_id=str(bank_trans.id),
-                                payment_purpose=trans_data.get('payment_purpose', ''),
-                                status=Payment.STATUS_PROCESSED,
-                            )
-                            bank_trans.matched_payment = payment
-                            matched_count += 1
+                    if result.get('payment_created'):
+                        from .models import Payment
+                        payment = Payment.objects.get(id=result['payment_id'])
+                        bank_trans.matched_payment = payment
+                        bank_trans.matched_uid = payment.assessment.payment_uid
+                        matched_count += 1
+                        
+                        payment_results.append({
+                            'transaction_id': bank_trans.id,
+                            'payer_name': trans_data.get('payer_name', ''),
+                            'amount': str(trans_data['amount']),
+                            'assessment_id': result['matched_assessment_id'],
+                            'new_status': result['assessment_status'],
+                            'debt_remaining': result['new_debt'],
+                        })
                     
                     bank_trans.save()
         
@@ -1059,6 +1060,7 @@ class BankStatementViewSet(viewsets.ModelViewSet):
             'detail': f'Импортировано {len(transactions_data)} транзакций',
             'statement_id': statement.id,
             'matched': matched_count,
+            'payments': payment_results,
         })
 
 

@@ -7,6 +7,47 @@
 {% endblock %}
 
 {% block content %}
+<style>
+#map-container {
+    width: 100%;
+    height: 600px;
+    border-radius: 8px;
+    z-index: 1;
+}
+
+.leaflet-container {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.custom-div-icon {
+    background: none;
+    border: none;
+}
+
+.leaflet-popup-content-wrapper {
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+.leaflet-popup-content {
+    margin: 12px 16px;
+    line-height: 1.6;
+}
+
+.leaflet-control-layers {
+    border-radius: 8px !important;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1) !important;
+}
+
+.leaflet-control-layers-toggle {
+    width: 36px !important;
+    height: 36px !important;
+}
+
+.leaflet-control-zoom a {
+    border-radius: 6px !important;
+}
+</style>
 <div class="page-header">
     <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
         <div>
@@ -63,33 +104,34 @@
 
 <!-- Карта -->
 <div class="table-container" style="height: 600px; position: relative; overflow: hidden;">
-    <div id="map-loading" style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; z-index: 10; background: rgba(255,255,255,0.9);">
+    <div id="map-loading" style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; z-index: 1000; background: rgba(255,255,255,0.95);">
         <div class="empty-state">
             <div class="empty-icon">⏳</div>
             <h3>Загрузка карты...</h3>
-            <p>Загружаем данные участков</p>
+            <p>Инициализация карты и загрузка данных</p>
         </div>
     </div>
-    <div id="map-container-inner" style="width: 100%; height: 100%; position: relative;">
-        <iframe id="map-iframe" width="100%" height="100%" frameborder="0" style="border-radius: 8px; transition: opacity 0.3s;"></iframe>
-        <div id="map-info-panel" style="position: absolute; bottom: 16px; left: 16px; background: white; padding: 12px 16px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.2); max-width: 300px; display: none; z-index: 20; font-size: 0.85rem;">
-            <div id="map-info-content"></div>
-        </div>
-    </div>
+    <div id="map-container" style="width: 100%; height: 100%;"></div>
 </div>
 
 <!-- Управление координатами -->
 <div class="filters-bar" style="margin-top: 16px;">
-    <span style="font-weight: 500;">⚡ Быстрые действия:</span>
-    <button class="btn btn-sm btn-secondary" onclick="copyCoordinatesList()">
-        📋 Копировать список координат
+    <span style="font-weight: 500;">⚡ Действия с границами:</span>
+    <button class="btn btn-sm btn-primary" onclick="bulkLoadBoundaries()">
+        🗺️ Загрузить границы из Росреестра
     </button>
-    <button class="btn btn-sm btn-secondary" onclick="openBulkCoordsModal()">
-        📦 Массовое обновление координат
+    <button class="btn btn-sm btn-secondary" onclick="loadMapData()">
+        🔄 Обновить карту
     </button>
-    <span style="margin-left: auto; font-size: 0.85rem; color: var(--gray-500);" id="coord-actions-hint">
-        Кликните по участку в списке для быстрой установки координат
-    </span>
+    <button class="btn btn-sm btn-primary" onclick="openManualBoundariesModal()">
+        ✏️ Ввести границы вручную
+    </button>
+    <button class="btn btn-sm btn-secondary" onclick="openNSPDHelper()">
+        🗺️ Открыть карту НСПД (копировать координаты)
+    </button>
+    <button class="btn btn-sm btn-secondary" onclick="loadMapData()">
+        🔄 Обновить карту
+    </button>
 </div>
 
 <!-- Список участков без координат с пагинацией -->
@@ -137,164 +179,657 @@
 
 {% block extra_js %}
 <script>
-    let allPlots = [];
-    let mapCenterLat = 55.7558;
-    let mapCenterLon = 37.6173;
-    let mapZoom = 16;
-    
-    // Переменные для пагинации участков без координат
-    let noCoordsCurrentPage = 1;
-    let noCoordsLimit = 50;
-    let noCoordsTotalCount = 0;
+// Глобальные переменные
+let map = null;
+let plotsLayer = null;
+let boundariesLayer = null;
+let allPlotsData = [];
+let mapInitialized = false;
 
-    async function loadMapData() {
-        const statusFilter = document.getElementById('map-status-filter')?.value || '';
-        const ownerFilter = document.getElementById('map-owner-filter')?.value || '';
+// Переменные для пагинации участков без координат
+let noCoordsCurrentPage = 1;
+let noCoordsLimit = 50;
+let noCoordsTotalCount = 0;
+let mapCenterLat = 55.7558;
+let mapCenterLon = 37.6173;
+
+// Функция инициализации карты Leaflet
+function initLeafletMap() {
+    if (mapInitialized) {
+        console.log('Карта уже инициализирована');
+        return true;
+    }
+    
+    try {
+        // Проверяем, что контейнер существует
+        const container = document.getElementById('map-container');
+        if (!container) {
+            console.error('Контейнер карты не найден');
+            return false;
+        }
         
-        const params = new URLSearchParams();
-        if (statusFilter) params.append('status', statusFilter);
-        if (ownerFilter) params.append('has_owners', ownerFilter);
+        // Создаем карту
+        map = L.map('map-container').setView([55.7558, 37.6173], 15);
+        
+        // Добавляем слой OpenStreetMap
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+            maxZoom: 19
+        }).addTo(map);
+        
+        // Создаем группы слоев
+        plotsLayer = L.layerGroup().addTo(map);
+        boundariesLayer = L.layerGroup().addTo(map);
+        
+        // Добавляем контроль слоев
+        const overlayMaps = {
+            "📍 Участки": plotsLayer
+            {% comment %} "🗺️ Границы": boundariesLayer {% endcomment %}
+        };
+        L.control.layers(null, overlayMaps, {collapsed: false}).addTo(map);
+        
+        // Добавляем масштабную линейку
+        L.control.scale().addTo(map);
+        
+        mapInitialized = true;
+        console.log('Карта успешно инициализирована');
+        
+        // Скрываем индикатор загрузки
+        const loadingEl = document.getElementById('map-loading');
+        if (loadingEl) {
+            loadingEl.style.display = 'none';
+        }
+        
+        return true;
+        
+    } catch (error) {
+        console.error('Ошибка инициализации карты:', error);
+        return false;
+    }
+}
+
+// Функция для получения цвета по статусу
+function getStatusColor(status) {
+    const colors = {
+        'active': '#4CAF50',
+        'abandoned': '#FF9800', 
+        'disputed': '#f44336'
+    };
+    return colors[status] || '#9E9E9E';
+}
+
+// Функция для создания иконки маркера
+function getStatusIcon(status) {
+    const colors = {
+        'active': '#4CAF50',
+        'abandoned': '#FF9800',
+        'disputed': '#f44336'
+    };
+    const color = colors[status] || '#9E9E9E';
+    
+    return L.divIcon({
+        className: 'custom-div-icon',
+        html: `<div style="
+            background-color: ${color}; 
+            width: 12px; 
+            height: 12px; 
+            border-radius: 50%; 
+            border: 2px solid white; 
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        "></div>`,
+        iconSize: [12, 12],
+        iconAnchor: [6, 6]
+    });
+}
+
+// Открыть модалку для ручного ввода границ
+async function openManualBoundariesModal(plotId = null, plotNumber = null) {
+    // Если не передан ID, показываем выбор участка
+    if (!plotId) {
+        // Получаем список участков без границ
+        try {
+            const data = await apiFetch('/api/plots/?has_boundaries=false&limit=100');
+            if (!data || !data.results || data.results.length === 0) {
+                showAlert('Все участки уже имеют границы!', 'info');
+                return;
+            }
+            
+            let options = data.results.map(p => 
+                `<option value="${p.id}">Уч. №${escapeHtml(p.plot_number)} — ${escapeHtml(p.cadastral_number || 'без кад. номера')}</option>`
+            ).join('');
+            
+            const content = `
+                <div class="form-group">
+                    <label>Выберите участок:</label>
+                    <select id="manual-boundaries-plot" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
+                        <option value="">— Выберите участок —</option>
+                        ${options}
+                    </select>
+                </div>
+                <div id="boundaries-input-area" style="display: none;">
+                    <div class="form-group">
+                        <label>Координаты границ (формат: широта,долгота — по одной точке на строку):</label>
+                        <textarea id="manual-boundaries-text" rows="10" 
+                            placeholder="55.7558,37.6173&#10;55.7560,37.6180&#10;55.7555,37.6185&#10;55.7553,37.6175"
+                            style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ddd; font-family: monospace;"></textarea>
+                    </div>
+                    <div style="margin: 12px 0; padding: 12px; background: #f0f8ff; border-radius: 8px; border: 1px solid #b8daff;">
+                        <p style="margin: 0; font-size: 0.85rem;">
+                            💡 <strong>Как получить координаты:</strong><br>
+                            1. Нажмите кнопку "Открыть карту НСПД"<br>
+                            2. Найдите участок по кадастровому номеру<br>
+                            3. Нажмите на участок → "Информация" → скопируйте координаты<br>
+                            4. Вставьте сюда в формате: <b>широта,долгота</b> (по одной точке на строку)
+                        </p>
+                    </div>
+                </div>
+            `;
+            
+            openModal('✏️ Ручной ввод границ участка', content, '💾 Сохранить', async () => {
+                const selectedPlotId = document.getElementById('manual-boundaries-plot').value;
+                const boundariesText = document.getElementById('manual-boundaries-text').value;
+                
+                if (!selectedPlotId) {
+                    showAlert('Выберите участок', 'error');
+                    return;
+                }
+                
+                const boundaries = parseBoundariesText(boundariesText);
+                if (!boundaries) {
+                    showAlert('Введите корректные координаты (минимум 3 точки)', 'error');
+                    return;
+                }
+                
+                await saveBoundariesToServer(selectedPlotId, boundaries);
+            });
+            
+            // Показываем поле ввода при выборе участка
+            setTimeout(() => {
+                const select = document.getElementById('manual-boundaries-plot');
+                if (select) {
+                    select.addEventListener('change', function() {
+                        document.getElementById('boundaries-input-area').style.display = 
+                            this.value ? 'block' : 'none';
+                    });
+                }
+            }, 100);
+            
+        } catch (error) {
+            showAlert('Ошибка загрузки списка участков', 'error');
+        }
+        return;
+    }
+    
+    // Если передан ID — сразу показываем поле ввода
+    const content = `
+        <p style="margin-bottom: 12px;">
+            Участок: <b>№${escapeHtml(plotNumber)}</b>
+        </p>
+        <div class="form-group">
+            <label>Координаты границ (широта,долгота — по одной точке на строку):</label>
+            <textarea id="manual-boundaries-text" rows="10" 
+                placeholder="55.7558,37.6173&#10;55.7560,37.6180&#10;55.7555,37.6185&#10;55.7553,37.6175"
+                style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ddd; font-family: monospace;"></textarea>
+        </div>
+        <div style="margin: 12px 0; padding: 12px; background: #f0f8ff; border-radius: 8px; border: 1px solid #b8daff;">
+            <p style="margin: 0; font-size: 0.85rem;">
+                💡 <strong>Как получить координаты:</strong><br>
+                1. Нажмите "Открыть карту НСПД"<br>
+                2. Найдите участок и скопируйте координаты<br>
+                3. Вставьте сюда в формате: <b>широта,долгота</b>
+            </p>
+        </div>
+    `;
+    
+    openModal(`✏️ Границы участка №${escapeHtml(plotNumber)}`, content, '💾 Сохранить', async () => {
+        const boundariesText = document.getElementById('manual-boundaries-text').value;
+        const boundaries = parseBoundariesText(boundariesText);
+        
+        if (!boundaries) {
+            showAlert('Введите минимум 3 координаты в формате: широта,долгота', 'error');
+            return;
+        }
+        
+        await saveBoundariesToServer(plotId, boundaries);
+    });
+}
+
+// Парсинг текста с координатами
+function parseBoundariesText(text) {
+    if (!text || !text.trim()) return null;
+    
+    const lines = text.trim().split('\n');
+    const boundaries = [];
+    
+    for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        
+        // Поддерживаем форматы: "lat,lon" или "lat lon" или "[lat, lon]"
+        let parts = trimmed.replace(/[\[\]]/g, '').split(/[\s,]+/);
+        
+        if (parts.length >= 2) {
+            const lat = parseFloat(parts[0]);
+            const lon = parseFloat(parts[1]);
+            
+            if (!isNaN(lat) && !isNaN(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180) {
+                boundaries.push([lat, lon]);
+            }
+        }
+    }
+    
+    return boundaries.length >= 3 ? boundaries : null;
+}
+
+// Сохранение границ на сервер
+async function saveBoundariesToServer(plotId, boundaries) {
+    try {
+        const result = await apiFetch(`/api/plots/${plotId}/save-boundaries/`, {
+            method: 'POST',
+            body: JSON.stringify({
+                boundaries: boundaries,
+                source: 'manual'
+            })
+        });
+        
+        if (result && result.boundaries) {
+            showAlert(`✅ Границы сохранены (${result.boundaries.length} точек)`, 'success');
+            loadMapData(); // Перезагружаем карту
+        } else {
+            showAlert('Ошибка сохранения границ', 'error');
+        }
+    } catch (error) {
+        showAlert(`Ошибка: ${error.message}`, 'error');
+    }
+}
+
+// Открыть карту НСПД для копирования координат
+function openNSPDHelper() {
+    const cadastralNumber = prompt(
+        'Введите кадастровый номер участка для поиска на карте НСПД:\n' +
+        '(Например: 50:20:0010101:123)\n\n' +
+        'На открывшейся карте:\n' +
+        '1. Найдите участок\n' +
+        '2. Кликните по нему\n' +
+        '3. Выберите "Информация об объекте"\n' +
+        '4. Скопируйте координаты\n' +
+        '5. Вернитесь сюда и вставьте в поле ввода',
+        ''
+    );
+    
+    if (cadastralNumber) {
+        window.open(
+            `https://nspd.gov.ru/map?thematic=PKK&search=${encodeURIComponent(cadastralNumber)}`,
+            '_blank'
+        );
+    }
+}
+
+// Основная функция загрузки данных карты
+async function loadMapData() {
+    // Инициализируем карту, если ещё не сделали
+    if (!mapInitialized) {
+        const initialized = initLeafletMap();
+        if (!initialized) {
+            console.error('Не удалось инициализировать карту');
+            showAlert('Ошибка инициализации карты', 'error');
+            return;
+        }
+    }
+    
+    // Проверяем, что слои существуют
+    if (!plotsLayer || !boundariesLayer) {
+        console.error('Слои карты не инициализированы');
+        return;
+    }
+    
+    const statusFilter = document.getElementById('map-status-filter')?.value || '';
+    const ownerFilter = document.getElementById('map-owner-filter')?.value || '';
+    
+    const params = new URLSearchParams();
+    if (statusFilter) params.append('status', statusFilter);
+    if (ownerFilter) params.append('has_owners', ownerFilter);
+    
+    try {
+        // Показываем индикатор загрузки
+        const loadingEl = document.getElementById('map-loading');
+        if (loadingEl) loadingEl.style.display = 'flex';
+        
+        // Загружаем данные участков
+        const data = await apiFetch(`/api/plots/geo/?${params}`);
+        
+        if (!data || !data.results) {
+            console.warn('Нет данных для отображения');
+            if (loadingEl) loadingEl.style.display = 'none';
+            return;
+        }
+        
+        allPlotsData = data.results;
+        
+        // Очищаем слои
+        plotsLayer.clearLayers();
+        boundariesLayer.clearLayers();
+        
+        // Массив для определения границ карты
+        const bounds = [];
+        
+        // Счетчики для статистики
+        let markersCount = 0;
+        let boundariesCount = 0;
+        
+        // Добавляем маркеры и границы
+        allPlotsData.forEach(plot => {
+            // Добавляем маркер если есть координаты
+            if (plot.latitude && plot.longitude) {
+                const marker = L.marker([plot.latitude, plot.longitude], {
+                    icon: getStatusIcon(plot.status)
+                }).addTo(plotsLayer);
+                
+                // Формируем содержимое всплывающей подсказки
+                let popupContent = `
+                    <div style="min-width: 200px;">
+                        <b style="font-size: 14px;">Участок №${escapeHtml(plot.plot_number)}</b><br>
+                        <hr style="margin: 4px 0;">
+                        📐 Площадь: <b>${plot.area_sqm} м²</b><br>
+                        📊 Статус: <span style="color: ${getStatusColor(plot.status)};">${plot.status_display}</span><br>
+                `;
+                
+                if (plot.owners_info && plot.owners_info.length > 0) {
+                    popupContent += '<br><b>👥 Владельцы:</b><br>';
+                    plot.owners_info.forEach(owner => {
+                        popupContent += `&nbsp;&nbsp;• ${escapeHtml(owner.name)} (${owner.share}%)<br>`;
+                    });
+                }
+                
+                popupContent += `
+                        <br>
+                        <a href="/plots/${plot.id}/" style="color: #4CAF50; text-decoration: none;">
+                            📋 Открыть карточку участка
+                        </a>
+                    </div>
+                `;
+                
+                marker.bindPopup(popupContent, { maxWidth: 300 });
+                bounds.push([plot.latitude, plot.longitude]);
+                markersCount++;
+            }
+            
+            {% comment %} // Отрисовываем границы если есть
+            if (plot.boundaries && plot.boundaries.length >= 3) {
+                try {
+                    // Проверяем замкнутость полигона
+                    let boundaries = plot.boundaries;
+                    const first = boundaries[0];
+                    const last = boundaries[boundaries.length - 1];
+
+                    // Если полигон не замкнут, добавляем первую точку в конец
+                    if (first[0] !== last[0] || first[1] !== last[1]) {
+                        boundaries = [...boundaries, first];
+                        console.warn(`Полигон участка ${plot.plot_number} был не замкнут, исправлено`);
+                    }
+
+                    // Отрисовываем полигон КРАСНЫМ цветом
+                    const polygon = L.polygon(boundaries, {
+                        color: '#ff0000',        // Ярко-красный цвет границ
+                        fillColor: '#ff3333',    
+                        fillOpacity: 0.15,       // Полупрозрачная заливка
+                        weight: 3,               // Толстая линия для видимости
+                        opacity: 0.9,
+                        lineJoin: 'round',
+                        lineCap: 'round'
+                    }).addTo(boundariesLayer);
+
+                    // Всплывающая подсказка с информацией
+                    polygon.bindPopup(`
+                        <div style="min-width: 180px;">
+                            <b style="font-size: 14px; color: #ff0000;">🏠 Участок №${escapeHtml(plot.plot_number)}</b><br>
+                            <hr style="margin: 4px 0;">
+                            📐 Площадь: <b>${plot.area_sqm} м²</b><br>
+                            📊 Статус: <span style="color: ${getStatusColor(plot.status)};">${plot.status_display}</span><br>
+                            🗺️ Точек границ: <b>${boundaries.length}</b><br>
+                            ${boundaries.length > 0 ? `📍 Центр: ${boundaries[0][0].toFixed(6)}, ${boundaries[0][1].toFixed(6)}` : ''}
+                            <hr style="margin: 4px 0;">
+                            <a href="/plots/${plot.id}/" style="color: #4CAF50; text-decoration: none;">
+                                📋 Открыть карточку участка
+                            </a>
+                        </div>
+                    `, { maxWidth: 300 });
+
+                    // Добавляем точки границ в bounds для центрирования карты
+                    boundaries.forEach(point => {
+                        if (point[0] && point[1]) {
+                            bounds.push([point[0], point[1]]);
+                        }
+                    });
+
+                    boundariesCount++;
+
+                    // Отладочный вывод в консоль (только для разработки)
+                    if (boundaries.length > 0) {
+                        console.log(`Участок ${plot.plot_number}: ${boundaries.length} точек границ, замкнут: ${first[0] === boundaries[boundaries.length-1][0] && first[1] === boundaries[boundaries.length-1][1]}`);
+                    }
+
+                } catch (e) {
+                    console.error(`Ошибка отрисовки границ участка ${plot.plot_number}:`, e);
+                }
+            } {% endcomment %}
+        });
+        
+        // Центрируем карту по всем точкам
+        if (bounds.length > 0) {
+            try {
+                map.fitBounds(bounds, { 
+                    padding: [50, 50],
+                    maxZoom: 18
+                });
+                
+                // Обновляем центр карты для других функций
+                const center = map.getCenter();
+                mapCenterLat = center.lat;
+                mapCenterLon = center.lng;
+            } catch (e) {
+                console.error('Ошибка центрирования карты:', e);
+            }
+        }
+        
+        // Обновляем статистику
+        updateMapStats(allPlotsData);
+        
+        // Обновляем счетчик на карте
+        const plotsCountEl = document.getElementById('map-plots-count');
+        if (plotsCountEl) {
+            plotsCountEl.textContent = 
+                `📍 Маркеров: ${markersCount} | 🗺️ Границ: ${boundariesCount} | Всего участков: ${allPlotsData.length}`;
+        }
+        
+        // Скрываем индикатор загрузки
+        if (loadingEl) loadingEl.style.display = 'none';
+        
+        // Загружаем список участков без координат
+        await loadPlotsWithoutCoords();
+        
+    } catch (error) {
+        console.error('Ошибка загрузки карты:', error);
+        const loadingEl = document.getElementById('map-loading');
+        if (loadingEl) {
+            loadingEl.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-icon">❌</div>
+                    <h3>Ошибка загрузки</h3>
+                    <p>${error.message || 'Не удалось загрузить данные карты'}</p>
+                    <button class="btn btn-primary" onclick="loadMapData()">🔄 Повторить</button>
+                </div>`;
+            loadingEl.style.display = 'flex';
+        }
+    }
+}
+
+// Функция обновления статистики
+function updateMapStats(plots) {
+    const total = plots.length;
+    const active = plots.filter(p => p.status === 'active').length;
+    // Количество участков БЕЗ КООРДИНАТ (а не с границами)
+    const withoutCoords = plots.filter(p => !p.latitude || !p.longitude).length;
+    
+    const statTotal = document.getElementById('stat-total');
+    const statActive = document.getElementById('stat-active');
+    const statNoCoords = document.getElementById('stat-no-coords');
+    
+    if (statTotal) {
+        const valueEl = statTotal.querySelector('.stat-value');
+        if (valueEl) valueEl.textContent = total;
+    }
+    
+    if (statActive) {
+        const valueEl = statActive.querySelector('.stat-value');
+        if (valueEl) valueEl.textContent = active;
+    }
+    
+    if (statNoCoords) {
+        const valueEl = statNoCoords.querySelector('.stat-value');
+        if (valueEl) valueEl.textContent = withoutCoords;  // ← исправлено
+    }
+}
+
+// Загрузка границ для конкретного участка
+async function loadPlotBoundaries(plotId) {
+    try {
+        showAlert('🔄 Загружаем границы из Росреестра...', 'info');
+        
+        const result = await apiFetch(`/api/plots/${plotId}/load-boundaries/`, {
+            method: 'POST'
+        });
+        
+        if (result && result.boundaries) {
+            showAlert(`✅ Границы загружены (${result.boundaries.length} точек)`, 'success');
+            loadMapData(); // Перезагружаем карту
+        } else if (result && result.suggested_cadastral) {
+            showAlert(
+                `⚠️ Границы не найдены. Рядом найден участок: ${result.suggested_cadastral}`, 
+                'warning'
+            );
+        } else {
+            showAlert('❌ Границы не найдены в ПКК', 'warning');
+        }
+        
+    } catch (error) {
+        showAlert(`❌ Ошибка: ${error.message}`, 'error');
+    }
+}
+
+// Массовая загрузка границ
+async function bulkLoadBoundaries() {
+    const content = `
+        <div class="form-group">
+            <label>Режим загрузки:</label>
+            <select id="bulk-load-mode" style="width: 100%; padding: 8px; margin: 8px 0; border-radius: 6px; border: 1px solid #ddd;">
+                <option value="without_boundaries">Участки без границ (в БД)</option>
+                <option value="all">Все участки с кадастровыми номерами</option>
+                <option value="selected">Выбранные участки (по ID)</option>
+            </select>
+        </div>
+        <div id="selected-ids-input" style="display: none;">
+            <label>ID участков (через запятую):</label>
+            <input type="text" id="plot-ids" placeholder="1,2,3,4,5" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
+        </div>
+        <div class="form-group">
+            <label>Задержка между запросами (секунд):</label>
+            <input type="number" id="request-delay" value="0.5" min="0.1" max="5" step="0.1" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
+        </div>
+        <div style="margin: 12px 0; padding: 12px; background: #f8f9fa; border-radius: 8px; border: 1px solid #e9ecef;">
+            <p style="margin: 0; font-size: 0.85rem; color: #666;">
+                ⚠️ <strong>Внимание:</strong><br>
+                • Загрузка может занять время (примерно 1 сек на участок)<br>
+                • Рекомендуется загружать не более 50 участков за раз<br>
+                • Данные берутся из публичной кадастровой карты Росреестра
+            </p>
+        </div>
+        <div id="bulk-load-progress" style="display: none; margin-top: 12px;">
+            <div style="background: #e9ecef; border-radius: 10px; height: 20px; overflow: hidden;">
+                <div id="progress-bar" style="width: 0%; height: 100%; background: linear-gradient(90deg, #4CAF50, #8BC34A); transition: width 0.3s;"></div>
+            </div>
+            <p style="text-align: center; margin-top: 8px; font-size: 0.85rem;" id="progress-text">0%</p>
+        </div>
+    `;
+    
+    openModal('🗺️ Массовая загрузка границ из Росреестра', content, '🚀 Начать загрузку', async () => {
+        const mode = document.getElementById('bulk-load-mode').value;
+        const delay = parseFloat(document.getElementById('request-delay').value) || 0.5;
+        
+        let body = { delay: delay };
+        
+        if (mode === 'all') {
+            body.load_all = true;
+        } else if (mode === 'selected') {
+            const idsText = document.getElementById('plot-ids').value;
+            body.plot_ids = idsText.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
+            if (body.plot_ids.length === 0) {
+                showAlert('Укажите ID участков', 'error');
+                return;
+            }
+        } else {
+            // Получаем список участков без границ
+            try {
+                const plotsData = await apiFetch('/api/plots/?has_boundaries=false&limit=1000');
+                if (plotsData && plotsData.results && plotsData.results.length > 0) {
+                    body.plot_ids = plotsData.results.map(p => p.id);
+                } else {
+                    showAlert('Все участки уже имеют границы!', 'info');
+                    return;
+                }
+            } catch (error) {
+                showAlert('Ошибка получения списка участков', 'error');
+                return;
+            }
+        }
+        
+        // Показываем прогресс
+        const progressDiv = document.getElementById('bulk-load-progress');
+        if (progressDiv) progressDiv.style.display = 'block';
         
         try {
-            const data = await apiFetch(`/api/plots/geo/?${params}`);
-
-            const plotsCountEl = document.getElementById('map-plots-count');
-            const loadingEl = document.getElementById('map-loading');
-            const iframeEl = document.getElementById('map-iframe');
-
-            // Обработка случая, когда нет данных или ошибка
-            if (!data || !data.results) {
-                if (plotsCountEl) plotsCountEl.textContent = 'Ошибка загрузки';
-                if (loadingEl) {
-                    loadingEl.innerHTML = `
-                        <div class="empty-state">
-                            <div class="empty-icon">❌</div>
-                            <h3>Ошибка загрузки</h3>
-                            <p>Не удалось загрузить данные карты</p>
-                            <button class="btn btn-primary" onclick="loadMapData()">🔄 Повторить</button>
-                        </div>`;
-                    loadingEl.style.display = 'flex';
-                }
-                return;
-            }
-
-            const plots = data.results;
-            allPlots = plots;
-
-            // Обработка случая, когда нет участков с координатами
-            if (plots.length === 0) {
-                if (loadingEl) {
-                    loadingEl.innerHTML = `
-                        <div class="empty-state">
-                            <div class="empty-icon">🗺️</div>
-                            <h3>Нет участков с координатами</h3>
-                            <p>Добавьте координаты для участков, чтобы они отобразились на карте</p>
-                            <button class="btn btn-primary" onclick="window.location.href='/plots/'">Перейти к участкам</button>
-                        </div>`;
-                    loadingEl.style.display = 'flex';
-                }
-                if (plotsCountEl) plotsCountEl.textContent = 'Нет участков для отображения';
-                
-                // Показываем стандартную карту
-                if (iframeEl) {
-                    iframeEl.src = `https://www.openstreetmap.org/export/embed.html?bbox=37.5,55.6,37.8,55.9&layer=mapnik`;
-                }
-                
-                // Всё равно загружаем список участков без координат
-                await loadPlotsWithoutCoords();
-                return;
-            }
-
-            // Обновляем счётчик
-            if (plotsCountEl) {
-                plotsCountEl.textContent = 
-                    `Отображается: ${plots.length} ${pluralize(plots.length, 'участок', 'участка', 'участков')}`;
-            }
-
-            // Обновляем статистику
-            updateMapStats(plots);
-
-            // Формируем карту
-            if (iframeEl) {
-                const lats = plots.map(p => p.latitude);
-                const lons = plots.map(p => p.longitude);
-                
-                // Проверяем, что все координаты валидны
-                const validLats = lats.filter(lat => lat !== null && !isNaN(lat));
-                const validLons = lons.filter(lon => lon !== null && !isNaN(lon));
-                
-                if (validLats.length > 0 && validLons.length > 0) {
-                    mapCenterLat = (Math.min(...validLats) + Math.max(...validLats)) / 2;
-                    mapCenterLon = (Math.min(...validLons) + Math.max(...validLons)) / 2;
-
-                    const latSpread = Math.max(...validLats) - Math.min(...validLats);
-                    const lonSpread = Math.max(...validLons) - Math.min(...validLons);
-
-                    const latMargin = Math.max(0.001, latSpread * 0.2);
-                    const lonMargin = Math.max(0.001, lonSpread * 0.2);
-
-                    const bbox = [
-                        Math.min(...validLons) - lonMargin,
-                        Math.min(...validLats) - latMargin,
-                        Math.max(...validLons) + lonMargin,
-                        Math.max(...validLats) + latMargin
-                    ].join(',');
-
-                    iframeEl.src = 
-                        `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${mapCenterLat},${mapCenterLon}`;
-                } else {
-                    iframeEl.src = `https://www.openstreetmap.org/export/embed.html?bbox=37.5,55.6,37.8,55.9&layer=mapnik`;
-                }
-                iframeEl.style.opacity = '1';
-            }
-
-            // Скрываем загрузку
-            if (loadingEl) {
-                loadingEl.style.display = 'none';
-            }
-        
-            // Загружаем участки без координат
-            await loadPlotsWithoutCoords();
-
-        } catch (error) {
-            console.error('Ошибка загрузки карты:', error);
-            const plotsCountEl = document.getElementById('map-plots-count');
-            const loadingEl = document.getElementById('map-loading');
+            showAlert('🔄 Загружаем границы... Это может занять несколько минут', 'info');
             
-            if (plotsCountEl) plotsCountEl.textContent = 'Ошибка загрузки';
-            if (loadingEl) {
-                loadingEl.innerHTML = `
-                    <div class="empty-state">
-                        <div class="empty-icon">❌</div>
-                        <h3>Ошибка загрузки</h3>
-                        <p>${error.message || 'Проверьте подключение к серверу'}</p>
-                        <button class="btn btn-primary" onclick="loadMapData()">🔄 Повторить</button>
-                    </div>`;
-                loadingEl.style.display = 'flex';
+            const result = await apiFetch('/api/plots/bulk-load-boundaries/', {
+                method: 'POST',
+                body: JSON.stringify(body)
+            });
+            
+            if (result) {
+                const message = result.success > 0 
+                    ? `✅ Загружено: ${result.success}, ошибок: ${result.failed}`
+                    : `⚠️ Не удалось загрузить границы. Ошибок: ${result.failed}`;
+                
+                showAlert(message, result.success > 0 ? 'success' : 'warning');
+                
+                // Перезагружаем карту
+                setTimeout(() => loadMapData(), 1000);
             }
+        } catch (error) {
+            showAlert(`❌ Ошибка: ${error.message}`, 'error');
+        } finally {
+            if (progressDiv) progressDiv.style.display = 'none';
         }
-    }
+    });
+    
+    // Обработчик изменения режима
+    setTimeout(() => {
+        const modeSelect = document.getElementById('bulk-load-mode');
+        if (modeSelect) {
+            modeSelect.addEventListener('change', function(e) {
+                const idsInput = document.getElementById('selected-ids-input');
+                if (idsInput) {
+                    idsInput.style.display = e.target.value === 'selected' ? 'block' : 'none';
+                }
+            });
+        }
+    }, 100);
+}
 
-    function updateMapStats(plots) {
-        const total = plots.length;
-        const active = plots.filter(p => p.status === 'active').length;
-        
-        const statTotal = document.getElementById('stat-total');
-        const statActive = document.getElementById('stat-active');
-        
-        if (statTotal) {
-            const valueEl = statTotal.querySelector('.stat-value');
-            if (valueEl) valueEl.textContent = total;
-        }
-        
-        if (statActive) {
-            const valueEl = statActive.querySelector('.stat-value');
-            if (valueEl) valueEl.textContent = active;
-        }
-    }
-
-    async function loadPlotsWithoutCoords(page = 1) {
-        const statusFilter = document.getElementById('map-status-filter').value;
+// Загрузка участков без координат (с пагинацией)
+async function loadPlotsWithoutCoords(page = 1) {
+    try {
+        const statusFilter = document.getElementById('map-status-filter')?.value || '';
         const params = new URLSearchParams();
         
         if (statusFilter) params.append('status', statusFilter);
@@ -302,51 +837,43 @@
         params.append('limit', noCoordsLimit);
         params.append('offset', (page - 1) * noCoordsLimit);
 
-        try {
-            const data = await apiFetch(`/api/plots/?${params}`);
-            const tbody = document.getElementById('no-coords-table-body');
-            
-            if (!data || !data.results) {
-                tbody.innerHTML = `<tr><td colspan="6">Ошибка загрузки</td><tr>`;
-                return;
-            }
+        const data = await apiFetch(`/api/plots/?${params}`);
+        const tbody = document.getElementById('no-coords-table-body');
+        
+        if (!data || !data.results) {
+            if (tbody) tbody.innerHTML = '<tr><td colspan="6">Ошибка загрузки</td></tr>';
+            return;
+        }
 
-            const plotsWithoutCoords = data.results;
-            noCoordsTotalCount = data.count || 0;
-            
-            // Обновляем статистику
-            const statNoCoords = document.getElementById('stat-no-coords');
-            if (statNoCoords) {
-                const valueEl = statNoCoords.querySelector('.stat-value');
-                if (valueEl) valueEl.textContent = noCoordsTotalCount;
-            }
-            
-            document.getElementById('no-coords-count').textContent = 
-                `Найдено: ${noCoordsTotalCount} ${pluralize(noCoordsTotalCount, 'участок', 'участка', 'участков')}`;
+        const plotsWithoutCoords = data.results;
+        noCoordsTotalCount = data.count || 0;
+        noCoordsCurrentPage = page;
+        
+        // Обновляем счетчик
+        const countEl = document.getElementById('no-coords-count');
+        if (countEl) {
+            countEl.textContent = `Найдено: ${noCoordsTotalCount} ${pluralize(noCoordsTotalCount, 'участок', 'участка', 'участков')}`;
+        }
 
-            if (plotsWithoutCoords.length === 0 && page === 1) {
+        if (plotsWithoutCoords.length === 0) {
+            if (tbody) {
                 tbody.innerHTML = `
                     <tr>
                         <td colspan="6">
                             <div class="empty-state">
                                 <div class="empty-icon">✅</div>
-                                <h3>Все участки на карте</h3>
-                                <p>У всех участков заданы координаты</p>
+                                <h3>Все участки имеют координаты</h3>
+                                <p>У всех ${noCoordsTotalCount} участков заданы координаты на карте</p>
                             </div>
                         </td>
                     </tr>`;
-                document.getElementById('no-coords-pagination').innerHTML = '';
-                return;
             }
+            document.getElementById('no-coords-pagination').innerHTML = '';
+            return;
+        }
 
-            if (plotsWithoutCoords.length === 0 && page > 1) {
-                // Если на текущей странице нет данных, но есть предыдущие - загружаем предыдущую
-                if (page > 1) {
-                    await loadPlotsWithoutCoords(page - 1);
-                }
-                return;
-            }
-
+        // Заполняем таблицу
+        if (tbody) {
             tbody.innerHTML = plotsWithoutCoords.map(plot => `
                 <tr style="cursor: pointer;" onclick="quickSetCoordinates(${plot.id}, '${escapeHtml(plot.plot_number)}')">
                     <td>
@@ -354,8 +881,17 @@
                             Уч. №${escapeHtml(plot.plot_number)}
                         </a>
                     </td>
-                    <td style="font-family: monospace; font-size: 0.8rem;">
-                        ${escapeHtml(plot.cadastral_number)}
+                    <td>
+                        <div style="display: flex; gap: 4px;">
+                            <button class="btn btn-sm btn-primary" 
+                                onclick="event.stopPropagation(); openSetCoordsFromMap(${plot.id}, '${escapeHtml(plot.plot_number)}', ${mapCenterLat}, ${mapCenterLon})">
+                                📍 Точка
+                            </button>
+                            <button class="btn btn-sm btn-secondary" 
+                                onclick="event.stopPropagation(); openManualBoundariesModal(${plot.id}, '${escapeHtml(plot.plot_number)}')">
+                                ✏️ Границы
+                            </button>
+                        </div>
                     </td>
                     <td>${plot.area_sqm} м²</td>
                     <td>${getStatusBadge(plot.status)}</td>
@@ -365,291 +901,144 @@
                         </span>
                     </td>
                     <td>
-                        <button class="btn btn-sm btn-primary" onclick="event.stopPropagation(); openSetCoordsFromMap(${plot.id}, '${escapeHtml(plot.plot_number)}', ${mapCenterLat}, ${mapCenterLon})">
-                            📍 Задать координаты
-                        </button>
+                        <div style="display: flex; gap: 4px;">
+                            <button class="btn btn-sm btn-primary" 
+                                onclick="event.stopPropagation(); openSetCoordsFromMap(${plot.id}, '${escapeHtml(plot.plot_number)}', ${mapCenterLat}, ${mapCenterLon})">
+                                📍 Координаты
+                            </button>
+                            <button class="btn btn-sm btn-secondary" 
+                                onclick="event.stopPropagation(); openManualBoundariesModal(${plot.id}, '${escapeHtml(plot.plot_number)}')">
+                                ✏️ Границы
+                            </button>
+                        </div>
                     </td>
                 </tr>
             `).join('');
-            
-            // Рендерим пагинацию
-            renderNoCoordsPagination();
-
-        } catch (error) {
-            console.error('Ошибка загрузки участков без координат:', error);
-            const tbody = document.getElementById('no-coords-table-body');
-            if (tbody) {
-                tbody.innerHTML = `<tr><td colspan="6">Ошибка загрузки: ${error.message}</td></tr>`;
-            }
-        }
-    }
-
-    function renderNoCoordsPagination() {
-        const paginationDiv = document.getElementById('no-coords-pagination');
-        const totalPages = Math.ceil(noCoordsTotalCount / noCoordsLimit);
-        
-        if (totalPages <= 1) {
-            paginationDiv.innerHTML = '';
-            return;
-        }
-
-        let html = '';
-        
-        html += `<button onclick="goToNoCoordsPage(1)" ${noCoordsCurrentPage === 1 ? 'disabled' : ''}>«</button>`;
-        html += `<button onclick="goToNoCoordsPage(${noCoordsCurrentPage - 1})" ${noCoordsCurrentPage === 1 ? 'disabled' : ''}>‹</button>`;
-        
-        // Показываем страницы с умными отступами
-        let startPage = Math.max(1, noCoordsCurrentPage - 2);
-        let endPage = Math.min(totalPages, noCoordsCurrentPage + 2);
-        
-        if (startPage > 1) {
-            html += `<button onclick="goToNoCoordsPage(1)">1</button>`;
-            if (startPage > 2) html += `<button disabled>…</button>`;
         }
         
-        for (let i = startPage; i <= endPage; i++) {
-            html += `<button class="${i === noCoordsCurrentPage ? 'active' : ''}" onclick="goToNoCoordsPage(${i})">${i}</button>`;
+        // Рендерим пагинацию
+        renderNoCoordsPagination();
+
+    } catch (error) {
+        console.error('Ошибка загрузки участков без координат:', error);
+        const tbody = document.getElementById('no-coords-table-body');
+        if (tbody) {
+            tbody.innerHTML = `<tr><td colspan="6">Ошибка загрузки: ${error.message}</td></tr>`;
         }
-        
-        if (endPage < totalPages) {
-            if (endPage < totalPages - 1) html += `<button disabled>…</button>`;
-            html += `<button onclick="goToNoCoordsPage(${totalPages})">${totalPages}</button>`;
-        }
-        
-        html += `<button onclick="goToNoCoordsPage(${noCoordsCurrentPage + 1})" ${noCoordsCurrentPage === totalPages ? 'disabled' : ''}>›</button>`;
-        html += `<button onclick="goToNoCoordsPage(${totalPages})" ${noCoordsCurrentPage === totalPages ? 'disabled' : ''}>»</button>`;
-        
-        paginationDiv.innerHTML = html;
+    }
+}
+
+// Пагинация для списка без координат
+function renderNoCoordsPagination() {
+    const paginationDiv = document.getElementById('no-coords-pagination');
+    if (!paginationDiv) return;
+    
+    const totalPages = Math.ceil(noCoordsTotalCount / noCoordsLimit);
+    
+    if (totalPages <= 1) {
+        paginationDiv.innerHTML = '';
+        return;
     }
 
-    function goToNoCoordsPage(page) {
-        noCoordsCurrentPage = page;
-        loadPlotsWithoutCoords(page);
+    let html = '';
+    
+    html += `<button onclick="goToNoCoordsPage(1)" ${noCoordsCurrentPage === 1 ? 'disabled' : ''}>«</button>`;
+    html += `<button onclick="goToNoCoordsPage(${noCoordsCurrentPage - 1})" ${noCoordsCurrentPage === 1 ? 'disabled' : ''}>‹</button>`;
+    
+    let startPage = Math.max(1, noCoordsCurrentPage - 2);
+    let endPage = Math.min(totalPages, noCoordsCurrentPage + 2);
+    
+    if (startPage > 1) {
+        html += `<button onclick="goToNoCoordsPage(1)">1</button>`;
+        if (startPage > 2) html += `<button disabled>…</button>`;
     }
-
-    function changeNoCoordsLimit() {
-        noCoordsLimit = parseInt(document.getElementById('no-coords-limit').value);
-        noCoordsCurrentPage = 1;
-        loadPlotsWithoutCoords(1);
+    
+    for (let i = startPage; i <= endPage; i++) {
+        html += `<button class="${i === noCoordsCurrentPage ? 'active' : ''}" onclick="goToNoCoordsPage(${i})">${i}</button>`;
     }
-
-    function quickSetCoordinates(plotId, plotNumber) {
-        openSetCoordsFromMap(plotId, plotNumber, mapCenterLat, mapCenterLon);
+    
+    if (endPage < totalPages) {
+        if (endPage < totalPages - 1) html += `<button disabled>…</button>`;
+        html += `<button onclick="goToNoCoordsPage(${totalPages})">${totalPages}</button>`;
     }
+    
+    html += `<button onclick="goToNoCoordsPage(${noCoordsCurrentPage + 1})" ${noCoordsCurrentPage === totalPages ? 'disabled' : ''}>›</button>`;
+    html += `<button onclick="goToNoCoordsPage(${totalPages})" ${noCoordsCurrentPage === totalPages ? 'disabled' : ''}>»</button>`;
+    
+    paginationDiv.innerHTML = html;
+}
 
-    function getStatusBadge(status) {
-        const badges = {
-            'active': '<span class="badge-status badge-active">Активный</span>',
-            'abandoned': '<span class="badge-status badge-inactive">Заброшенный</span>',
-            'disputed': '<span class="badge-status badge-warning">Спорный</span>',
-        };
-        return badges[status] || `<span class="badge-status badge-inactive">${status}</span>`;
-    }
+function goToNoCoordsPage(page) {
+    loadPlotsWithoutCoords(page);
+}
 
-    function openSetCoordsFromMap(plotId, plotNumber, defaultLat, defaultLon) {
-        const content = `
-            <div class="form-group">
-                <label>Широта * (от -90 до 90)</label>
-                <input type="number" id="coord-lat" value="${defaultLat}" step="any" min="-90" max="90" placeholder="55.7558">
-            </div>
-            <div class="form-group">
-                <label>Долгота * (от -180 до 180)</label>
-                <input type="number" id="coord-lon" value="${defaultLon}" step="any" min="-180" max="180" placeholder="37.6173">
-            </div>
-            <div style="margin: 12px 0; display: flex; gap: 8px; flex-wrap: wrap;">
-                <button type="button" class="btn btn-secondary btn-sm" onclick="openYandexMaps()">
-                    🗺️ Яндекс.Карты
-                </button>
-                <button type="button" class="btn btn-secondary btn-sm" onclick="openGoogleMaps()">
-                    📍 Google Maps
-                </button>
-                <button type="button" class="btn btn-secondary btn-sm" onclick="open2GIS()">
-                    🏙️ 2ГИС
-                </button>
-                <button type="button" class="btn btn-secondary btn-sm" onclick="useCurrentMapCenter()">
-                    📌 Центр карты
-                </button>
-            </div>
-            <p style="font-size: 0.8rem; color: var(--gray-500);">
-                Найдите участок на карте, нажмите правой кнопкой мыши и выберите "Копировать координаты"
-            </p>
-            <p style="font-size: 0.8rem; color: var(--gray-500);">
-                Или нажмите "Центр карты" для установки координат в центре текущего вида
-            </p>
-        `;
-        
-        openModal(`Задать координаты для участка №${escapeHtml(plotNumber)}`, content, 'Сохранить', async () => {
-            const lat = parseFloat(document.getElementById('coord-lat').value);
-            const lon = parseFloat(document.getElementById('coord-lon').value);
-            
-            if (isNaN(lat) || isNaN(lon)) {
-                showAlert('Введите корректные координаты', 'error');
-                return;
-            }
-            
-            if (lat < -90 || lat > 90) {
-                showAlert('Широта должна быть от -90 до 90', 'error');
-                return;
-            }
-            
-            if (lon < -180 || lon > 180) {
-                showAlert('Долгота должна быть от -180 до 180', 'error');
-                return;
-            }
-            
-            const result = await apiFetch(`/api/plots/${plotId}/set-coordinates/`, {
-                method: 'POST',
-                body: JSON.stringify({ latitude: lat, longitude: lon }),
-            });
-            
-            if (result) {
-                showAlert('Координаты сохранены', 'success');
-                loadMapData();
-            }
-        });
-        
-        // Функции для открытия карт
-        window.openYandexMaps = function() {
-            const lat = document.getElementById('coord-lat').value || defaultLat;
-            const lon = document.getElementById('coord-lon').value || defaultLon;
-            window.open(`https://yandex.ru/maps/?ll=${lon},${lat}&z=18`, '_blank');
-        };
-        
-        window.openGoogleMaps = function() {
-            const lat = document.getElementById('coord-lat').value || defaultLat;
-            const lon = document.getElementById('coord-lon').value || defaultLon;
-            window.open(`https://www.google.com/maps?q=${lat},${lon}`, '_blank');
-        };
-        
-        window.open2GIS = function() {
-            const lat = document.getElementById('coord-lat').value || defaultLat;
-            const lon = document.getElementById('coord-lon').value || defaultLon;
-            window.open(`https://2gis.ru/geo/${lon},${lat}`, '_blank');
-        };
-        
-        window.useCurrentMapCenter = function() {
-            document.getElementById('coord-lat').value = mapCenterLat;
-            document.getElementById('coord-lon').value = mapCenterLon;
-        };
-    }
+function changeNoCoordsLimit() {
+    noCoordsLimit = parseInt(document.getElementById('no-coords-limit').value);
+    noCoordsCurrentPage = 1;
+    loadPlotsWithoutCoords(1);
+}
 
-    function copyCoordinatesList() {
-        const coordsText = allPlots.map(p => 
-            `${p.plot_number}: ${p.latitude}, ${p.longitude}`
-        ).join('\n');
-        
-        navigator.clipboard.writeText(coordsText).then(() => {
-            showAlert('Координаты скопированы в буфер обмена', 'success');
-        }).catch(() => {
-            showAlert('Не удалось скопировать', 'error');
-        });
-    }
+function quickSetCoordinates(plotId, plotNumber) {
+    openSetCoordsFromMap(plotId, plotNumber, mapCenterLat, mapCenterLon);
+}
 
-    async function openBulkCoordsModal() {
-        const content = `
-            <p style="margin-bottom: 12px;">Вставьте данные в формате:</p>
-            <code style="display: block; background: var(--gray-100); padding: 8px; border-radius: 4px; margin-bottom: 12px; font-size: 0.8rem;">
-                номер_участка широта долгота<br>
-                42А 55.7558 37.6173<br>
-                43 55.7560 37.6180
-            </code>
-            <div class="form-group">
-                <label>Данные координат *</label>
-                <textarea id="bulk-coords-text" rows="10" placeholder="номер_участка широта долгота"></textarea>
-            </div>
-        `;
-        
-        openModal('Массовое обновление координат', content, 'Обновить', async () => {
-            const text = document.getElementById('bulk-coords-text').value.trim();
-            if (!text) {
-                showAlert('Введите данные', 'error');
-                return;
-            }
-            
-            const lines = text.split('\n').filter(line => line.trim());
-            const updates = [];
-            const errors = [];
-            
-            // Получаем все участки для сопоставления номеров
-            const allPlotsData = await apiFetch('/api/plots/?limit=1000&fields=id,plot_number');
-            const plotMap = {};
-            if (allPlotsData && allPlotsData.results) {
-                allPlotsData.results.forEach(p => {
-                    plotMap[p.plot_number.toUpperCase()] = p.id;
-                });
-            }
-            
-            for (const line of lines) {
-                const parts = line.trim().split(/\s+/);
-                if (parts.length < 3) {
-                    errors.push(`Неверный формат: ${line}`);
-                    continue;
-                }
-                
-                const plotNumber = parts[0].toUpperCase();
-                const lat = parseFloat(parts[1]);
-                const lon = parseFloat(parts[2]);
-                
-                if (isNaN(lat) || isNaN(lon)) {
-                    errors.push(`Неверные координаты: ${line}`);
-                    continue;
-                }
-                
-                const plotId = plotMap[plotNumber];
-                if (!plotId) {
-                    errors.push(`Участок не найден: ${plotNumber}`);
-                    continue;
-                }
-                
-                updates.push({
-                    id: plotId,
-                    latitude: lat,
-                    longitude: lon
-                });
-            }
-            
-            if (updates.length === 0) {
-                showAlert('Нет корректных данных для обновления', 'error');
-                return;
-            }
-            
-            const result = await apiFetch('/api/plots/bulk-set-coordinates/', {
-                method: 'POST',
-                body: JSON.stringify(updates),
-            });
-            
-            if (result) {
-                showAlert(
-                    `Обновлено: ${result.updated}, ошибок: ${result.errors}`,
-                    result.errors > 0 ? 'warning' : 'success'
-                );
-                loadMapData();
-            }
-        });
-    }
+function getStatusBadge(status) {
+    const badges = {
+        'active': '<span class="badge-status badge-active">Активный</span>',
+        'abandoned': '<span class="badge-status badge-inactive">Заброшенный</span>',
+        'disputed': '<span class="badge-status badge-warning">Спорный</span>',
+    };
+    return badges[status] || `<span class="badge-status badge-inactive">${status}</span>`;
+}
 
-    function pluralize(n, one, few, many) {
-        const mod10 = n % 10;
-        const mod100 = n % 100;
-        if (mod10 === 1 && mod100 !== 11) return one;
-        if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return few;
-        return many;
-    }
+// Вспомогательные функции
+function pluralize(n, one, few, many) {
+    const mod10 = n % 10;
+    const mod100 = n % 100;
+    if (mod10 === 1 && mod100 !== 11) return one;
+    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return few;
+    return many;
+}
 
-    function escapeHtml(text) {
-        if (!text) return '';
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-    }
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
 
-    document.addEventListener('DOMContentLoaded', () => {
+// Инициализация при загрузке страницы
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('Инициализация карты...');
+    
+    // Инициализируем карту
+    const initialized = initLeafletMap();
+    
+    if (initialized) {
+        // Загружаем данные
         loadMapData();
-        // Привязываем обработчик изменения лимита
-        const limitSelect = document.getElementById('no-coords-limit');
-        if (limitSelect) {
-            limitSelect.addEventListener('change', changeNoCoordsLimit);
-        }
-    });
+    } else {
+        console.error('Не удалось инициализировать карту');
+        document.getElementById('map-loading').innerHTML = `
+            <div class="empty-state">
+                <div class="empty-icon">❌</div>
+                <h3>Ошибка инициализации карты</h3>
+                <p>Проверьте подключение к интернету</p>
+                <button class="btn btn-primary" onclick="location.reload()">🔄 Обновить страницу</button>
+            </div>`;
+    }
+    
+    // Привязываем обработчики
+    const limitSelect = document.getElementById('no-coords-limit');
+    if (limitSelect) {
+        limitSelect.addEventListener('change', changeNoCoordsLimit);
+    }
+    
+    // Обработчики фильтров
+    const statusFilter = document.getElementById('map-status-filter');
+    const ownerFilter = document.getElementById('map-owner-filter');
+    if (statusFilter) statusFilter.addEventListener('change', loadMapData);
+    if (ownerFilter) ownerFilter.addEventListener('change', loadMapData);
+});
 </script>
 {% endblock %}

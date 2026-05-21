@@ -1,3 +1,5 @@
+<!-- SNT/payments/templates/payments/bank_import.html - обновленная версия -->
+
 {% extends "base.html" %}
 
 {% block title %}Импорт из банка | CRM СНТ{% endblock %}
@@ -23,17 +25,11 @@
         <span style="font-weight: 600;">📤 Загрузить выписку</span>
     </div>
     <div style="padding: 24px;">
-        <!-- Скрытая форма для правильной отправки файла -->
-        <form id="upload-form" enctype="multipart/form-data" style="display: none;">
-            {% csrf_token %}
-            <input type="file" name="file" id="form-file-input" accept=".csv,.xlsx,.xls,.txt">
-        </form>
-        
         <div style="border: 2px dashed var(--gray-300); border-radius: var(--radius); padding: 40px; text-align: center;" id="drop-zone">
             <div class="empty-icon" style="font-size: 3rem;">📁</div>
             <h3>Перетащите файл сюда или нажмите для выбора</h3>
-            <p style="color: var(--gray-500); margin-top: 8px;">Поддерживаются форматы: CSV, Excel (.xlsx, .xls), 1С (.txt)</p>
-            <input type="file" id="file-input" accept=".csv,.xlsx,.xls,.txt" style="display: none;" onchange="handleFileSelect(event)">
+            <p style="color: var(--gray-500); margin-top: 8px;">Поддерживаются форматы: CSV, Excel (.xlsx, .xls), 1С (.txt), PDF</p>
+            <input type="file" id="file-input" accept=".csv,.xlsx,.xls,.txt,.pdf" style="display: none;" onchange="handleFileSelect(event)">
             <button class="btn btn-primary" style="margin-top: 16px;" onclick="document.getElementById('file-input').click()">Выбрать файл</button>
         </div>
         
@@ -50,6 +46,14 @@
     </div>
 </div>
 
+<!-- Результаты импорта -->
+<div id="import-results" style="display: none;" class="table-container" style="margin-bottom: 24px;">
+    <div class="table-toolbar">
+        <span style="font-weight: 600;">✅ Результаты импорта</span>
+    </div>
+    <div id="results-content"></div>
+</div>
+
 <!-- История импортов -->
 <div class="table-container">
     <div class="table-toolbar">
@@ -63,13 +67,26 @@
                 <th>Файл</th>
                 <th>Транзакций</th>
                 <th>Сопоставлено</th>
+                <th>Оплачено</th>
                 <th>Статус</th>
+                <th>Действия</th>
             </tr>
         </thead>
         <tbody id="history-table">
-            <tr><td colspan="6">Загрузка...</td></tr>
+            <tr><td colspan="8">Загрузка...</td></tr>
         </tbody>
     </table>
+</div>
+
+<!-- Модальное окно для просмотра деталей -->
+<div id="details-modal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 10000; justify-content: center; align-items: center;">
+    <div style="background: white; border-radius: 12px; max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto;">
+        <div style="padding: 20px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between;">
+            <h3>Детали импорта</h3>
+            <button onclick="closeDetailsModal()" style="background: none; border: none; font-size: 24px; cursor: pointer;">&times;</button>
+        </div>
+        <div id="details-content" style="padding: 20px;"></div>
+    </div>
 </div>
 {% endblock %}
 
@@ -77,7 +94,6 @@
 <script>
     let selectedFile = null;
 
-    // Функция получения CSRF-токена из cookie
     function getCSRFToken() {
         const name = 'csrftoken';
         let cookieValue = null;
@@ -139,33 +155,36 @@
         formData.append('file', selectedFile);
 
         const csrftoken = getCSRFToken();
-        console.log('CSRF Token:', csrftoken); // Для отладки
 
         try {
             const response = await fetch('/api/bank-statements/import/', {
                 method: 'POST',
                 headers: {
                     'X-CSRFToken': csrftoken,
-                    // Не устанавливаем Content-Type! Браузер сам установит с boundary
                 },
                 body: formData,
-                credentials: 'same-origin', // Важно для передачи cookie
+                credentials: 'same-origin',
             });
 
             progressBar.style.width = '100%';
 
-            console.log('Response status:', response.status); // Для отладки
-
             if (!response.ok) {
                 const errorText = await response.text();
-                console.error('Error response:', errorText);
                 throw new Error(`Ошибка ${response.status}: ${errorText}`);
             }
 
             const data = await response.json();
-            showAlert(`✅ Импортировано: ${data.detail}, сопоставлено: ${data.matched}`, 'success');
             
-            // Сброс
+            // Показываем результаты
+            showImportResults(data);
+            
+            let message = `✅ Импортировано: ${data.detail}`;
+            if (data.matched > 0) {
+                message += `, сопоставлено и оплачено: ${data.matched}`;
+            }
+            showAlert(message, 'success');
+            
+            // Сброс формы
             selectedFile = null;
             document.getElementById('file-info').style.display = 'none';
             document.getElementById('file-input').value = '';
@@ -180,13 +199,70 @@
         }
     }
 
+    function showImportResults(data) {
+        const resultsDiv = document.getElementById('import-results');
+        const contentDiv = document.getElementById('results-content');
+        
+        if (!data.payments || data.payments.length === 0) {
+            resultsDiv.style.display = 'none';
+            return;
+        }
+        
+        let html = `
+            <div style="padding: 16px;">
+                <p><strong>💰 Обработано платежей:</strong> ${data.payments.length}</p>
+                <div style="max-height: 300px; overflow-y: auto;">
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <thead>
+                            <tr style="background: var(--gray-50);">
+                                <th style="padding: 8px; text-align: left;">Плательщик</th>
+                                <th style="padding: 8px; text-align: left;">Сумма</th>
+                                <th style="padding: 8px; text-align: left;">Начисление</th>
+                                <th style="padding: 8px; text-align: left;">Статус</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+        `;
+        
+        for (const payment of data.payments) {
+            const statusClass = payment.new_status === 'Оплачено' ? 'badge-active' : 'badge-warning';
+            html += `
+                <tr style="border-bottom: 1px solid var(--gray-100);">
+                    <td style="padding: 8px;">${escapeHtml(payment.payer_name)}</td>
+                    <td style="padding: 8px; font-weight: 600;">${payment.amount} ₽</td>
+                    <td style="padding: 8px;">№${payment.assessment_id}</td>
+                    <td style="padding: 8px;">
+                        <span class="badge-status ${statusClass}">
+                            ${payment.new_status} ${payment.debt_remaining === '0' ? '✅' : `(долг: ${payment.debt_remaining} ₽)`}
+                        </span>
+                    </td>
+                </tr>
+            `;
+        }
+        
+        html += `
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+        
+        contentDiv.innerHTML = html;
+        resultsDiv.style.display = 'block';
+        
+        // Автоматически скрываем через 10 секунд
+        setTimeout(() => {
+            resultsDiv.style.display = 'none';
+        }, 10000);
+    }
+
     async function loadHistory() {
         try {
             const data = await apiFetch('/api/bank-statements/?ordering=-statement_date&limit=10');
             const tbody = document.getElementById('history-table');
             
             if (!data || !data.results || data.results.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state"><div class="empty-icon">📋</div><h3>Нет импортов</h3></div></td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="8"><div class="empty-state"><div class="empty-icon">📋</div><h3>Нет импортов</h3></div></td></tr>`;
                 return;
             }
 
@@ -197,7 +273,11 @@
                     <td><a href="${s.file_original}" style="color: var(--primary);">📎 ${s.file_original.split('/').pop()}</a></td>
                     <td>${s.total_transactions}</td>
                     <td><strong>${s.matched_transactions}</strong></td>
+                    <td><span class="badge-status badge-active">${s.matched_transactions || 0}</span></td>
                     <td>${getImportStatusBadge(s.status)}</td>
+                    <td>
+                        <button class="btn-icon" onclick="viewStatementDetails(${s.id})" title="Детали">👁️</button>
+                    </td>
                 </tr>
             `).join('');
         } catch (error) {
@@ -205,9 +285,62 @@
         }
     }
 
+    async function viewStatementDetails(statementId) {
+        try {
+            const data = await apiFetch(`/api/bank-transactions/?statement=${statementId}&limit=100`);
+            if (!data || !data.results) return;
+            
+            const modal = document.getElementById('details-modal');
+            const content = document.getElementById('details-content');
+            
+            let html = `
+                <h4 style="margin-bottom: 16px;">Транзакции</h4>
+                <div style="max-height: 500px; overflow-y: auto;">
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <thead>
+                            <tr style="background: var(--gray-50);">
+                                <th style="padding: 8px; text-align: left;">Дата</th>
+                                <th style="padding: 8px; text-align: left;">Плательщик</th>
+                                <th style="padding: 8px; text-align: left;">Сумма</th>
+                                <th style="padding: 8px; text-align: left;">Статус</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+            `;
+            
+            for (const trans of data.results) {
+                const statusIcon = trans.is_matched ? '✅' : '❌';
+                const statusText = trans.is_matched ? `Сопоставлено (${trans.match_confidence}%)` : 'Не сопоставлено';
+                html += `
+                    <tr style="border-bottom: 1px solid var(--gray-100);">
+                        <td style="padding: 8px;">${formatDate(trans.transaction_date)}</td>
+                        <td style="padding: 8px;">${escapeHtml(trans.payer_name)}</td>
+                        <td style="padding: 8px; font-weight: 600;">${trans.amount} ₽</td>
+                        <td style="padding: 8px;">${statusIcon} ${statusText}</td>
+                    </tr>
+                `;
+            }
+            
+            html += `
+                        </tbody>
+                    </table>
+                </div>
+            `;
+            
+            content.innerHTML = html;
+            modal.style.display = 'flex';
+        } catch (error) {
+            showAlert('Ошибка загрузки деталей', 'error');
+        }
+    }
+    
+    function closeDetailsModal() {
+        document.getElementById('details-modal').style.display = 'none';
+    }
+
     function getImportStatusBadge(status) {
         const map = {
-            'imported': '<span class="badge-status badge-warning">Импортирована</span>',
+            'imported': '<span class="badge-status badge-warning">📥 Импортирована</span>',
             'processed': '<span class="badge-status badge-active">✅ Обработана</span>',
             'error': '<span class="badge-status badge-danger">❌ Ошибка</span>',
         };

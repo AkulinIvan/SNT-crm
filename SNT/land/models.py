@@ -86,6 +86,27 @@ class LandPlot(models.Model):
         'Дата обновления',
         auto_now=True
     )
+    boundaries = models.JSONField(
+        'Границы участка',
+        null=True,
+        blank=True,
+        help_text='Координаты границ участка из Росреестра [[lat, lon], ...]'
+    )
+    
+    # Новое поле для хранения данных из ПКК
+    pkk_data = models.JSONField(
+        'Данные ПКК',
+        null=True,
+        blank=True,
+        help_text='Данные публичной кадастровой карты'
+    )
+    
+    # Дата последнего обновления из Росреестра
+    rosreestr_updated = models.DateTimeField(
+        'Дата обновления из Росреестра',
+        null=True,
+        blank=True
+    )
 
     class Meta:
         verbose_name = 'Земельный участок'
@@ -125,6 +146,11 @@ class LandPlot(models.Model):
         """Основной адрес (или номер участка, если адрес не задан)"""
         return self.address or f'Участок №{self.plot_number}'
 
+    @property
+    def has_boundaries(self):
+        """Проверка наличия границ участка"""
+        return self.boundaries is not None and len(self.boundaries) > 0
+    
     def clean(self):
         """Расширенная валидация модели"""
         super().clean()

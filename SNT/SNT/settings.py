@@ -230,3 +230,10 @@ LOGGING = {
         },
     },
 }
+
+
+ROSREESTR_API_KEY = '53ba1b7a55abbа14aa97eff3a5220792'  # Ваш API ключ
+ROSREESTR_API_URL = 'https://api-cloud.ru/api/rosreestr.php'
+ROSREESTR_TIMEOUT = 120  # Таймаут ожидания ответа
+
+KADNET_API_KEY = '' 

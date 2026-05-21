@@ -35,8 +35,6 @@ class LandPlotDetailSerializer(serializers.ModelSerializer):
     updated_at = serializers.DateTimeField(read_only=True, format='%d.%m.%Y %H:%M')
     has_coordinates = serializers.SerializerMethodField(read_only=True)
     
-    # Убираем owners_count из детального сериализатора
-    # или делаем его только для чтения, если нужно
     owners_count = serializers.IntegerField(read_only=True, required=False)
     
     plot_number = serializers.CharField(
@@ -44,16 +42,26 @@ class LandPlotDetailSerializer(serializers.ModelSerializer):
         help_text='Номер участка (может содержать буквы, например: 42А)'
     )
 
+    has_boundaries = serializers.SerializerMethodField(read_only=True)
+    boundaries_loaded = serializers.SerializerMethodField(read_only=True)
+    rosreestr_updated = serializers.DateTimeField(read_only=True, format='%d.%m.%Y %H:%M')
     class Meta:
         model = LandPlot
         fields = [
             'id', 'plot_number', 'cadastral_number', 'area_sqm', 'address',
             'latitude', 'longitude', 'status', 'status_display', 'notes',
-            'created_at', 'updated_at', 'has_coordinates', 'owners_count'
+            'created_at', 'updated_at', 'has_coordinates', 'owners_count',
+            'has_boundaries', 'boundaries_loaded', 'boundaries', 'rosreestr_updated',
         ]
         read_only_fields = ('id', 'created_at', 'updated_at', 'status_display', 
                            'has_coordinates', 'owners_count')
 
+    def get_has_boundaries(self, obj):
+        return obj.has_boundaries
+    
+    def get_boundaries_loaded(self, obj):
+        return obj.boundaries is not None
+    
     def get_has_coordinates(self, obj):
         return obj.has_coordinates
 
@@ -137,12 +145,13 @@ class LandPlotGeoSerializer(serializers.ModelSerializer):
     """
     owners_info = serializers.SerializerMethodField(read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
-
+    boundaries = serializers.JSONField(read_only=True)
+    
     class Meta:
         model = LandPlot
         fields = [
             'id', 'plot_number', 'latitude', 'longitude', 
-            'status', 'status_display', 'owners_info', 'area_sqm'
+            'status', 'status_display', 'owners_info', 'area_sqm', 'boundaries',
         ]
 
     def get_owners_info(self, obj):

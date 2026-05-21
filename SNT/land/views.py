@@ -1,4 +1,5 @@
-# SNT\land\views.py
+from typing import List
+
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -11,6 +12,7 @@ from django.db import transaction
 from django.utils import timezone
 import logging
 from rest_framework import permissions
+from .services import rosreestr_service
 
 from accounts.permissions import IsManagerOrAbove
 
@@ -20,6 +22,7 @@ from .serializers import (
     LandPlotDetailSerializer,
     LandPlotGeoSerializer,
 )
+from .services import RosreestrService
 
 logger = logging.getLogger(__name__)
 
@@ -278,6 +281,256 @@ class LandPlotViewSet(viewsets.ModelViewSet):
         serializer = LandPlotDetailSerializer(land_plot)
         return Response(serializer.data)
 
+    @action(detail=True, methods=['post'], url_path='load-boundaries')
+    def load_boundaries(self, request, pk=None):
+        """
+        POST /api/plots/{id}/load-boundaries/
+        
+        Загрузка границ участка из Росреестра через бесплатное API ПКК
+        """
+        land_plot = self.get_object()
+        
+        if not land_plot.cadastral_number:
+            return Response(
+                {'detail': 'Отсутствует кадастровый номер'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            if land_plot.has_coordinates:
+                boundaries = rosreestr_service.get_boundaries_from_nspd_by_coords(
+                    land_plot.latitude, 
+                    land_plot.longitude
+                )
+                if boundaries:
+                    land_plot.boundaries = boundaries
+                    land_plot.rosreestr_updated = timezone.now()
+                    land_plot.save(update_fields=['boundaries', 'rosreestr_updated'])
+                
+                logger.info(
+                    f'Границы загружены для участка #{land_plot.plot_number}: '
+                    f'{len(enriched_data["boundaries"])} точек'
+                )
+                
+                return Response({
+                    'detail': f'Границы загружены ({len(enriched_data["boundaries"])} точек)',
+                    'boundaries': enriched_data['boundaries'],
+                    'updated_at': land_plot.rosreestr_updated,
+                })
+            else:
+                # Пробуем найти по координатам
+                if land_plot.has_coordinates:
+                    parcel_info = rosreestr_service.get_parcel_by_coordinates(
+                        land_plot.latitude, 
+                        land_plot.longitude
+                    )
+                    if parcel_info and parcel_info.get('cadastral_number'):
+                        return Response({
+                            'detail': 'Границы не найдены, но найден участок поблизости',
+                            'suggested_cadastral': parcel_info['cadastral_number'],
+                            'parcel_info': parcel_info
+                        })
+                
+                return Response(
+                    {'detail': 'Границы не найдены в ПКК'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+                
+        except Exception as e:
+            logger.error(f'Ошибка загрузки границ: {str(e)}')
+            return Response(
+                {'detail': f'Ошибка загрузки: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    @action(detail=False, methods=['post'], url_path='bulk-load-boundaries')
+    def bulk_load_boundaries(self, request):
+        """
+        POST /api/plots/bulk-load-boundaries/
+        
+        Массовая загрузка границ через бесплатное API ПКК
+        """
+        plot_ids = request.data.get('plot_ids')
+        load_all = request.data.get('load_all', False)
+        delay = float(request.data.get('delay', 0.5))
+        
+        if load_all:
+            plots = LandPlot.objects.filter(
+                cadastral_number__isnull=False
+            ).exclude(cadastral_number='')
+        elif plot_ids:
+            plots = LandPlot.objects.filter(id__in=plot_ids)
+        else:
+            return Response(
+                {'detail': 'Укажите plot_ids или load_all=true'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Используем пакетную загрузку
+        results = rosreestr_service.batch_load_boundaries(plots, delay=delay)
+        
+        return Response(results)
+    
+    @action(detail=True, methods=['get'], url_path='check-rosreestr')
+    def check_rosreestr(self, request, pk=None):
+        """
+        GET /api/plots/{id}/check-rosreestr/
+        
+        Проверка наличия данных в Росреестре без сохранения
+        """
+        land_plot = self.get_object()
+        
+        result = {
+            'plot_id': land_plot.id,
+            'plot_number': land_plot.plot_number,
+            'cadastral_number': land_plot.cadastral_number,
+            'has_boundaries_in_db': land_plot.has_boundaries,
+            'checks': {}
+        }
+        
+        # Проверка по кадастровому номеру
+        if land_plot.cadastral_number:
+            boundaries = rosreestr_service.get_parcel_boundaries(land_plot.cadastral_number)
+            result['checks']['by_cadastral'] = {
+                'found': boundaries is not None,
+                'points_count': len(boundaries) if boundaries else 0
+            }
+        
+        # Проверка по координатам
+        if land_plot.has_coordinates:
+            parcel_info = rosreestr_service.get_parcel_by_coordinates(
+                land_plot.latitude, 
+                land_plot.longitude
+            )
+            result['checks']['by_coordinates'] = {
+                'found': parcel_info is not None,
+                'cadastral_number': parcel_info.get('cadastral_number') if parcel_info else None,
+                'address': parcel_info.get('address') if parcel_info else None
+            }
+        
+        return Response(result)
+    
+    @action(detail=True, methods=['get'], url_path='boundaries')
+    def get_boundaries(self, request, pk=None):
+        """
+        GET /api/plots/{id}/boundaries/
+        
+        Получение сохраненных границ участка
+        """
+        land_plot = self.get_object()
+        
+        if not land_plot.has_boundaries:
+            return Response(
+                {'detail': 'Границы не загружены'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        return Response({
+            'id': land_plot.id,
+            'plot_number': land_plot.plot_number,
+            'cadastral_number': land_plot.cadastral_number,
+            'boundaries': land_plot.boundaries,
+            'rosreestr_updated': land_plot.rosreestr_updated,
+        })
+    
+    @action(detail=False, methods=['get'], url_path='all-boundaries')
+    def all_boundaries(self, request):
+        """
+        GET /api/plots/all-boundaries/
+        
+        Получение всех загруженных границ для карты
+        """
+        plots = LandPlot.objects.filter(
+            boundaries__isnull=False
+        ).exclude(boundaries=[])
+        
+        data = []
+        for plot in plots:
+            data.append({
+                'id': plot.id,
+                'plot_number': plot.plot_number,
+                'cadastral_number': plot.cadastral_number,
+                'status': plot.status,
+                'boundaries': plot.boundaries,
+                'area_sqm': plot.area_sqm,
+                'owners_count': plot.owners_count,
+            })
+        
+        return Response({
+            'count': len(data),
+            'results': data,
+        })
+    
+    @action(detail=True, methods=['post'], url_path='save-boundaries')
+    def save_boundaries(self, request, pk=None):
+        """
+        POST /api/plots/{id}/save-boundaries/
+        Ручное сохранение границ участка с автоматической нормализацией.
+        """
+        land_plot = self.get_object()
+        boundaries = request.data.get('boundaries', [])
+        source = request.data.get('source', 'manual')   
+
+        if not boundaries or len(boundaries) < 3:
+            return Response(
+                {'detail': 'Минимум 3 точки для построения полигона'},
+                status=status.HTTP_400_BAD_REQUEST
+            )   
+
+        # Валидация и нормализация координат
+        validated = []
+        for point in boundaries:
+            if len(point) < 2:
+                continue
+            try:
+                lat, lon = float(point[0]), float(point[1])
+                if -90 <= lat <= 90 and -180 <= lon <= 180:
+                    validated.append([lat, lon])
+            except (ValueError, TypeError):
+                continue    
+
+        if len(validated) < 3:
+            return Response(
+                {'detail': 'Недостаточно валидных координат (минимум 3 точки)'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # НОРМАЛИЗАЦИЯ: удаляем дубликаты и замыкаем полигон
+        normalized = self._normalize_boundaries(validated)
+
+        land_plot.boundaries = normalized
+        land_plot.rosreestr_updated = timezone.now()
+        land_plot.save(update_fields=['boundaries', 'rosreestr_updated', 'updated_at']) 
+
+        logger.info(
+            f'Границы сохранены для участка #{land_plot.plot_number}: '
+            f'{len(normalized)} точек (источник: {source})'
+        )   
+
+        return Response({
+            'detail': f'Границы сохранены ({len(normalized)} точек)',
+            'boundaries': normalized,
+            'source': source,
+            'normalized': len(normalized) != len(validated)
+        })
+
+    def _normalize_boundaries(self, boundaries: List) -> List:
+        """Нормализация границ: замыкание и удаление дубликатов"""
+        if not boundaries or len(boundaries) < 3:
+            return boundaries
+        
+        # Удаляем дублирующиеся подряд точки
+        unique = []
+        for point in boundaries:
+            if not unique or point != unique[-1]:
+                unique.append(point)
+        
+        # Замыкаем полигон если нужно
+        if len(unique) >= 3 and unique[0] != unique[-1]:
+            unique.append(unique[0])
+        
+        return unique
+    
     @action(detail=False, methods=['get'], url_path='stats')
     def stats(self, request):
         """
