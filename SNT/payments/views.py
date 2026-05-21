@@ -628,23 +628,23 @@ class AssessmentViewSet(viewsets.ModelViewSet):
         Отправка квитанций всем должникам
         """
         from .email_service import email_sender
-        
+
         category_id = request.data.get('category_id')
         period_id = request.data.get('period_id')
         min_debt = Decimal(str(request.data.get('min_debt', 0)))
         attach_pdf = request.data.get('attach_pdf', False)  # ← по умолчанию False
-        
+
         assessments = Assessment.objects.filter(
             status__in=['pending', 'partial', 'overdue']
         ).select_related('owner', 'category', 'period')
-        
+
         if category_id:
             assessments = assessments.filter(category_id=category_id)
         if period_id:
             assessments = assessments.filter(period_id=period_id)
         if min_debt > 0:
             assessments = assessments.filter(amount__gte=min_debt)
-        
+
         # Фильтруем только тех, у кого есть email
         assessments_with_email = []
         for assessment in assessments:
@@ -653,24 +653,24 @@ class AssessmentViewSet(viewsets.ModelViewSet):
             ).exists()
             if has_email:
                 assessments_with_email.append(assessment)
-        
+
         if not assessments_with_email:
             return Response({
                 'detail': 'Нет должников с email для рассылки',
                 'total': 0,
             })
-        
+
         # Запускаем асинхронную отправку
         from threading import Thread
-        
+
         def send_in_background():
             email_sender.email_service.send_bulk_receipts(
                 assessments=assessments_with_email,
                 send_pdf_attachment=attach_pdf
             )
-        
+
         Thread(target=send_in_background, daemon=True).start()
-        
+
         return Response({
             'detail': f'Запущена рассылка {len(assessments_with_email)} квитанций должникам',
             'total': len(assessments_with_email),
@@ -1465,12 +1465,12 @@ class PaymentsDashboardView(View):
 
 class AssessmentsListView(View):
     def get(self, request):
-        return render(request, 'payments/assessments.html', {'active_page': 'payments'})
+        return render(request, 'payments/assessments.html', {'active_page': 'assessments'})
 
 
 class BankImportView(View):
     def get(self, request):
-        return render(request, 'payments/bank_import.html', {'active_page': 'payments'})
+        return render(request, 'payments/bank_import.html', {'active_page': 'bank-import'})
 
 
 class ReceiptTemplateViewSet(viewsets.ModelViewSet):

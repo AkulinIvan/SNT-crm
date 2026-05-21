@@ -117,9 +117,9 @@
 <!-- Управление координатами -->
 <div class="filters-bar" style="margin-top: 16px;">
     <span style="font-weight: 500;">⚡ Действия с границами:</span>
-    <button class="btn btn-sm btn-primary" onclick="bulkLoadBoundaries()">
+    {% comment %} <button class="btn btn-sm btn-primary" onclick="bulkLoadBoundaries()">
         🗺️ Загрузить границы из Росреестра
-    </button>
+    </button> {% endcomment %}
     <button class="btn btn-sm btn-secondary" onclick="loadMapData()">
         🔄 Обновить карту
     </button>
@@ -128,9 +128,6 @@
     </button>
     <button class="btn btn-sm btn-secondary" onclick="openNSPDHelper()">
         🗺️ Открыть карту НСПД (копировать координаты)
-    </button>
-    <button class="btn btn-sm btn-secondary" onclick="loadMapData()">
-        🔄 Обновить карту
     </button>
 </div>
 

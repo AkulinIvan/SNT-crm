@@ -294,7 +294,11 @@ class ProfileView(View):
 class UsersListView(View):
     @method_decorator(login_required)
     def get(self, request):
+        users = User.objects.all().order_by('username')
         if not (request.user.is_admin or request.user.has_perm('accounts.can_manage_users')):
             messages.error(request, 'У вас нет прав для просмотра этой страницы')
             return redirect('dashboard')
-        return render(request, 'accounts/users_list.html')
+        return render(request, 'users/list.html', {
+            'users': users,
+            'active_page': 'users'
+        })
