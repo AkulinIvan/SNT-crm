@@ -17,7 +17,7 @@ from django.core.exceptions import PermissionDenied
 import json
 import logging
 
-from SNT.common.mixins import OrganizationMixin
+from common.mixins import OrganizationMixin
 from .email_service import EmailReceiptService
 from land.models import LandPlot
 from users.models import Owner
@@ -148,8 +148,14 @@ class AssessmentViewSet(OrganizationMixin, viewsets.ModelViewSet):
     ordering = ['-created_at']
 
     def get_queryset(self):
-        """Фильтрация по организации"""
-        return super().get_queryset()  # OrganizationMixin уже отфильтрует
+        queryset = super().get_queryset()
+        
+        # Фильтрация по организации через параметр запроса
+        organization = self.request.query_params.get('organization')
+        if organization:
+            queryset = queryset.filter(owner__memberships__organization_id=organization, owner__memberships__status='active')
+        
+        return queryset
 
     def perform_create(self, serializer):
         """При создании проверяем, что owner принадлежит организации пользователя"""
@@ -160,7 +166,14 @@ class AssessmentViewSet(OrganizationMixin, viewsets.ModelViewSet):
             if owner.organization != self.request.current_organization:
                 raise PermissionDenied("Этот владелец не принадлежит вашему СНТ")
         
+        land_plot = serializer.validated_data.get('land_plot')
+        
+        if self.request.current_organization and land_plot.organization != self.request.current_organization:
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("Этот участок не принадлежит вашему СНТ")
+        
         super().perform_create(serializer)
+        
     def get_serializer_class(self):
         if self.action == 'list':
             return AssessmentListSerializer
@@ -760,15 +773,36 @@ class AssessmentViewSet(OrganizationMixin, viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='stats')
     def stats(self, request):
-        """Статистика по начислениям"""
-        from django.db.models import Count
+        """Статистика по начислениям с фильтрацией по организации"""
+        from django.db.models import Count, Sum
         
-        total_amount = Assessment.objects.aggregate(s=Sum('amount'))['s'] or 0
-        total_paid = Assessment.objects.aggregate(s=Sum('paid_amount'))['s'] or 0
+        # Базовый queryset
+        assessments = Assessment.objects.all()
+        
+        # Фильтруем по организации текущего пользователя (если не админ)
+        if not request.user.is_superuser and not request.user.is_admin:
+            if hasattr(request, 'current_organization') and request.current_organization:
+                org = request.current_organization
+                assessments = assessments.filter(
+                    owner__memberships__organization=org,
+                    owner__memberships__status='active'
+                )
+            else:
+                # Если у пользователя нет организации, возвращаем пустую статистику
+                return Response({
+                    'total_amount': 0,
+                    'total_paid': 0,
+                    'total_debt': 0,
+                    'by_status': {},
+                    'by_category': {},
+                })
+        
+        total_amount = assessments.aggregate(s=Sum('amount'))['s'] or 0
+        total_paid = assessments.aggregate(s=Sum('paid_amount'))['s'] or 0
         
         # Расчёт общей задолженности
         total_debt = 0
-        for a in Assessment.objects.filter(status__in=['pending', 'partial', 'overdue']):
+        for a in assessments.filter(status__in=['pending', 'partial', 'overdue']):
             total_debt += a.debt
         
         data = {
@@ -776,10 +810,10 @@ class AssessmentViewSet(OrganizationMixin, viewsets.ModelViewSet):
             'total_paid': float(total_paid),
             'total_debt': float(total_debt),
             'by_status': dict(
-                Assessment.objects.values_list('status').annotate(c=Count('id'))
+                assessments.values_list('status').annotate(c=Count('id'))
             ),
             'by_category': dict(
-                Assessment.objects.values_list('category__name').annotate(c=Count('id'))
+                assessments.values_list('category__name').annotate(c=Count('id'))
             ),
         }
         
@@ -1259,6 +1293,16 @@ class PaymentViewSet(viewsets.ModelViewSet):
     ]
     search_fields = ['assessment__owner__full_name', 'payment_purpose', 'matched_uid']
     ordering = ['-payment_date']
+    
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        
+        # Фильтрация по организации через параметр запроса
+        organization = self.request.query_params.get('organization')
+        if organization:
+            queryset = queryset.filter(assessment__owner__memberships__organization_id=organization, assessment__owner__memberships__status='active')
+        
+        return queryset
 
 
 class BankStatementViewSet(viewsets.ModelViewSet):

@@ -1,0 +1,224 @@
+{% extends "base.html" %}
+
+{% block title %}Регистрация СНТ | CRM СНТ{% endblock %}
+
+{% block content %}
+<div style="display: flex; justify-content: center; align-items: center; min-height: 80vh; padding: 20px;">
+    <div style="width: 100%; max-width: 600px;">
+        <div class="table-container">
+            <div class="table-toolbar" style="border-radius: 8px 8px 0 0;">
+                <span style="font-weight: 600;">🏢 Регистрация нового СНТ</span>
+            </div>
+            <div style="padding: 24px;">
+                <form id="register-form" method="post">
+                    {% csrf_token %}
+                    
+                    <h4 style="margin-bottom: 16px;">👤 Данные председателя</h4>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                        <div class="form-group">
+                            <label>Логин *</label>
+                            <input type="text" id="username" name="username" required placeholder="ivanov">
+                            <small>Используется для входа в систему</small>
+                        </div>
+                        <div class="form-group">
+                            <label>Email *</label>
+                            <input type="email" id="email" name="email" required placeholder="chairman@snt.ru">
+                        </div>
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px;">
+                        <div class="form-group">
+                            <label>Фамилия *</label>
+                            <input type="text" id="last_name" name="last_name" required placeholder="Иванов">
+                        </div>
+                        <div class="form-group">
+                            <label>Имя *</label>
+                            <input type="text" id="first_name" name="first_name" required placeholder="Иван">
+                        </div>
+                        <div class="form-group">
+                            <label>Отчество</label>
+                            <input type="text" id="middle_name" name="middle_name" placeholder="Иванович">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Телефон</label>
+                        <input type="tel" id="phone" name="phone" placeholder="+7 (XXX) XXX-XX-XX">
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                        <div class="form-group">
+                            <label>Пароль *</label>
+                            <input type="password" id="password1" name="password1" required placeholder="Минимум 8 символов">
+                            <small>Пароль должен содержать не менее 8 символов</small>
+                        </div>
+                        <div class="form-group">
+                            <label>Подтверждение пароля *</label>
+                            <input type="password" id="password2" name="password2" required placeholder="Повторите пароль">
+                        </div>
+                    </div>
+                    
+                    <hr style="margin: 20px 0;">
+                    
+                    <h4 style="margin-bottom: 16px;">🏢 Данные СНТ</h4>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                        <div class="form-group">
+                            <label>Полное наименование СНТ *</label>
+                            <input type="text" id="organization_name" name="organization_name" required 
+                                   placeholder="Садоводческое некоммерческое товарищество &quot;Строитель-43&quot;">
+                        </div>
+                        <div class="form-group">
+                            <label>Краткое наименование *</label>
+                            <input type="text" id="organization_short_name" name="organization_short_name" required 
+                                   placeholder="СНТ &quot;Строитель-43&quot;">
+                        </div>
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                        <div class="form-group">
+                            <label>ИНН *</label>
+                            <input type="text" id="organization_inn" name="organization_inn" required 
+                                   placeholder="10 или 12 цифр" maxlength="12">
+                        </div>
+                        <div class="form-group">
+                            <label>КПП</label>
+                            <input type="text" id="organization_kpp" name="organization_kpp" 
+                                   placeholder="9 цифр" maxlength="9">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Юридический адрес *</label>
+                        <textarea id="organization_address" name="organization_address" rows="2" required 
+                                  placeholder="Полный юридический адрес"></textarea>
+                    </div>
+                    
+                    <hr style="margin: 20px 0;">
+                    
+                    <h4 style="margin-bottom: 16px;">🏦 Банковские реквизиты</h4>
+                    <div class="form-group">
+                        <label>Банк *</label>
+                        <input type="text" id="organization_bank" name="organization_bank" required 
+                               placeholder="Полное наименование банка">
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                        <div class="form-group">
+                            <label>БИК *</label>
+                            <input type="text" id="organization_bik" name="organization_bik" required 
+                                   placeholder="9 цифр" maxlength="9">
+                        </div>
+                        <div class="form-group">
+                            <label>Расчётный счёт *</label>
+                            <input type="text" id="organization_account" name="organization_account" required 
+                                   placeholder="20 цифр" maxlength="20">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Корреспондентский счёт *</label>
+                        <input type="text" id="organization_corr" name="organization_corr" required 
+                               placeholder="20 цифр" maxlength="20">
+                    </div>
+                    
+                    <div style="margin-top: 24px;">
+                        <button type="submit" class="btn btn-primary" style="width: 100%; padding: 12px;">
+                            🚀 Зарегистрировать СНТ
+                        </button>
+                    </div>
+                    
+                    <p style="text-align: center; margin-top: 16px; font-size: 0.85rem;">
+                        Уже есть аккаунт? <a href="/login/" style="color: var(--primary);">Войти</a>
+                    </p>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    const form = document.getElementById('register-form');
+    
+    form.addEventListener('submit', async function(e) {
+        e.preventDefault();
+        
+        // Валидация
+        const password1 = document.getElementById('password1').value;
+        const password2 = document.getElementById('password2').value;
+        
+        if (password1 !== password2) {
+            showAlert('Пароли не совпадают', 'error');
+            return;
+        }
+        
+        if (password1.length < 8) {
+            showAlert('Пароль должен содержать не менее 8 символов', 'error');
+            return;
+        }
+        
+        // Валидация ИНН
+        const inn = document.getElementById('organization_inn').value;
+        if (!/^\d{10}$|^\d{12}$/.test(inn)) {
+            showAlert('ИНН должен содержать 10 или 12 цифр', 'error');
+            return;
+        }
+        
+        // Валидация БИК
+        const bik = document.getElementById('organization_bik').value;
+        if (!/^\d{9}$/.test(bik)) {
+            showAlert('БИК должен содержать 9 цифр', 'error');
+            return;
+        }
+        
+        // Валидация счёта
+        const account = document.getElementById('organization_account').value;
+        if (!/^\d{20}$/.test(account.replace(/\s/g, ''))) {
+            showAlert('Расчётный счёт должен содержать 20 цифр', 'error');
+            return;
+        }
+        
+        const formData = new FormData(form);
+        
+        try {
+            showAlert('Регистрация... Пожалуйста, подождите', 'info');
+            
+            const response = await fetch('/api/auth/register/', {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': getCSRFToken(),
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    username: formData.get('username'),
+                    email: formData.get('email'),
+                    password: formData.get('password1'),
+                    first_name: formData.get('first_name'),
+                    last_name: formData.get('last_name'),
+                    middle_name: formData.get('middle_name'),
+                    phone: formData.get('phone'),
+                    organization: {
+                        name: formData.get('organization_name'),
+                        short_name: formData.get('organization_short_name'),
+                        inn: formData.get('organization_inn'),
+                        kpp: formData.get('organization_kpp'),
+                        legal_address: formData.get('organization_address'),
+                        bank_name: formData.get('organization_bank'),
+                        bank_bik: formData.get('organization_bik'),
+                        bank_account: formData.get('organization_account'),
+                        bank_corr_account: formData.get('organization_corr'),
+                    }
+                })
+            });
+            
+            const data = await response.json();
+            
+            if (response.ok) {
+                showAlert('Регистрация успешна! Теперь вы можете войти.', 'success');
+                setTimeout(() => {
+                    window.location.href = '/login/';
+                }, 2000);
+            } else {
+                showAlert(data.detail || data.error || 'Ошибка регистрации', 'error');
+            }
+        } catch (error) {
+            console.error('Registration error:', error);
+            showAlert('Ошибка сети. Попробуйте позже.', 'error');
+        }
+    });
+</script>
+{% endblock %}

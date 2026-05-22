@@ -8,16 +8,17 @@ class LandPlotListSerializer(serializers.ModelSerializer):
     Краткий сериализатор для списка участков.
     """
     status_display = serializers.CharField(source='get_status_display', read_only=True)
-    owners_count = serializers.SerializerMethodField(read_only=True)  # Используем SerializerMethodField
+    owners_count = serializers.SerializerMethodField(read_only=True)
     has_coordinates = serializers.SerializerMethodField(read_only=True)
-
+    organization_name = serializers.CharField(source='organization.short_name', read_only=True)
+    
     class Meta:
         model = LandPlot
         fields = [
             'id', 'plot_number', 'cadastral_number',
             'area_sqm', 'status', 'status_display', 'address', 
             'latitude', 'longitude', 'has_coordinates',
-            'owners_count', 'created_at',
+            'owners_count', 'created_at', 'organization_name',
         ]
         read_only_fields = ['id', 'created_at', 'has_coordinates']
 

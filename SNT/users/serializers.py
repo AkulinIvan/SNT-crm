@@ -25,7 +25,6 @@ class ContactInfoSerializer(serializers.ModelSerializer):
 
     def validate_value(self, value):
         """Дополнительная валидация в зависимости от типа"""
-        # Получаем тип из разных источников
         contact_type = None
         if hasattr(self, 'initial_data') and self.initial_data.get('type'):
             contact_type = self.initial_data.get('type')
@@ -33,7 +32,6 @@ class ContactInfoSerializer(serializers.ModelSerializer):
             contact_type = self.instance.type
         
         if contact_type == ContactInfo.PHONE:
-            # Очищаем номер от лишних символов
             cleaned = ''.join(c for c in value if c.isdigit() or c in '+()- ')
             digits = ''.join(c for c in cleaned if c.isdigit())
             if len(digits) < 10:
@@ -51,12 +49,10 @@ class ContactInfoSerializer(serializers.ModelSerializer):
 
     def validate(self, data):
         """Валидация контакта"""
-        # Получаем owner
         owner = data.get('owner')
         if not owner and self.instance:
             owner = self.instance.owner
         
-        # Получаем тип и значение
         contact_type = data.get('type')
         if not contact_type and self.instance:
             contact_type = self.instance.type
@@ -66,7 +62,6 @@ class ContactInfoSerializer(serializers.ModelSerializer):
             value = self.instance.value
         
         if owner and contact_type and value and data.get('is_active', True):
-            # Проверяем дубликаты
             duplicate = ContactInfo.objects.filter(
                 owner=owner,
                 type=contact_type,
@@ -97,7 +92,6 @@ class OwnershipSerializer(serializers.ModelSerializer):
         read_only_fields = ['owner_name', 'land_plot_detail']
 
     def get_share_display(self, obj):
-        """Красивое отображение доли"""
         if obj.share == '1/1':
             return 'Полная собственность'
         try:
@@ -108,7 +102,6 @@ class OwnershipSerializer(serializers.ModelSerializer):
             return obj.share
 
     def validate_share(self, value):
-        """Валидация доли"""
         try:
             parts = value.split('/')
             if len(parts) == 2:
@@ -128,7 +121,7 @@ class OwnerListSerializer(serializers.ModelSerializer):
     primary_phone = serializers.CharField(read_only=True)
     primary_email = serializers.CharField(read_only=True)
     plots_count = serializers.IntegerField(read_only=True)
-    organization_name = serializers.SerializerMethodField()  # Изменено на метод
+    organization_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Owner
@@ -153,7 +146,7 @@ class OwnerDetailSerializer(serializers.ModelSerializer):
     updated_at = serializers.DateTimeField(read_only=True, format='%d.%m.%Y %H:%M')
     total_debt = serializers.SerializerMethodField()
     is_debtor = serializers.SerializerMethodField()
-    memberships = serializers.SerializerMethodField()  # Добавить членства
+    memberships = serializers.SerializerMethodField()
 
     class Meta:
         model = Owner
@@ -161,7 +154,7 @@ class OwnerDetailSerializer(serializers.ModelSerializer):
             'id', 'full_name',
             'primary_phone', 'primary_email',
             'contacts', 'ownerships',
-            'total_debt', 'is_debtor', 'memberships',  # Добавить memberships
+            'total_debt', 'is_debtor', 'memberships',
             'created_at', 'updated_at',
         ]
 
@@ -200,10 +193,3 @@ class OwnerCreateUpdateSerializer(serializers.ModelSerializer):
         """Нормализация ФИО"""
         value = ' '.join(value.split())
         return value.title()
-    
-    def create(self, validated_data):
-        """Автоматически подставляем организацию из запроса"""
-        request = self.context.get('request')
-        if request and hasattr(request, 'current_organization') and request.current_organization:
-            validated_data['organization'] = request.current_organization
-        return super().create(validated_data)

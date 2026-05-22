@@ -51,7 +51,7 @@
             <span style="font-weight: 600;">📋 Последние начисления</span>
             <a href="/payments/assessments/" style="font-size: 0.85rem; color: var(--primary);">Все →</a>
         </div>
-        <table>
+        <table style="width: 100%; border-collapse: collapse;">
             <thead>
                 <tr>
                     <th>Владелец</th>
@@ -61,7 +61,7 @@
                 </tr>
             </thead>
             <tbody id="recent-assessments">
-                <tr><td colspan="4">Загрузка...</td></tr>
+                <tr><td colspan="4">Загрузка...</tr>
             </tbody>
         </table>
     </div>
@@ -71,7 +71,7 @@
             <span style="font-weight: 600;">💳 Последние платежи</span>
             <a href="/api/payments/" style="font-size: 0.85rem; color: var(--primary);">Все →</a>
         </div>
-        <table>
+        <table style="width: 100%; border-collapse: collapse;">
             <thead>
                 <tr>
                     <th>Плательщик</th>
@@ -81,7 +81,7 @@
                 </tr>
             </thead>
             <tbody id="recent-payments">
-                <tr><td colspan="4">Загрузка...</td></tr>
+                <tr><td colspan="4">Загрузка...</tr>
             </tbody>
         </table>
     </div>
@@ -95,16 +95,54 @@
     <div style="padding: 20px; display: flex; gap: 12px; flex-wrap: wrap;">
         <button class="btn btn-primary" onclick="openGenerateModal()">🔄 Сгенерировать начисления</button>
         <button class="btn btn-secondary" onclick="window.location.href='/payments/import/'">🏦 Импортировать выписку</button>
-        <button class="btn btn-secondary" onclick="window.location.href='/api/admin/'">⚙️ Управление категориями</button>
+        <button class="btn btn-secondary" onclick="window.location.href='/admin/payments/paymentcategory/'">⚙️ Управление категориями</button>
     </div>
 </div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
+    // Получаем организацию текущего пользователя
+    let currentOrganizationId = null;
+
+    async function getCurrentOrganization() {
+        try {
+            const userData = await apiFetch('/api/auth/me/');
+            if (userData && userData.organization) {
+                currentOrganizationId = userData.organization;
+                console.log('Текущая организация:', currentOrganizationId);
+            }
+        } catch (e) {
+            console.error('Ошибка получения организации:', e);
+        }
+    }
+
     async function loadPaymentsDashboard() {
-        // Статистика
-        const stats = await apiFetch('/api/assessments/stats/');
+        await getCurrentOrganization();
+        
+        // Строим параметры фильтрации
+        let filterParams = '';
+        if (currentOrganizationId) {
+            filterParams = `&organization=${currentOrganizationId}`;
+        }
+        
+        // Статистика (через владельцев организации)
+        let stats = null;
+        if (currentOrganizationId) {
+            // Получаем статистику через API организации
+            const orgStats = await apiFetch(`/api/organizations/${currentOrganizationId}/stats/`);
+            if (orgStats) {
+                stats = {
+                    total_debt: orgStats.total_debt || 0,
+                    total_amount: 0,
+                    total_paid: 0,
+                    by_status: { overdue: orgStats.overdue_count || 0 }
+                };
+            }
+        } else {
+            stats = await apiFetch('/api/assessments/stats/');
+        }
+        
         if (stats) {
             document.getElementById('stat-debt').textContent = 
                 (stats.total_debt || 0).toLocaleString('ru-RU') + ' ₽';
@@ -116,11 +154,18 @@
                 (stats.by_status?.overdue || 0) + ' начислений';
         }
 
-        // Последние начисления
-        const assessments = await apiFetch('/api/assessments/?ordering=-created_at&limit=5');
+        // Последние начисления (только для организации пользователя)
+        let assessmentsUrl = '/api/assessments/?ordering=-created_at&limit=5';
+        if (currentOrganizationId) {
+            assessmentsUrl += `&organization=${currentOrganizationId}`;
+        }
+        const assessments = await apiFetch(assessmentsUrl);
         if (assessments && assessments.results) {
-            document.getElementById('recent-assessments').innerHTML = 
-                assessments.results.map(a => `
+            const tbody = document.getElementById('recent-assessments');
+            if (assessments.results.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4"><div class="empty-state"><div class="empty-icon">📋</div><h3>Нет начислений</h3></div></td></tr>';
+            } else {
+                tbody.innerHTML = assessments.results.map(a => `
                     <tr>
                         <td>${escapeHtml(a.owner_name)}</td>
                         <td>${escapeHtml(a.category_name)}</td>
@@ -128,13 +173,21 @@
                         <td>${getStatusBadge(a.status_display)}</td>
                     </tr>
                 `).join('');
+            }
         }
 
-        // Последние платежи
-        const payments = await apiFetch('/api/payments/?ordering=-payment_date&limit=5');
+        // Последние платежи (только для организации пользователя)
+        let paymentsUrl = '/api/payments/?ordering=-payment_date&limit=5';
+        if (currentOrganizationId) {
+            paymentsUrl += `&organization=${currentOrganizationId}`;
+        }
+        const payments = await apiFetch(paymentsUrl);
         if (payments && payments.results) {
-            document.getElementById('recent-payments').innerHTML = 
-                payments.results.map(p => `
+            const tbody = document.getElementById('recent-payments');
+            if (payments.results.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4"><div class="empty-state"><div class="empty-icon">💳</div><h3>Нет платежей</h3></div></td></td>';
+            } else {
+                tbody.innerHTML = payments.results.map(p => `
                     <tr>
                         <td>${escapeHtml(p.owner_name || '—')}</td>
                         <td><strong>${p.amount} ₽</strong></td>
@@ -142,6 +195,7 @@
                         <td>${p.payment_method === 'bank' ? '🏦' : '💵'} ${p.payment_method}</td>
                     </tr>
                 `).join('');
+            }
         }
     }
 
@@ -152,7 +206,7 @@
             'Частично оплачено': '<span class="badge-status badge-warning">📊 Частично</span>',
             'Просрочено': '<span class="badge-status badge-danger">🔴 Просрочено</span>',
         };
-        return map[status] || `<span class="badge-status badge-inactive">${status}</span>`;
+        return map[status] || `<span class="badge-status badge-inactive">${escapeHtml(status)}</span>`;
     }
 
     function openGenerateModal() {
@@ -181,7 +235,7 @@
                     <select id="gen-period">${periodOptions}</select>
                 </div>
                 <p style="font-size: 0.85rem; color: var(--gray-500);">
-                    Начисления будут созданы для всех активных участков
+                    Начисления будут созданы для всех активных участков вашего СНТ
                 </p>
             `, 'Сгенерировать', async () => {
                 const categoryId = document.getElementById('gen-category').value;

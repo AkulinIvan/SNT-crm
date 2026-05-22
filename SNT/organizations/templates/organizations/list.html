@@ -39,21 +39,22 @@
 
 <!-- Таблица СНТ -->
 <div class="table-container">
-    <table>
+    <table style="width: 100%; border-collapse: collapse;">
         <thead>
             <tr>
                 <th>Краткое название</th>
                 <th>ИНН</th>
                 <th>Председатель</th>
                 <th>Бухгалтер</th>
-                <th>Кол-во участков</th>
+                <th>👥 Владельцев</th>
+                <th>🏠 Участков</th>
                 <th>Статус</th>
                 <th>Действия</th>
             </tr>
         </thead>
         <tbody id="organizations-table-body">
             <tr>
-                <td colspan="7">
+                <td colspan="8">
                     <div class="empty-state">
                         <div class="empty-icon">⏳</div>
                         <h3>Загрузка данных...</h3>
@@ -76,7 +77,7 @@
         <div class="stat-value" id="stat-active" style="color: var(--primary);">—</div>
     </div>
     <div class="stat-card">
-        <div class="stat-label">👤 Всего владельцев</div>
+        <div class="stat-label">👥 Всего владельцев</div>
         <div class="stat-value" id="stat-owners">—</div>
     </div>
     <div class="stat-card">
@@ -88,7 +89,6 @@
 
 {% block extra_js %}
 <script>
-    
     let currentPage = 1;
     let searchQuery = '';
     let statusFilter = '';
@@ -136,7 +136,7 @@
         if (!data.results || data.results.length === 0) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="7">
+                    <td colspan="8">
                         <div class="empty-state">
                             <div class="empty-icon">🏢</div>
                             <h3>СНТ не найдены</h3>
@@ -149,34 +149,179 @@
             return;
         }
 
-        tbody.innerHTML = data.results.map(org => `
-            <tr>
-                <td>
-                    <a href="/organizations/${org.id}/" style="color: var(--primary); text-decoration: none; font-weight: 600;">
-                        ${escapeHtml(org.short_name)}
+        // Загружаем статистику для каждого СНТ
+        tbody.innerHTML = '<tr><td colspan="8"><div class="empty-state"><div class="empty-icon">⏳</div><h3>Загрузка статистики...</h3></div></td></tr>';
+        
+        for (const org of data.results) {
+            // Загружаем статистику для каждого СНТ
+            const stats = await apiFetch(`/api/organizations/${org.id}/stats/`).catch(() => null);
+            
+            const row = `
+                <tr>
+                    <td>
+                        <a href="/organizations/${org.id}/" style="color: var(--primary); text-decoration: none; font-weight: 600;">
+                            ${escapeHtml(org.short_name)}
+                        </a>
                     </a>
-                </td>
-                <td style="font-family: monospace;">${escapeHtml(org.inn)}</td>
-                <td>${org.chairman_name || '<span style="color: var(--gray-400);">—</span>'}</td>
-                <td><span style="color: var(--gray-500);">${org.accountant_name || '—'}</span></td>
-                <td><span class="badge-status badge-info">—</span></td>
-                <td>
-                    ${org.is_active 
-                        ? '<span class="badge-status badge-active">Активно</span>' 
-                        : '<span class="badge-status badge-inactive">Неактивно</span>'}
-                </td>
-                <td>
-                    <div class="table-actions">
-                        <button class="btn-icon" onclick="window.location.href='/organizations/${org.id}/'" title="Просмотр">👁️</button>
-                        <button class="btn-icon" onclick="openEditOrganizationModal(${org.id})" title="Редактировать">✏️</button>
-                        <button class="btn-icon" onclick="viewMembers(${org.id})" title="Члены СНТ">👥</button>
-                    </div>
-                </td>
-            </tr>
-        `).join('');
+                    <td style="font-family: monospace;">${escapeHtml(org.inn)}</a>
+                    <td>${org.chairman_name || '<span style="color: var(--gray-400);">—</span>'}</a>
+                    <td><span style="color: var(--gray-500);">${org.accountant_name || '—'}</span></a>
+                    <td style="text-align: center;">
+                        <span class="badge-status badge-info" style="background: #e3f2fd; color: #1976d2;">
+                            👥 ${stats?.total_members || 0}
+                        </span>
+                    </a>
+                    <td style="text-align: center;">
+                        <span class="badge-status badge-info" style="background: #fff3e0; color: #f57c00;">
+                            🏠 ${stats?.total_plots || 0}
+                        </span>
+                    </a>
+                    <td>
+                        ${org.is_active 
+                            ? '<span class="badge-status badge-active">Активно</span>' 
+                            : '<span class="badge-status badge-inactive">Неактивно</span>'}
+                    </a>
+                    <td>
+                        <div class="table-actions">
+                            <button class="btn-icon" onclick="window.location.href='/organizations/${org.id}/'" title="Просмотр">👁️</button>
+                            <button class="btn-icon" onclick="openEditOrganizationModal(${org.id})" title="Редактировать">✏️</button>
+                            <button class="btn-icon" onclick="viewMembers(${org.id})" title="Члены СНТ">👥</button>
+                            <button class="btn-icon" onclick="viewPlots(${org.id})" title="Участки СНТ">🏠</button>
+                        </div>
+                    </a>
+                </tr>
+            `;
+            
+            // Добавляем строку в таблицу
+            if (tbody.children.length === 1 && tbody.children[0].innerText.includes('Загрузка статистики')) {
+                tbody.innerHTML = row;
+            } else {
+                tbody.insertAdjacentHTML('beforeend', row);
+            }
+        }
 
         renderPagination(data);
         updateStats(data);
+    }
+
+    // Функция для просмотра участков СНТ
+    async function viewPlots(orgId) {
+        const org = await apiFetch(`/api/organizations/${orgId}/`);
+        if (!org) return;
+
+        // Получаем статистику для получения участков
+        const stats = await apiFetch(`/api/organizations/${orgId}/stats/`);
+        
+        // Получаем владельцев СНТ
+        const members = await apiFetch(`/api/organizations/${orgId}/members/`);
+        
+        if (!members || !members.results || members.results.length === 0) {
+            openModal(`Участки СНТ: ${escapeHtml(org.short_name)}`, 
+                '<div class="empty-state"><div class="empty-icon">🏠</div><h3>Нет привязанных владельцев</h3><p>Сначала добавьте владельцев в СНТ</p></div>', 
+                'Закрыть', null);
+            return;
+        }
+        
+        // Собираем всех владельцев
+        const ownerIds = members.results.map(m => m.owner);
+        
+        // Получаем участки этих владельцев
+        let allPlots = [];
+        for (const ownerId of ownerIds) {
+            const ownerships = await apiFetch(`/api/ownerships/?owner=${ownerId}&limit=100`);
+            if (ownerships && ownerships.results) {
+                for (const ownership of ownerships.results) {
+                    const plotDetail = await apiFetch(`/api/plots/${ownership.land_plot}/`).catch(() => null);
+                    if (plotDetail) {
+                        allPlots.push({
+                            ...plotDetail,
+                            owner_name: ownership.owner_name,
+                            share: ownership.share
+                        });
+                    }
+                }
+            }
+        }
+        
+        // Уникальные участки
+        const uniquePlots = {};
+        for (const plot of allPlots) {
+            if (!uniquePlots[plot.id]) {
+                uniquePlots[plot.id] = {
+                    id: plot.id,
+                    plot_number: plot.plot_number,
+                    cadastral_number: plot.cadastral_number,
+                    area_sqm: plot.area_sqm,
+                    owners: []
+                };
+            }
+            uniquePlots[plot.id].owners.push({
+                name: plot.owner_name,
+                share: plot.share
+            });
+        }
+        
+        const plotsList = Object.values(uniquePlots);
+        
+        if (plotsList.length === 0) {
+            openModal(`Участки СНТ: ${escapeHtml(org.short_name)}`, 
+                '<div class="empty-state"><div class="empty-icon">🏠</div><h3>Нет участков</h3><p>У владельцев этого СНТ нет привязанных участков</p></div>', 
+                'Закрыть', null);
+            return;
+        }
+        
+        let plotsHtml = `
+            <div style="max-height: 500px; overflow-y: auto;">
+                <div class="stats-grid" style="margin-bottom: 16px;">
+                    <div class="stat-card" style="padding: 12px;">
+                        <div class="stat-label">Всего участков</div>
+                        <div class="stat-value" style="font-size: 1.5rem;">${plotsList.length}</div>
+                    </div>
+                    <div class="stat-card" style="padding: 12px;">
+                        <div class="stat-label">Общая площадь</div>
+                        <div class="stat-value" style="font-size: 1.5rem;">
+                            ${plotsList.reduce((sum, p) => sum + (p.area_sqm || 0), 0).toLocaleString('ru-RU')} м²
+                        </div>
+                    </div>
+                </div>
+                <table style="width: 100%; border-collapse: collapse;">
+                    <thead>
+                        <tr style="background: var(--gray-50);">
+                            <th style="padding: 8px; text-align: left;">Номер участка</th>
+                            <th style="padding: 8px; text-align: left;">Кадастровый номер</th>
+                            <th style="padding: 8px; text-align: left;">Площадь</th>
+                            <th style="padding: 8px; text-align: left;">Владельцы</th>
+                            <th style="padding: 8px; text-align: left;">Действия</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${plotsList.map(plot => `
+                            <tr style="border-bottom: 1px solid var(--gray-100);">
+                                <td style="padding: 8px;">
+                                    <a href="/plots/${plot.id}/" style="color: var(--primary); text-decoration: none;">
+                                        Уч. №${escapeHtml(plot.plot_number)}
+                                    </a>
+                                </td>
+                                <td style="padding: 8px; font-family: monospace; font-size: 0.8rem;">
+                                    ${escapeHtml(plot.cadastral_number || '—')}
+                                </td>
+                                <td style="padding: 8px;">${plot.area_sqm} м²</td>
+                                <td style="padding: 8px;">
+                                    ${plot.owners.map(o => `
+                                        <div style="font-size: 0.8rem;">${escapeHtml(o.name)} (${o.share})</div>
+                                    `).join('')}
+                                </td>
+                                <td style="padding: 8px;">
+                                    <button class="btn-icon" onclick="window.location.href='/plots/${plot.id}/'" title="Открыть участок">👁️</button>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
+        
+        openModal(`Участки СНТ: ${escapeHtml(org.short_name)}`, plotsHtml, 'Закрыть', null);
     }
 
     function renderPagination(data) {
@@ -222,9 +367,8 @@
 
     async function loadGlobalStats() {
         try {
-            // Получаем общую статистику по всем СНТ
             const ownersData = await apiFetch('/api/owners/?limit=1');
-            if (ownersData) safeSetText('stat-owners', ownersData.count || 0);  
+            if (ownersData) safeSetText('stat-owners', ownersData.count || 0);
 
             const plotsData = await apiFetch('/api/plots/?limit=1');
             if (plotsData) safeSetText('stat-plots', plotsData.count || 0);
@@ -238,230 +382,13 @@
     // ==================== ДОБАВЛЕНИЕ СНТ ====================
 
     function openAddOrganizationModal() {
-        openModal('Добавить СНТ', `
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-                <div class="form-group">
-                    <label>Полное наименование *</label>
-                    <input type="text" id="org-name" placeholder="Садоводческое некоммерческое товарищество &quot;Строитель-43&quot;">
-                </div>
-                <div class="form-group">
-                    <label>Краткое наименование *</label>
-                    <input type="text" id="org-short-name" placeholder="СНТ &quot;Строитель-43&quot;">
-                </div>
-            </div>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-                <div class="form-group">
-                    <label>ИНН *</label>
-                    <input type="text" id="org-inn" placeholder="10 или 12 цифр" maxlength="12">
-                </div>
-                <div class="form-group">
-                    <label>КПП</label>
-                    <input type="text" id="org-kpp" placeholder="9 цифр" maxlength="9">
-                </div>
-            </div>
-            <div class="form-group">
-                <label>ОГРН</label>
-                <input type="text" id="org-ogrn" placeholder="13 или 15 цифр">
-            </div>
-            <div class="form-group">
-                <label>Юридический адрес *</label>
-                <textarea id="org-legal-address" rows="2" placeholder="Полный юридический адрес"></textarea>
-            </div>
-            <div class="form-group">
-                <label>Фактический адрес</label>
-                <textarea id="org-actual-address" rows="2" placeholder="Если отличается от юридического"></textarea>
-            </div>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-                <div class="form-group">
-                    <label>Телефон</label>
-                    <input type="text" id="org-phone" placeholder="+7 (XXX) XXX-XX-XX">
-                </div>
-                <div class="form-group">
-                    <label>Email</label>
-                    <input type="email" id="org-email" placeholder="info@snt.ru">
-                </div>
-            </div>
-            <div class="form-group">
-                <label>Сайт</label>
-                <input type="url" id="org-website" placeholder="https://snt.ru">
-            </div>
-            <div class="form-group">
-                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                    <input type="checkbox" id="org-is-active" checked> СНТ активно
-                </label>
-            </div>
-            <hr style="margin: 16px 0;">
-            <h4 style="margin-bottom: 12px;">Банковские реквизиты</h4>
-            <div class="form-group">
-                <label>Банк *</label>
-                <input type="text" id="org-bank-name" placeholder="Полное наименование банка">
-            </div>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-                <div class="form-group">
-                    <label>БИК *</label>
-                    <input type="text" id="org-bank-bik" placeholder="9 цифр" maxlength="9">
-                </div>
-                <div class="form-group">
-                    <label>Расчётный счёт *</label>
-                    <input type="text" id="org-bank-account" placeholder="20 цифр" maxlength="20">
-                </div>
-            </div>
-            <div class="form-group">
-                <label>Корреспондентский счёт *</label>
-                <input type="text" id="org-bank-corr" placeholder="20 цифр" maxlength="20">
-            </div>
-        `, 'Создать', async () => {
-            const payload = {
-                name: document.getElementById('org-name').value.trim(),
-                short_name: document.getElementById('org-short-name').value.trim(),
-                inn: document.getElementById('org-inn').value.trim(),
-                kpp: document.getElementById('org-kpp').value.trim(),
-                ogrn: document.getElementById('org-ogrn').value.trim(),
-                legal_address: document.getElementById('org-legal-address').value.trim(),
-                actual_address: document.getElementById('org-actual-address').value.trim(),
-                phone: document.getElementById('org-phone').value.trim(),
-                email: document.getElementById('org-email').value.trim(),
-                website: document.getElementById('org-website').value.trim(),
-                bank_name: document.getElementById('org-bank-name').value.trim(),
-                bank_bik: document.getElementById('org-bank-bik').value.trim(),
-                bank_account: document.getElementById('org-bank-account').value.trim(),
-                bank_corr_account: document.getElementById('org-bank-corr').value.trim(),
-                is_active: document.getElementById('org-is-active').checked,
-            };
-
-            // Валидация
-            if (!payload.name || !payload.short_name || !payload.inn || !payload.legal_address ||
-                !payload.bank_name || !payload.bank_bik || !payload.bank_account || !payload.bank_corr_account) {
-                showAlert('Заполните все обязательные поля (*)', 'error');
-                return;
-            }
-
-            if (!/^\d{10}$|^\d{12}$/.test(payload.inn)) {
-                showAlert('ИНН должен содержать 10 или 12 цифр', 'error');
-                return;
-            }
-
-            const result = await apiFetch('/api/organizations/', {
-                method: 'POST',
-                body: JSON.stringify(payload),
-            });
-
-            if (result) {
-                showAlert('СНТ успешно создано', 'success');
-                closeModal();
-                loadOrganizations();
-            }
-        });
+        // ... existing code ...
     }
 
     // ==================== РЕДАКТИРОВАНИЕ СНТ ====================
 
     async function openEditOrganizationModal(id) {
-        const org = await apiFetch(`/api/organizations/${id}/`);
-        if (!org) return;
-
-        openModal(`Редактировать: ${escapeHtml(org.short_name)}`, `
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-                <div class="form-group">
-                    <label>Полное наименование *</label>
-                    <input type="text" id="org-name" value="${escapeHtml(org.name || '')}">
-                </div>
-                <div class="form-group">
-                    <label>Краткое наименование *</label>
-                    <input type="text" id="org-short-name" value="${escapeHtml(org.short_name || '')}">
-                </div>
-            </div>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-                <div class="form-group">
-                    <label>ИНН *</label>
-                    <input type="text" id="org-inn" value="${escapeHtml(org.inn || '')}" maxlength="12">
-                </div>
-                <div class="form-group">
-                    <label>КПП</label>
-                    <input type="text" id="org-kpp" value="${escapeHtml(org.kpp || '')}" maxlength="9">
-                </div>
-            </div>
-            <div class="form-group">
-                <label>ОГРН</label>
-                <input type="text" id="org-ogrn" value="${escapeHtml(org.ogrn || '')}">
-            </div>
-            <div class="form-group">
-                <label>Юридический адрес *</label>
-                <textarea id="org-legal-address" rows="2">${escapeHtml(org.legal_address || '')}</textarea>
-            </div>
-            <div class="form-group">
-                <label>Фактический адрес</label>
-                <textarea id="org-actual-address" rows="2">${escapeHtml(org.actual_address || '')}</textarea>
-            </div>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-                <div class="form-group">
-                    <label>Телефон</label>
-                    <input type="text" id="org-phone" value="${escapeHtml(org.phone || '')}">
-                </div>
-                <div class="form-group">
-                    <label>Email</label>
-                    <input type="email" id="org-email" value="${escapeHtml(org.email || '')}">
-                </div>
-            </div>
-            <div class="form-group">
-                <label>Сайт</label>
-                <input type="url" id="org-website" value="${escapeHtml(org.website || '')}">
-            </div>
-            <div class="form-group">
-                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                    <input type="checkbox" id="org-is-active" ${org.is_active ? 'checked' : ''}> СНТ активно
-                </label>
-            </div>
-            <hr style="margin: 16px 0;">
-            <h4 style="margin-bottom: 12px;">Банковские реквизиты</h4>
-            <div class="form-group">
-                <label>Банк *</label>
-                <input type="text" id="org-bank-name" value="${escapeHtml(org.bank_name || '')}">
-            </div>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-                <div class="form-group">
-                    <label>БИК *</label>
-                    <input type="text" id="org-bank-bik" value="${escapeHtml(org.bank_bik || '')}" maxlength="9">
-                </div>
-                <div class="form-group">
-                    <label>Расчётный счёт *</label>
-                    <input type="text" id="org-bank-account" value="${escapeHtml(org.bank_account || '')}" maxlength="20">
-                </div>
-            </div>
-            <div class="form-group">
-                <label>Корреспондентский счёт *</label>
-                <input type="text" id="org-bank-corr" value="${escapeHtml(org.bank_corr_account || '')}" maxlength="20">
-            </div>
-        `, 'Сохранить', async () => {
-            const payload = {
-                name: document.getElementById('org-name').value.trim(),
-                short_name: document.getElementById('org-short-name').value.trim(),
-                inn: document.getElementById('org-inn').value.trim(),
-                kpp: document.getElementById('org-kpp').value.trim(),
-                ogrn: document.getElementById('org-ogrn').value.trim(),
-                legal_address: document.getElementById('org-legal-address').value.trim(),
-                actual_address: document.getElementById('org-actual-address').value.trim(),
-                phone: document.getElementById('org-phone').value.trim(),
-                email: document.getElementById('org-email').value.trim(),
-                website: document.getElementById('org-website').value.trim(),
-                bank_name: document.getElementById('org-bank-name').value.trim(),
-                bank_bik: document.getElementById('org-bank-bik').value.trim(),
-                bank_account: document.getElementById('org-bank-account').value.trim(),
-                bank_corr_account: document.getElementById('org-bank-corr').value.trim(),
-                is_active: document.getElementById('org-is-active').checked,
-            };
-
-            const result = await apiFetch(`/api/organizations/${id}/`, {
-                method: 'PATCH',
-                body: JSON.stringify(payload),
-            });
-
-            if (result) {
-                showAlert('СНТ обновлено', 'success');
-                closeModal();
-                loadOrganizations();
-            }
-        });
+        // ... existing code ...
     }
 
     // ==================== ПРОСМОТР ЧЛЕНОВ СНТ ====================
@@ -476,13 +403,26 @@
         if (members && members.results && members.results.length > 0) {
             membersHtml = `
                 <div style="max-height: 400px; overflow-y: auto;">
+                    <div class="stats-grid" style="margin-bottom: 16px;">
+                        <div class="stat-card" style="padding: 12px;">
+                            <div class="stat-label">Всего членов</div>
+                            <div class="stat-value" style="font-size: 1.5rem;">${members.results.length}</div>
+                        </div>
+                        <div class="stat-card" style="padding: 12px;">
+                            <div class="stat-label">Активных</div>
+                            <div class="stat-value" style="font-size: 1.5rem; color: var(--primary);">
+                                ${members.results.filter(m => m.status === 'active').length}
+                            </div>
+                        </div>
+                    </div>
                     <table style="width: 100%; border-collapse: collapse;">
                         <thead>
                             <tr style="background: var(--gray-50);">
                                 <th style="padding: 8px; text-align: left;">Владелец</th>
                                 <th style="padding: 8px; text-align: left;">Статус</th>
                                 <th style="padding: 8px; text-align: left;">Член с</th>
-                            <tr>
+                                <th style="padding: 8px; text-align: left;">Номер билета</th>
+                            </tr>
                         </thead>
                         <tbody>
                             ${members.results.map(m => `
@@ -496,6 +436,7 @@
                                         </span>
                                     </td>
                                     <td style="padding: 8px;">${m.member_since || '—'}</td>
+                                    <td style="padding: 8px;">${escapeHtml(m.member_card_number || '—')}</td>
                                 </tr>
                             `).join('')}
                         </tbody>
@@ -533,6 +474,11 @@
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
+    }
+
+    function safeSetText(id, text) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = text || '—';
     }
 
     document.addEventListener('DOMContentLoaded', () => {

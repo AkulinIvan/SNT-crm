@@ -44,6 +44,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'django_filters',
     
+    'common',
     'accounts',
     'land',
     'users',
@@ -85,6 +86,7 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'accounts.middleware.UserActivityMiddleware',
     'accounts.middleware.OrganizationMiddleware',
+    'common.middleware.RequestMiddleware',
 ]
 
 ROOT_URLCONF = 'SNT.urls'
@@ -197,7 +199,7 @@ SNT_CHAIRMAN = 'Председатель правления'
 # CSRF настройки
 CSRF_COOKIE_NAME = 'csrftoken'
 CSRF_COOKIE_HTTPONLY = False
-CSRF_COOKIE_SAMESITE = 'Lax'  # Или 'Strict'
+CSRF_COOKIE_SAMESITE = 'Lax'
 CSRF_COOKIE_SECURE = False
 CSRF_USE_SESSIONS = False
 CSRF_TRUSTED_ORIGINS = [

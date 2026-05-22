@@ -294,6 +294,8 @@
 
             showAlert(`Создано ${totalCreated} начислений`, 'success'); 
 
+            closeModal();
+            
             // Обработка в зависимости от формата
             if (generateReceipts && format === 'pdf' && allReceiptsHtml.length > 0) {
                 // Генерируем PDF через сервер
@@ -841,21 +843,21 @@ function showReceiptsList(results, receiptsHtml) {
                 <label>ФИО *</label>
                 <input type="text" id="owner-fullname" placeholder="Иванов Иван Иванович" required>
             </div>
-        `, 'Добавить', async (closeModal) => {
+        `, 'Добавить', async (closeModal) => {  // ← ДОБАВИТЬ closeModal как параметр
             const fullName = document.getElementById('owner-fullname').value.trim();
             if (!fullName) {
                 showAlert('Введите ФИО владельца', 'error');
                 return;
-            }
+            }   
 
             const result = await apiFetch('/api/owners/', {
                 method: 'POST',
                 body: JSON.stringify({ full_name: fullName }),
-            });
+            }); 
 
             if (result) {
                 showAlert('Владелец добавлен', 'success');
-                closeModal();
+                if (typeof closeModal === 'function') closeModal();  // ← Проверяем и вызываем closeModal
                 loadOwners();
             }
         });
@@ -865,33 +867,32 @@ function showReceiptsList(results, receiptsHtml) {
     
     async function openEditOwnerModal(id) {
         const owner = await apiFetch(`/api/owners/${id}/`);
-        if (!owner) return;
+        if (!owner) return; 
 
         openModal(`Редактировать владельца`, `
             <div class="form-group">
                 <label>ФИО *</label>
                 <input type="text" id="edit-owner-fullname" value="${escapeHtml(owner.full_name)}" required>
             </div>
-        `, 'Сохранить', async (closeModal) => {
+        `, 'Сохранить', async (closeModal) => {  // ← ДОБАВИТЬ closeModal как параметр
             const fullName = document.getElementById('edit-owner-fullname').value.trim();
             if (!fullName) {
                 showAlert('Введите ФИО владельца', 'error');
                 return;
-            }   
+            }       
 
             const result = await apiFetch(`/api/owners/${id}/`, {
                 method: 'PATCH',
                 body: JSON.stringify({ full_name: fullName }),
-            });
+            }); 
 
             if (result) {
                 showAlert('Владелец обновлён', 'success');
-                closeModal();
+                if (typeof closeModal === 'function') closeModal();  // ← Проверяем и вызываем closeModal
                 loadOwners();
             }
         });
     }
-
     // ==================== Удаление владельца ====================
     
     function confirmDeleteOwner(id, fullName) {
@@ -900,13 +901,13 @@ function showReceiptsList(results, receiptsHtml) {
             <p style="color: var(--danger); font-size: 0.85rem; margin-top: 8px;">
                 Это действие нельзя отменить. Все контакты и связи с участками будут удалены.
             </p>
-        `, 'Удалить', async () => {
+        `, 'Удалить', async (closeModal) => {
             const result = await apiFetch(`/api/owners/${id}/`, {
                 method: 'DELETE',
             });
             if (result !== null) {
                 showAlert('Владелец удалён', 'success');
-                closeModal();
+                if (typeof closeModal === 'function') closeModal();  // ← Проверяем и вызываем closeModal
                 loadOwners();
             }
         });

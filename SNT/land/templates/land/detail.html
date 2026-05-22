@@ -7,6 +7,36 @@
 {% endblock %}
 
 {% block content %}
+<style>
+#plot-map {
+    width: 100%;
+    height: 400px;
+    border-radius: 8px;
+    z-index: 1;
+    background: var(--gray-100);
+}
+
+.leaflet-container {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    border-radius: 8px;
+}
+
+.custom-div-icon {
+    background: none;
+    border: none;
+}
+
+.leaflet-popup-content-wrapper {
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+.leaflet-popup-content {
+    margin: 12px 16px;
+    line-height: 1.6;
+}
+</style>
+
 <div id="plot-detail">
     <div class="page-header" style="display: flex; justify-content: space-between; align-items: flex-start;">
         <div>
@@ -27,7 +57,7 @@
                 <span style="font-weight: 600;">📋 Основная информация</span>
                 <span id="plot-status-badge"></span>
             </div>
-            <table>
+            <table style="width: 100%; border-collapse: collapse;">
                 <tbody>
                     <tr><td style="color: var(--gray-500); width: 40%;">Номер участка</td><td id="info-plot-number">—</td></tr>
                     <tr><td style="color: var(--gray-500);">Кадастровый номер</td><td id="info-cadastral" style="font-family: monospace;">—</td></tr>
@@ -41,27 +71,24 @@
         </div>
 
         <!-- Координаты и карта -->
-        <div class="table-container">
-            <div class="table-toolbar">
-                <span style="font-weight: 600;">🗺️ Координаты</span>
-                <button class="btn btn-secondary btn-sm" id="btn-set-coords" onclick="openSetCoordinatesModal()">📍 Задать координаты</button>
-            </div>
-            <div id="map-container" style="height: 300px; background: var(--gray-100); display: flex; align-items: center; justify-content: center; border-radius: var(--radius-sm);">
-                <div id="map-placeholder" class="empty-state">
-                    <div class="empty-icon">🗺️</div>
-                    <h3>Координаты не заданы</h3>
-                    <p>Нажмите «Задать координаты» для отображения на карте</p>
+        <div>
+            <div class="table-container">
+                <div class="table-toolbar">
+                    <span style="font-weight: 600;">🗺️ Координаты на карте</span>
+                    <button class="btn btn-secondary btn-sm" id="btn-set-coords" onclick="openSetCoordinatesModal()">📍 Задать координаты</button>
                 </div>
-                <div id="map-display" style="display: none; width: 100%; height: 100%;">
-                    <iframe id="map-iframe" width="100%" height="100%" frameborder="0" style="border-radius: var(--radius-sm);"></iframe>
+                <div id="plot-map" style="height: 350px;"></div>
+                <div style="margin-top: 12px; display: flex; gap: 16px; justify-content: center;">
+                    <div>
+                        <span style="color: var(--gray-500); font-size: 0.85rem;">Широта:</span>
+                        <strong id="info-latitude" style="font-family: monospace;">—</strong>
+                    </div>
+                    <div>
+                        <span style="color: var(--gray-500); font-size: 0.85rem;">Долгота:</span>
+                        <strong id="info-longitude" style="font-family: monospace;">—</strong>
+                    </div>
                 </div>
             </div>
-            <table style="margin-top: 0;">
-                <tbody>
-                    <tr><td style="color: var(--gray-500);">Широта</td><td id="info-latitude">—</td></tr>
-                    <tr><td style="color: var(--gray-500);">Долгота</td><td id="info-longitude">—</td></tr>
-                </tbody>
-            </table>
         </div>
     </div>
 
@@ -71,7 +98,7 @@
             <span style="font-weight: 600;">👤 Владельцы участка</span>
             <button class="btn btn-primary btn-sm" onclick="openAddOwnerModal()">+ Привязать владельца</button>
         </div>
-        <table>
+        <table style="width: 100%; border-collapse: collapse;">
             <thead>
                 <tr>
                     <th>ФИО</th>
@@ -111,6 +138,81 @@
 <script>
     const plotId = {{ plot_id }};
     let plotData = null;
+    let plotMap = null;
+    let plotMarker = null;
+
+    // Инициализация карты Leaflet
+    function initPlotMap() {
+        const container = document.getElementById('plot-map');
+        if (!container) return;
+        
+        // Проверяем, есть ли координаты
+        const hasCoords = plotData && plotData.latitude && plotData.longitude;
+        const centerLat = hasCoords ? plotData.latitude : 55.7558;
+        const centerLon = hasCoords ? plotData.longitude : 37.6173;
+        
+        plotMap = L.map('plot-map').setView([centerLat, centerLon], 15);
+        
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+            maxZoom: 19
+        }).addTo(plotMap);
+        
+        // Добавляем масштабную линейку
+        L.control.scale().addTo(plotMap);
+        
+        // Добавляем маркер если есть координаты
+        if (hasCoords) {
+            addMarker(plotData.latitude, plotData.longitude);
+        }
+    }
+    
+    // Добавление маркера на карту
+    function addMarker(lat, lon) {
+        if (plotMarker) {
+            plotMap.removeLayer(plotMarker);
+        }
+        
+        plotMarker = L.marker([lat, lon], {
+            draggable: true,
+            icon: L.divIcon({
+                className: 'custom-div-icon',
+                html: `<div style="
+                    background-color: #4CAF50;
+                    width: 16px;
+                    height: 16px;
+                    border-radius: 50%;
+                    border: 3px solid white;
+                    box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+                "></div>`,
+                iconSize: [16, 16],
+                iconAnchor: [8, 8]
+            })
+        }).addTo(plotMap);
+        
+        // Обработчик перемещения маркера
+        plotMarker.on('dragend', function(e) {
+            const position = plotMarker.getLatLng();
+            updateCoordinatesFromMap(position.lat, position.lng);
+        });
+        
+        plotMap.setView([lat, lon], 16);
+    }
+    
+    // Обновление координат после перемещения маркера
+    async function updateCoordinatesFromMap(lat, lon) {
+        const result = await apiFetch(`/api/plots/${plotId}/set-coordinates/`, {
+            method: 'POST',
+            body: JSON.stringify({ latitude: lat, longitude: lon }),
+        });
+        
+        if (result) {
+            // Обновляем отображение
+            document.getElementById('info-latitude').textContent = lat.toFixed(6);
+            document.getElementById('info-longitude').textContent = lon.toFixed(6);
+            showAlert('Координаты обновлены', 'success');
+        }
+    }
 
     async function loadPlotDetail() {
         plotData = await apiFetch(`/api/plots/${plotId}/`);
@@ -157,19 +259,15 @@
         document.getElementById('info-longitude').textContent = 
             plotData.longitude ? plotData.longitude.toFixed(6) : '—';
 
-        if (plotData.latitude && plotData.longitude) {
-            document.getElementById('map-placeholder').style.display = 'none';
-            document.getElementById('map-display').style.display = 'block';
-            document.getElementById('map-iframe').src = 
-                `https://www.openstreetmap.org/export/embed.html?bbox=${plotData.longitude-0.002},${plotData.latitude-0.001},${plotData.longitude+0.002},${plotData.latitude+0.001}&layer=mapnik`;
-        }
-
         // Примечания
         document.getElementById('info-notes').innerHTML = 
             plotData.notes 
                 ? `<p style="white-space: pre-wrap;">${escapeHtml(plotData.notes)}</p>` 
                 : '<span style="color: var(--gray-400);">Нет примечаний</span>';
 
+        // Инициализируем карту
+        initPlotMap();
+        
         // Загружаем владельцев
         loadOwners();
     }
@@ -202,7 +300,6 @@
         }
 
         // Получаем контакты для каждого владельца
-        const ownerIds = data.results.map(o => o.owner);
         const ownersWithContacts = [];
 
         for (const ownership of data.results) {
@@ -238,7 +335,7 @@
         `).join('');
     }
 
-    // --- Координаты ---
+    // --- Координаты (модалка для ручного ввода) ---
 
     function openSetCoordinatesModal() {
         openModal('Задать координаты участка', `

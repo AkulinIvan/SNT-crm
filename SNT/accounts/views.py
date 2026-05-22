@@ -1,6 +1,9 @@
 from decimal import Decimal
 
 from django.shortcuts import render, redirect
+from django.contrib.auth.forms import UserCreationForm
+from django.urls import reverse_lazy
+from django.views.generic import CreateView
 from django.views import View
 from django.contrib.auth import login, logout, update_session_auth_hash
 from django.contrib.auth.decorators import login_required
@@ -27,7 +30,7 @@ from .serializers import (
     UserActionLogSerializer,
 )
 from .permissions import IsAdminOrSuperuser, CanManageUsers, CanViewAuditLog
-
+from organizations.models import Organization
 
 # ==================== API ViewSets ====================
 
@@ -119,6 +122,86 @@ class AuthViewSet(viewsets.ViewSet):
             return x_forwarded_for.split(',')[0].strip()
         return request.META.get('REMOTE_ADDR')
 
+    @action(detail=False, methods=['post'], url_path='register')
+    def register(self, request):
+        """
+        POST /api/auth/register/
+        Регистрация нового председателя с созданием СНТ.
+        """
+        from organizations.models import Organization
+        
+        data = request.data
+        org_data = data.get('organization', {})
+        
+        # Проверяем, не существует ли пользователь
+        if User.objects.filter(username=data.get('username')).exists():
+            return Response(
+                {'detail': 'Пользователь с таким логином уже существует'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if data.get('email') and User.objects.filter(email=data.get('email')).exists():
+            return Response(
+                {'detail': 'Пользователь с таким email уже существует'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Проверяем, не существует ли СНТ с таким ИНН
+        if Organization.objects.filter(inn=org_data.get('inn')).exists():
+            return Response(
+                {'detail': 'СНТ с таким ИНН уже зарегистрировано'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Создаем пользователя
+        user = User.objects.create_user(
+            username=data.get('username'),
+            email=data.get('email'),
+            password=data.get('password'),
+            first_name=data.get('first_name', ''),
+            last_name=data.get('last_name', ''),
+            phone=data.get('phone', ''),
+            role='manager',  # Председатель
+            is_active=True
+        )
+        
+        if data.get('middle_name'):
+            user.middle_name = data.get('middle_name')
+            user.save()
+        
+        # Создаем СНТ
+        organization = Organization.objects.create(
+            name=org_data.get('name'),
+            short_name=org_data.get('short_name'),
+            inn=org_data.get('inn'),
+            kpp=org_data.get('kpp', ''),
+            legal_address=org_data.get('legal_address'),
+            bank_name=org_data.get('bank_name'),
+            bank_bik=org_data.get('bank_bik'),
+            bank_account=org_data.get('bank_account'),
+            bank_corr_account=org_data.get('bank_corr_account'),
+            chairman=user,
+            is_active=True
+        )
+        
+        # Привязываем пользователя к СНТ
+        user.organization = organization
+        user.save()
+        
+        # Логируем регистрацию
+        UserActionLog.objects.create(
+            user=user,
+            action='create',
+            details=f'Регистрация нового СНТ: {organization.short_name}',
+            ip_address=self._get_client_ip(request),
+            user_agent=request.META.get('HTTP_USER_AGENT', ''),
+        )
+        
+        return Response({
+            'detail': 'Регистрация успешно завершена',
+            'user_id': user.id,
+            'organization_id': organization.id,
+        }, status=status.HTTP_201_CREATED)
 
 class UserViewSet(viewsets.ModelViewSet):
     """
@@ -302,3 +385,49 @@ class UsersListView(View):
             'users': users,
             'active_page': 'users'
         })
+        
+
+class ChairmanRegistrationView(CreateView):
+    """
+    Регистрация председателя с автоматическим созданием СНТ.
+    """
+    template_name = 'accounts/register.html'
+    success_url = reverse_lazy('login')
+    
+    def get_form_class(self):
+        return UserCreationForm
+    
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['active_page'] = 'register'
+        return context
+    
+    def form_valid(self, form):
+        # Создаем пользователя
+        user = form.save(commit=False)
+        user.role = 'manager'  # Председатель
+        user.is_active = True
+        user.save()
+        
+        # Создаем СНТ из данных формы
+        organization = Organization.objects.create(
+            name=self.request.POST.get('organization_name'),
+            short_name=self.request.POST.get('organization_short_name'),
+            inn=self.request.POST.get('organization_inn', ''),
+            legal_address=self.request.POST.get('organization_address', ''),
+            bank_name=self.request.POST.get('organization_bank', ''),
+            bank_bik=self.request.POST.get('organization_bik', ''),
+            bank_account=self.request.POST.get('organization_account', ''),
+            bank_corr_account=self.request.POST.get('organization_corr', ''),
+            is_active=True
+        )
+        
+        # Привязываем председателя к СНТ
+        organization.chairman = user
+        organization.save()
+        
+        # Привязываем пользователя к СНТ
+        user.organization = organization
+        user.save()
+        
+        return super().form_valid(form)

@@ -14,7 +14,7 @@ from django.utils import timezone
 import logging
 from rest_framework import permissions
 from .services import rosreestr_service
-from SNT.common.mixins import OrganizationMixin
+from common.mixins import OrganizationMixin
 
 from accounts.permissions import IsManagerOrAbove
 
@@ -29,7 +29,7 @@ from .serializers import (
 logger = logging.getLogger(__name__)
 
 
-class LandPlotViewSet(viewsets.ModelViewSet):
+class LandPlotViewSet(OrganizationMixin, viewsets.ModelViewSet):
     """
     ViewSet для управления земельными участками.
     """
@@ -53,13 +53,11 @@ class LandPlotViewSet(viewsets.ModelViewSet):
         return LandPlotDetailSerializer
 
     def get_queryset(self):
-        """Расширенная фильтрация"""
-        # Базовый queryset с предзагрузкой связей
-        queryset = LandPlot.objects.prefetch_related('ownerships__owner').all()
+        """Расширенная фильтрация с учетом организации"""
+        # Базовый queryset с фильтрацией по организации
+        queryset = super().get_queryset()
         
-        # НЕ ДОБАВЛЯЕМ аннотацию owners_count здесь!
-        
-        # Фильтрация по наличию координат
+        # Дополнительная фильтрация по наличию координат
         has_coordinates = self.request.query_params.get('has_coordinates')
         if has_coordinates is not None:
             if has_coordinates.lower() == 'true':
@@ -89,18 +87,25 @@ class LandPlotViewSet(viewsets.ModelViewSet):
         
         return queryset
 
+    def perform_create(self, serializer):
+        """При создании автоматически подставляем организацию"""
+        if hasattr(self.request, 'current_organization') and self.request.current_organization:
+            serializer.save(organization=self.request.current_organization)
+        else:
+            super().perform_create(serializer)
+            
     def list(self, request, *args, **kwargs):
-        """Расширенный list с дополнительной статистикой"""
+        """Расширенный list с дополнительной статистикой и фильтрацией по СНТ"""
         queryset = self.filter_queryset(self.get_queryset())
-        
+
         page = self.paginate_queryset(queryset)
         if page is not None:
             serializer = self.get_serializer(page, many=True)
             response = self.get_paginated_response(serializer.data)
-            
+
             # Статистика по отфильтрованным участкам
             total_area = queryset.aggregate(total=Sum('area_sqm'))['total'] or 0
-            
+
             response.data['stats'] = {
                 'total': queryset.count(),
                 'total_area': round(total_area, 2),
@@ -111,7 +116,7 @@ class LandPlotViewSet(viewsets.ModelViewSet):
                 }
             }
             return response
-        
+
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
 
@@ -154,23 +159,32 @@ class LandPlotViewSet(viewsets.ModelViewSet):
     def geo(self, request):
         """
         GET /api/plots/geo/
-        
-        Возвращает координаты участков для карты.
-        Дополнительные фильтры:
-        ?status=active - фильтр по статусу
-        ?has_owners=true - только с владельцами
+
+        Возвращает координаты участков для карты с учетом СНТ пользователя.
         """
         status_filter = request.query_params.get('status')
         has_owners = request.query_params.get('has_owners')
-        
+
+        # Базовый queryset с фильтрацией по организации
         queryset = LandPlot.objects.filter(
             latitude__isnull=False,
             longitude__isnull=False,
         )
-        
+
+        # Фильтруем по организации пользователя (если не админ)
+        if not request.user.is_superuser and not request.user.is_admin:
+            if hasattr(request, 'current_organization') and request.current_organization:
+                queryset = queryset.filter(organization=request.current_organization)
+            else:
+                # Если у пользователя нет организации, возвращаем пустой результат
+                return Response({
+                    'count': 0,
+                    'results': []
+                })
+
         if status_filter:
             queryset = queryset.filter(status=status_filter)
-        
+
         if has_owners is not None:
             queryset = queryset.annotate(
                 owners_count=Count('ownerships')
@@ -179,10 +193,10 @@ class LandPlotViewSet(viewsets.ModelViewSet):
                 queryset = queryset.filter(owners_count__gt=0)
             else:
                 queryset = queryset.filter(owners_count=0)
-        
+
         # Добавляем информацию о владельцах для всплывающих подсказок
         queryset = queryset.prefetch_related('ownerships__owner')
-        
+
         serializer = LandPlotGeoSerializer(queryset, many=True)
         return Response({
             'count': queryset.count(),
@@ -497,12 +511,35 @@ class LandPlotViewSet(viewsets.ModelViewSet):
     def stats(self, request):
         """
         GET /api/plots/stats/
-        
-        Расширенная статистика по участкам.
+
+        Расширенная статистика по участкам с учетом СНТ пользователя.
         """
-        total = LandPlot.objects.count()
+        # Базовый queryset с фильтрацией по организации
         queryset = LandPlot.objects.all()
-        
+
+        # Фильтруем по организации пользователя (если не админ)
+        if not request.user.is_superuser and not request.user.is_admin:
+            if hasattr(request, 'current_organization') and request.current_organization:
+                queryset = queryset.filter(organization=request.current_organization)
+            else:
+                # Если у пользователя нет организации, возвращаем нулевую статистику
+                return Response({
+                    'total': 0,
+                    'active': 0,
+                    'abandoned': 0,
+                    'disputed': 0,
+                    'total_area': 0,
+                    'with_coordinates': 0,
+                    'without_coordinates': 0,
+                    'with_owners': 0,
+                    'without_owners': 0,
+                    'average_area': 0,
+                    'average_owners_per_plot': 0,
+                    'last_added': None,
+                })
+
+        total = queryset.count()
+
         stats = {
             'total': total,
             'active': queryset.filter(status='active').count(),
@@ -530,10 +567,10 @@ class LandPlotViewSet(viewsets.ModelViewSet):
                     owners_count=Count('ownerships')
                 ).aggregate(avg=Avg('owners_count'))['avg'] or 0, 1
             ),
-            'last_added': LandPlot.objects.order_by('-created_at').first().plot_number 
-                if LandPlot.objects.exists() else None,
+            'last_added': queryset.order_by('-created_at').first().plot_number 
+                if queryset.exists() else None,
         }
-        
+
         return Response(stats)
 
     @action(detail=False, methods=['get'], url_path='near')

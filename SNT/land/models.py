@@ -4,6 +4,8 @@ from django.core.validators import MinValueValidator, MaxValueValidator
 from django.core.exceptions import ValidationError
 import re
 
+from organizations.models import Organization
+
 
 class LandPlot(models.Model):
     """
@@ -106,6 +108,18 @@ class LandPlot(models.Model):
         'Дата обновления из Росреестра',
         null=True,
         blank=True
+    )
+    
+    # Связь с СНТ
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name='land_plots',
+        verbose_name='СНТ',
+        help_text='СНТ, к которому относится участок',
+        null=True,
+        blank=True,
+        db_index=True
     )
 
     class Meta:

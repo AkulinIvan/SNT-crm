@@ -15,31 +15,65 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+def get_current_organization_details(request=None):
+    """
+    Получить реквизиты текущего СНТ из базы данных.
+    Если request передан, берем организацию текущего пользователя.
+    Иначе возвращаем первую активную организацию или None.
+    """
+    from organizations.models import Organization
+    
+    if request and hasattr(request, 'current_organization') and request.current_organization:
+        org = request.current_organization
+    else:
+        # Если нет request, берем первую активную организацию
+        org = Organization.objects.filter(is_active=True).first()
+    
+    if not org:
+        logger.warning("Не найдена активная организация СНТ")
+        return None
+    
+    return {
+        'name': org.name,
+        'short_name': org.short_name,
+        'inn': org.inn,
+        'kpp': org.kpp,
+        'account': org.bank_account,
+        'bank_name': org.bank_name,
+        'bank_bik': org.bank_bik,
+        'bank_corr': org.bank_corr_account,
+        'chairman': org.chairman.full_name if org.chairman else 'Председатель',
+    }
 
 class QRCodeGenerator:
     """
     Генератор QR-кодов для банковских квитанций.
-    
-    Стандарт ГОСТ Р 56042-2014 определяет формат данных для QR-кода,
-    который понимают все российские банковские приложения.
+    Реквизиты берутся из модели Organization.
     """
     
-    def __init__(self):
-        # Реквизиты СНТ (должны быть в settings)
-        self.snt_name = getattr(settings, 'SNT_NAME', 'СНТ "Строитель-43"')
-        self.snt_inn = getattr(settings, 'SNT_INN', '')
-        self.snt_kpp = getattr(settings, 'SNT_KPP', '')
-        self.snt_account = re.sub(r'\D', '', getattr(settings, 'SNT_ACCOUNT', ''))  # Только цифры
-        self.snt_bank_name = getattr(settings, 'SNT_BANK_NAME', '')
-        self.snt_bank_bik = getattr(settings, 'SNT_BANK_BIK', '')
-        self.snt_bank_corr = re.sub(r'\D', '', getattr(settings, 'SNT_BANK_CORR', ''))  # Только цифры
+    def __init__(self, request=None):
+        self.request = request
+        self.snt_details = get_current_organization_details(request)
         
-        # Логируем реквизиты для отладки
-        logger.info(f"QRCodeGenerator initialized with:")
-        logger.info(f"  SNT_NAME: {self.snt_name}")
-        logger.info(f"  SNT_ACCOUNT: {self.snt_account}")
-        logger.info(f"  SNT_BANK_BIK: {self.snt_bank_bik}")
-        logger.info(f"  SNT_BANK_CORR: {self.snt_bank_corr}")
+        if self.snt_details:
+            self.snt_name = self.snt_details['short_name']
+            self.snt_inn = self.snt_details['inn']
+            self.snt_kpp = self.snt_details.get('kpp', '')
+            self.snt_account = re.sub(r'\D', '', self.snt_details['account'])
+            self.snt_bank_name = self.snt_details['bank_name']
+            self.snt_bank_bik = self.snt_details['bank_bik']
+            self.snt_bank_corr = re.sub(r'\D', '', self.snt_details.get('bank_corr', ''))
+        else:
+            # Fallback на настройки, если нет организации в БД
+            self.snt_name = getattr(settings, 'SNT_NAME', 'СНТ')
+            self.snt_inn = getattr(settings, 'SNT_INN', '')
+            self.snt_kpp = getattr(settings, 'SNT_KPP', '')
+            self.snt_account = re.sub(r'\D', '', getattr(settings, 'SNT_ACCOUNT', ''))
+            self.snt_bank_name = getattr(settings, 'SNT_BANK_NAME', '')
+            self.snt_bank_bik = getattr(settings, 'SNT_BANK_BIK', '')
+            self.snt_bank_corr = re.sub(r'\D', '', getattr(settings, 'SNT_BANK_CORR', ''))
+        
+        logger.info(f"QRCodeGenerator initialized with organization: {self.snt_name}")
     
     def generate_qr_data(self, 
                          owner_name: str,
@@ -51,42 +85,34 @@ class QRCodeGenerator:
         """
         Генерирует строку данных для QR-кода по ГОСТ Р 56042-2014.
         """
-        # Уникальный идентификатор платежа
         payment_id = f"SNT-{assessment_id:06d}"
         
-        # Назначение платежа
         purpose = (
             f"Оплата {category_name} за {period}. "
             f"Уч.№{plot_number}, Владелец: {owner_name}, "
             f"ID:{payment_id}. Без НДС."
         )
-        # Обрезаем до 210 символов
         if len(purpose) > 210:
             purpose = purpose[:207] + "..."
         
-        # Формируем строку по ГОСТ Р 56042-2014
         fields = []
         
-        # Обязательные поля
-        fields.append("ST00012")  # Версия стандарта
+        fields.append("ST00012")
         fields.append(f"Name={self.snt_name[:160]}")
         fields.append(f"PersonalAcc={self.snt_account}")
         fields.append(f"BankName={self.snt_bank_name[:45]}")
         fields.append(f"BIC={self.snt_bank_bik}")
         fields.append(f"CorrespAcc={self.snt_bank_corr}")
         
-        # Необязательные поля
         if self.snt_inn:
             fields.append(f"INN={self.snt_inn}")
         if self.snt_kpp:
             fields.append(f"KPP={self.snt_kpp}")
         
-        # Платёжные реквизиты
         fields.append(f"PayeeINN={self.snt_inn}")
-        fields.append(f"Sum={int(amount * 100)}")  # Сумма в копейках
+        fields.append(f"Sum={int(amount * 100)}")
         fields.append(f"Purpose={purpose}")
         
-        # Данные плательщика
         name_parts = owner_name.split()
         if len(name_parts) > 0:
             fields.append(f"LastName={name_parts[0]}")
@@ -97,7 +123,6 @@ class QRCodeGenerator:
         
         fields.append(f"Contract={payment_id}")
         
-        # Собираем строку
         qr_string = "|".join(fields)
         
         logger.info(f"Generated QR data length: {len(qr_string)}")
@@ -175,31 +200,34 @@ class QRCodeGenerator:
 class SNTDetailsGenerator:
     """Генератор полных реквизитов СНТ для квитанции"""
     
-    def __init__(self):
-        self.name = getattr(settings, 'SNT_NAME', 'СНТ "Строитель-43"')
-        self.inn = getattr(settings, 'SNT_INN', '')
-        self.kpp = getattr(settings, 'SNT_KPP', '')
-        self.account = getattr(settings, 'SNT_ACCOUNT', '')
-        self.bank_name = getattr(settings, 'SNT_BANK_NAME', '')
-        self.bank_bik = getattr(settings, 'SNT_BANK_BIK', '')
-        self.bank_corr = getattr(settings, 'SNT_BANK_CORR', '')
-        self.oktmo = getattr(settings, 'SNT_OKTMO', '')
-        self.kbk = getattr(settings, 'SNT_KBK', '')
-        self.chairman = getattr(settings, 'SNT_CHAIRMAN', 'Председатель')
+    def __init__(self, request=None):
+        self.request = request
+        self.snt_details = get_current_organization_details(request)
     
     def get_details(self) -> dict:
         """Возвращает полные реквизиты СНТ для квитанции"""
+        if self.snt_details:
+            return {
+                'name': self.snt_details['name'],
+                'inn': self.snt_details['inn'],
+                'kpp': self.snt_details.get('kpp', ''),
+                'account': format_account(self.snt_details['account']),
+                'bank_name': self.snt_details['bank_name'],
+                'bank_bik': self.snt_details['bank_bik'],
+                'bank_corr': format_account(self.snt_details.get('bank_corr', '')),
+                'chairman': self.snt_details.get('chairman', 'Председатель'),
+            }
+        
+        # Fallback
         return {
-            'name': self.name,
-            'inn': self.inn,
-            'kpp': self.kpp,
-            'account': format_account(self.account),
-            'bank_name': self.bank_name,
-            'bank_bik': self.bank_bik,
-            'bank_corr': format_account(self.bank_corr),
-            'oktmo': self.oktmo,
-            'kbk': self.kbk,
-            'chairman': self.chairman,
+            'name': getattr(settings, 'SNT_NAME', 'СНТ'),
+            'inn': getattr(settings, 'SNT_INN', ''),
+            'kpp': getattr(settings, 'SNT_KPP', ''),
+            'account': format_account(getattr(settings, 'SNT_ACCOUNT', '')),
+            'bank_name': getattr(settings, 'SNT_BANK_NAME', ''),
+            'bank_bik': getattr(settings, 'SNT_BANK_BIK', ''),
+            'bank_corr': format_account(getattr(settings, 'SNT_BANK_CORR', '')),
+            'chairman': getattr(settings, 'SNT_CHAIRMAN', 'Председатель'),
         }
 
 

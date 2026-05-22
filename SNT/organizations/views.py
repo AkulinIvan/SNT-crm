@@ -161,6 +161,18 @@ class OrganizationViewSet(viewsets.ModelViewSet):
             stats['overdue_count'] = 0
 
         return Response(stats)
+    
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        
+        # Не-админы видят только свое СНТ
+        if not self.request.user.is_superuser and not self.request.user.is_admin:
+            if hasattr(self.request, 'current_organization') and self.request.current_organization:
+                queryset = queryset.filter(id=self.request.current_organization.id)
+            else:
+                queryset = queryset.none()
+        
+        return queryset
 
 
 class OrganizationListView(TemplateView):

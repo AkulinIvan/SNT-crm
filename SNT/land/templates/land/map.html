@@ -860,7 +860,7 @@ async function loadPlotsWithoutCoords(page = 1) {
                             <div class="empty-state">
                                 <div class="empty-icon">✅</div>
                                 <h3>Все участки имеют координаты</h3>
-                                <p>У всех ${noCoordsTotalCount} участков заданы координаты на карте</p>
+                                <p>У всех участков вашего СНТ заданы координаты на карте</p>
                             </div>
                         </td>
                     </tr>`;
@@ -877,18 +877,6 @@ async function loadPlotsWithoutCoords(page = 1) {
                         <a href="/plots/${plot.id}/" style="color: var(--primary); text-decoration: none; font-weight: 600;" onclick="event.stopPropagation();">
                             Уч. №${escapeHtml(plot.plot_number)}
                         </a>
-                    </td>
-                    <td>
-                        <div style="display: flex; gap: 4px;">
-                            <button class="btn btn-sm btn-primary" 
-                                onclick="event.stopPropagation(); openSetCoordsFromMap(${plot.id}, '${escapeHtml(plot.plot_number)}', ${mapCenterLat}, ${mapCenterLon})">
-                                📍 Точка
-                            </button>
-                            <button class="btn btn-sm btn-secondary" 
-                                onclick="event.stopPropagation(); openManualBoundariesModal(${plot.id}, '${escapeHtml(plot.plot_number)}')">
-                                ✏️ Границы
-                            </button>
-                        </div>
                     </td>
                     <td>${plot.area_sqm} м²</td>
                     <td>${getStatusBadge(plot.status)}</td>
@@ -913,7 +901,6 @@ async function loadPlotsWithoutCoords(page = 1) {
             `).join('');
         }
         
-        // Рендерим пагинацию
         renderNoCoordsPagination();
 
     } catch (error) {

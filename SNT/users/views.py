@@ -10,7 +10,7 @@ from django.utils import timezone
 import logging
 from rest_framework import permissions
 
-from SNT.common.mixins import OrganizationMixin
+from common.mixins import OrganizationMixin
 from accounts.permissions import IsManagerOrAbove
 from .models import Owner, Ownership, ContactInfo
 from .serializers import (
@@ -24,7 +24,57 @@ from land.models import LandPlot
 
 logger = logging.getLogger(__name__)
 
-
+class DashboardViewSet(viewsets.ViewSet):
+    """ViewSet для получения данных дашборда"""
+    
+    @action(detail=False, methods=['get'], url_path='stats')
+    def dashboard_stats(self, request):
+        """Получить статистику для дашборда с учетом организации"""
+        from payments.models import Assessment
+        from land.models import LandPlot
+        
+        # Получаем организацию пользователя
+        org = None
+        if not request.user.is_superuser and not request.user.is_admin:
+            org = getattr(request, 'current_organization', None)
+        
+        # Статистика владельцев
+        from users.models import Owner
+        owners_query = Owner.objects.all()
+        if org:
+            owners_query = owners_query.filter(memberships__organization=org, memberships__status='active')
+        owners_count = owners_query.count()
+        
+        # Статистика участков
+        plots_query = LandPlot.objects.all()
+        if org:
+            plots_query = plots_query.filter(organization=org)
+        plots_total = plots_query.count()
+        plots_active = plots_query.filter(status='active').count()
+        
+        # Статистика СНТ
+        from organizations.models import Organization
+        orgs_query = Organization.objects.all()
+        if not request.user.is_superuser and not request.user.is_admin and org:
+            orgs_query = orgs_query.filter(id=org.id)
+        orgs_count = orgs_query.count()
+        
+        # Задолженность
+        assessments_query = Assessment.objects.filter(status__in=['pending', 'partial', 'overdue'])
+        if org:
+            assessments_query = assessments_query.filter(owner__memberships__organization=org, owner__memberships__status='active')
+        total_debt = 0
+        for a in assessments_query:
+            total_debt += a.debt
+        
+        return Response({
+            'owners_count': owners_count,
+            'plots_total': plots_total,
+            'plots_active': plots_active,
+            'organizations_count': orgs_count,
+            'total_debt': float(total_debt),
+        })
+        
 class OwnerViewSet(OrganizationMixin, viewsets.ModelViewSet):
     """
     ViewSet для управления владельцами.
@@ -112,6 +162,11 @@ class OwnerViewSet(OrganizationMixin, viewsets.ModelViewSet):
         
         return queryset
 
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context
+    
     def list(self, request, *args, **kwargs):
         """Расширенный list с дополнительной статистикой"""
         queryset = self.filter_queryset(self.get_queryset())
@@ -183,6 +238,13 @@ class OwnerViewSet(OrganizationMixin, viewsets.ModelViewSet):
         
         land_plot = get_object_or_404(LandPlot, pk=plot_id)
         
+        # Проверяем, что участок принадлежит организации пользователя
+        if self.request.current_organization and land_plot.organization != self.request.current_organization:
+            return Response(
+                {'detail': 'Этот участок не принадлежит вашему СНТ'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+            
         # Проверка на существующую связь
         if Ownership.objects.filter(owner=owner, land_plot=land_plot).exists():
             return Response(
