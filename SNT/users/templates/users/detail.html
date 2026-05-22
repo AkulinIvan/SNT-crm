@@ -71,7 +71,28 @@
                 </table>
             </div>
         </div>
-
+        <!---->
+        <div class="table-container" style="margin-bottom: 24px;">
+            <div class="table-toolbar">
+                <span style="font-weight: 600;">🏢 СНТ</span>
+            </div>
+            <table style="width: 100%; border-collapse: collapse;">
+                <tbody>
+                    <tr>
+                        <td style="color: var(--gray-500); width: 40%;">Наименование СНТ</td>
+                        <td id="owner-organization">—</td>
+                        <td style="width: 50px;">
+                            <button class="btn-icon" onclick="openChangeOrganizationModal()" title="Изменить СНТ">✏️</button>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="color: var(--gray-500);">Статус членства</td>
+                        <td id="owner-membership-status">—</td>
+                        <td></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
         <!-- Правая колонка: Участки -->
         <div>
             <div class="table-container" style="margin-bottom: 24px;">
@@ -176,6 +197,109 @@
     const ownerId = {{ owner_id }};
     let ownerData = null;
 
+    // Загрузка информации о СНТ
+    async function loadOrganizationInfo() {
+        if (!ownerData.memberships || ownerData.memberships.length === 0) {
+            safeSetText('owner-organization', '—');
+            safeSetText('owner-organization-inn', '—');
+            safeSetText('owner-membership-status', 'Не состоит');
+            return;
+        }
+
+        const activeMembership = ownerData.memberships.find(m => m.status === 'active');
+        if (!activeMembership) {
+            safeSetText('owner-organization', '—');
+            safeSetText('owner-organization-inn', '—');
+            safeSetText('owner-membership-status', 'Неактивное членство');
+            return;
+        }
+
+        const orgData = await apiFetch(`/api/organizations/${activeMembership.organization}/`);
+        if (orgData) {
+            safeSetText('owner-organization', orgData.short_name || orgData.name);
+            safeSetText('owner-organization-inn', orgData.inn);
+
+            const statusMap = {
+                'active': '<span class="badge-status badge-active">Активный член</span>',
+                'inactive': '<span class="badge-status badge-inactive">Неактивный член</span>',
+                'excluded': '<span class="badge-status badge-danger">Исключён</span>',
+                'left': '<span class="badge-status badge-warning">Вышел</span>',
+            };
+            safeSetHTML('owner-membership-status', statusMap[activeMembership.status] || activeMembership.status);
+        }
+    }
+
+    // Функция смены СНТ для владельца - через членство
+    async function openChangeOrganizationModal() {
+        const orgsData = await apiFetch('/api/organizations/?limit=100');
+        if (!orgsData || !orgsData.results) {
+            showAlert('Не удалось загрузить список СНТ', 'error');
+            return;
+        }
+        
+        // Получаем текущее активное членство
+        const currentMembership = ownerData.memberships?.find(m => m.status === 'active');
+        const currentOrgId = currentMembership?.organization;
+        
+        const orgOptions = orgsData.results.map(org => 
+            `<option value="${org.id}" ${currentOrgId === org.id ? 'selected' : ''}>
+                ${escapeHtml(org.short_name)} (ИНН: ${org.inn})
+            </option>`
+        ).join('');
+        
+        openModal('Изменить СНТ владельца', `
+            <div class="form-group">
+                <label>Выберите СНТ</label>
+                <select id="owner-org-select" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
+                    <option value="">— Не состоит —</option>
+                    ${orgOptions}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Статус членства</label>
+                <select id="membership-status" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
+                    <option value="active" ${currentMembership?.status === 'active' ? 'selected' : ''}>Активный член</option>
+                    <option value="inactive" ${currentMembership?.status === 'inactive' ? 'selected' : ''}>Неактивный член</option>
+                    <option value="excluded">Исключён</option>
+                    <option value="left">Вышел добровольно</option>
+                </select>
+            </div>
+        `, 'Сохранить', async () => {
+            const newOrgId = document.getElementById('owner-org-select').value;
+            const newStatus = document.getElementById('membership-status').value;
+            
+            if (currentMembership) {
+                // Обновляем существующее членство
+                const result = await apiFetch(`/api/organization-members/${currentMembership.id}/`, {
+                    method: 'PATCH',
+                    body: JSON.stringify({
+                        organization: newOrgId ? parseInt(newOrgId) : null,
+                        status: newStatus
+                    })
+                });
+                if (result) {
+                    showAlert('Членство обновлено', 'success');
+                    closeModal();
+                    loadOwnerDetail();
+                }
+            } else if (newOrgId) {
+                // Создаем новое членство
+                const result = await apiFetch(`/api/organizations/${newOrgId}/add-member/`, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        owner: ownerId,
+                        status: newStatus
+                    })
+                });
+                if (result) {
+                    showAlert('Владелец добавлен в СНТ', 'success');
+                    closeModal();
+                    loadOwnerDetail();
+                }
+            }
+        });
+    }
+
     async function loadOwnerDetail() {
         ownerData = await apiFetch(`/api/owners/${ownerId}/`);
         if (!ownerData) {
@@ -200,6 +324,8 @@
         renderPlots(ownerData.ownerships || []);
         loadAssessments();
         loadPayments();
+        // Загружаем информацию о СНТ
+        await loadOrganizationInfo();
     }
 
     // ==================== КОНТАКТЫ ====================

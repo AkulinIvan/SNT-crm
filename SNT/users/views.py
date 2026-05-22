@@ -523,6 +523,11 @@ class OwnershipViewSet(viewsets.ModelViewSet):
         """Расширенная фильтрация"""
         queryset = super().get_queryset()
         
+        # Фильтрация по организации через членство
+        organization = self.request.query_params.get('organization')
+        if organization:
+            queryset = queryset.filter(memberships__organization_id=organization, memberships__status='active')
+        
         # Фильтрация по нескольким участкам
         land_plots = self.request.query_params.get('land_plot__in')
         if land_plots:

@@ -1,16 +1,20 @@
+# organizations/serializers.py
 from rest_framework import serializers
 from .models import Organization, OrganizationMembership
 from users.serializers import OwnerListSerializer
+from accounts.models import User
 
 
 class OrganizationSerializer(serializers.ModelSerializer):
     """Краткий сериализатор для списка СНТ"""
     chairman_name = serializers.CharField(source='chairman.full_name', read_only=True)
+    accountant_name = serializers.CharField(source='accountant.full_name', read_only=True)
     
     class Meta:
         model = Organization
         fields = [
-            'id', 'name', 'short_name', 'inn', 'chairman_name', 'is_active'
+            'id', 'name', 'short_name', 'inn', 'chairman_name', 
+            'accountant_name', 'is_active'
         ]
 
 
@@ -18,6 +22,20 @@ class OrganizationDetailSerializer(serializers.ModelSerializer):
     """Полный сериализатор СНТ"""
     chairman_name = serializers.CharField(source='chairman.full_name', read_only=True)
     accountant_name = serializers.CharField(source='accountant.full_name', read_only=True)
+    chairman_id = serializers.PrimaryKeyRelatedField(
+        source='chairman',
+        queryset=User.objects.all(),
+        write_only=True,
+        required=False,
+        allow_null=True
+    )
+    accountant_id = serializers.PrimaryKeyRelatedField(
+        source='accountant',
+        queryset=User.objects.all(),
+        write_only=True,
+        required=False,
+        allow_null=True
+    )
     
     class Meta:
         model = Organization

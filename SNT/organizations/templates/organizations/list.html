@@ -222,20 +222,16 @@
 
     async function loadGlobalStats() {
         try {
+            // Получаем общую статистику по всем СНТ
             const ownersData = await apiFetch('/api/owners/?limit=1');
-            if (ownersData) safeSetText('stat-owners', ownersData.count || 0);
+            if (ownersData) safeSetText('stat-owners', ownersData.count || 0);  
 
-            // Временно отключаем запрос к участкам, который вызывает ошибку
             const plotsData = await apiFetch('/api/plots/?limit=1');
             if (plotsData) safeSetText('stat-plots', plotsData.count || 0);
-
-            // Вместо этого используем данные из stats API
-            const orgStats = await apiFetch(`/api/organizations/${orgId}/stats/`);
-            if (orgStats) {
-                safeSetText('stat-plots', orgStats.total_plots || 0);
-            }
         } catch (e) {
             console.error('Error loading stats:', e);
+            safeSetText('stat-owners', '—');
+            safeSetText('stat-plots', '—');
         }
     }
 
@@ -541,7 +537,6 @@
 
     document.addEventListener('DOMContentLoaded', () => {
         loadOrganizations();
-        loadGlobalStats();
     });
 </script>
 {% endblock %}

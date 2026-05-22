@@ -62,12 +62,29 @@
             <div class="table-container">
                 <div class="table-toolbar">
                     <span style="font-weight: 600;">👔 Руководство</span>
+                    <button class="btn btn-primary btn-sm" onclick="openAssignChairmanModal()" id="btn-assign-chairman">👑 Назначить председателя</button>
                 </div>
                 <table style="width: 100%; border-collapse: collapse;">
                     <tbody>
-                        <tr><td style="color: var(--gray-500); width: 40%;">Председатель</td><td id="info-chairman">—</td></tr>
-                        <tr><td style="color: var(--gray-500);">Бухгалтер</td><td id="info-accountant">—</td></tr>
-                        <tr><td style="color: var(--gray-500);">Активность</td><td id="info-is-active">—</td></tr>
+                        <tr>
+                            <td style="color: var(--gray-500); width: 40%;">Председатель</td>
+                            <td id="info-chairman">—</td>
+                            <td style="width: 50px;">
+                                <button class="btn-icon" onclick="openAssignChairmanModal()" title="Изменить председателя" id="btn-edit-chairman" style="display: none;">✏️</button>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td style="color: var(--gray-500);">Бухгалтер</td>
+                            <td id="info-accountant">—</td>
+                            <td>
+                                <button class="btn-icon" onclick="openAssignAccountantModal()" title="Изменить бухгалтера" id="btn-edit-accountant" style="display: none;">✏️</button>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td style="color: var(--gray-500);">Активность</td>
+                            <td id="info-is-active">—</td>
+                            <td></td>
+                        </tr>
                     </tbody>
                 </table>
             </div>
@@ -135,6 +152,7 @@
     const pathParts = window.location.pathname.split('/');
     const orgId = parseInt(pathParts[pathParts.length - 2]);
     let orgData = null;
+    let availableUsers = [];
 
     async function loadOrganizationDetail() {
         orgData = await apiFetch(`/api/organizations/${orgId}/`);
@@ -173,8 +191,11 @@
         safeSetText('info-bank-corr', formatAccount(orgData.bank_corr_account));
 
         // Руководство
-        safeSetText('info-chairman', orgData.chairman_name || '—');
-        safeSetText('info-accountant', orgData.accountant_name || '—');
+        const chairmanName = orgData.chairman_name || '—';
+        const accountantName = orgData.accountant_name || '—';
+        
+        safeSetText('info-chairman', chairmanName);
+        safeSetText('info-accountant', accountantName);
         
         const statusHtml = orgData.is_active 
             ? '<span class="badge-status badge-active">Активно</span>' 
@@ -182,9 +203,25 @@
         safeSetHTML('info-is-active', statusHtml);
         safeSetHTML('org-status-badge', statusHtml);
 
+        // Показываем кнопки редактирования только если пользователь имеет права
+        const currentUser = await apiFetch('/api/auth/me/');
+        if (currentUser && (currentUser.is_superuser || currentUser.role === 'admin' || currentUser.role === 'manager')) {
+            document.getElementById('btn-edit-chairman').style.display = 'inline-block';
+            document.getElementById('btn-edit-accountant').style.display = 'inline-block';
+        }
+
         // Загружаем статистику и членов
         loadOrgStats();
         loadMembers();
+        loadAvailableUsers();
+    }
+
+    async function loadAvailableUsers() {
+        // Загружаем пользователей для назначения на роли
+        const usersData = await apiFetch('/api/users/?limit=100');
+        if (usersData && usersData.results) {
+            availableUsers = usersData.results;
+        }
     }
 
     function formatAccount(account) {
@@ -256,6 +293,92 @@
             'left': 'badge-warning',
         };
         return map[status] || 'badge-inactive';
+    }
+
+    // ==================== НАЗНАЧЕНИЕ ПРЕДСЕДАТЕЛЯ ====================
+
+    async function openAssignChairmanModal() {
+        if (availableUsers.length === 0) {
+            await loadAvailableUsers();
+        }
+        
+        const userOptions = availableUsers
+            .filter(u => u.is_active)
+            .map(u => `<option value="${u.id}" ${orgData.chairman === u.id ? 'selected' : ''}>${escapeHtml(u.full_name || u.username)} (${u.role_display})</option>`)
+            .join('');
+        
+        const modalContent = `
+            <div class="form-group">
+                <label>Выберите председателя СНТ</label>
+                <select id="chairman-user" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
+                    <option value="">— Не назначен —</option>
+                    ${userOptions}
+                </select>
+                <small style="color: var(--gray-500);">Председатель будет иметь права на управление СНТ</small>
+            </div>
+        `;
+        
+        openModal('Назначить председателя', modalContent, 'Сохранить', async () => {
+            const userId = document.getElementById('chairman-user').value;
+            
+            const payload = {
+                chairman_id: userId ? parseInt(userId) : null
+            };
+            
+            const result = await apiFetch(`/api/organizations/${orgId}/`, {
+                method: 'PATCH',
+                body: JSON.stringify(payload)
+            });
+            
+            if (result) {
+                showAlert(userId ? 'Председатель назначен' : 'Председатель удален', 'success');
+                closeModal();
+                loadOrganizationDetail();
+            }
+        });
+    }
+
+    // ==================== НАЗНАЧЕНИЕ БУХГАЛТЕРА ====================
+
+    async function openAssignAccountantModal() {
+        if (availableUsers.length === 0) {
+            await loadAvailableUsers();
+        }
+        
+        const userOptions = availableUsers
+            .filter(u => u.is_active)
+            .map(u => `<option value="${u.id}" ${orgData.accountant === u.id ? 'selected' : ''}>${escapeHtml(u.full_name || u.username)} (${u.role_display})</option>`)
+            .join('');
+        
+        const modalContent = `
+            <div class="form-group">
+                <label>Выберите бухгалтера СНТ</label>
+                <select id="accountant-user" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
+                    <option value="">— Не назначен —</option>
+                    ${userOptions}
+                </select>
+                <small style="color: var(--gray-500);">Бухгалтер будет иметь доступ к финансовым операциям</small>
+            </div>
+        `;
+        
+        openModal('Назначить бухгалтера', modalContent, 'Сохранить', async () => {
+            const userId = document.getElementById('accountant-user').value;
+            
+            const payload = {
+                accountant_id: userId ? parseInt(userId) : null
+            };
+            
+            const result = await apiFetch(`/api/organizations/${orgId}/`, {
+                method: 'PATCH',
+                body: JSON.stringify(payload)
+            });
+            
+            if (result) {
+                showAlert(userId ? 'Бухгалтер назначен' : 'Бухгалтер удален', 'success');
+                closeModal();
+                loadOrganizationDetail();
+            }
+        });
     }
 
     // ==================== ДОБАВЛЕНИЕ ЧЛЕНА СНТ ====================

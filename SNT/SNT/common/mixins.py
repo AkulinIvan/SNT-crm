@@ -1,11 +1,12 @@
-from django.db import models
+# SNT/common/mixins.py
 from django.core.exceptions import PermissionDenied
+
+from users.models import Owner
 
 
 class OrganizationMixin:
     """
-    Миксин для автоматической фильтрации queryset'ов по организации.
-    Используется в ViewSet и View.
+    Миксин для автоматической фильтрации queryset'ов через членство в СНТ.
     """
     
     def get_queryset(self):
@@ -17,23 +18,33 @@ class OrganizationMixin:
         
         # Для остальных пользователей - только их организация
         if hasattr(self.request, 'current_organization') and self.request.current_organization:
-            # Фильтруем по полю organization
-            if hasattr(queryset.model, 'organization'):
-                return queryset.filter(organization=self.request.current_organization)
+            org = self.request.current_organization
             
-            # Для моделей, связанных через владельца
-            if hasattr(queryset.model, 'owner') and hasattr(queryset.model.owner.field.model, 'organization'):
-                return queryset.filter(owner__organization=self.request.current_organization)
+            # Для модели Owner - фильтруем через членство
+            if queryset.model.__name__ == 'Owner':
+                return queryset.filter(memberships__organization=org, memberships__status='active').distinct()
             
-            # Для моделей, связанных через участок
-            if hasattr(queryset.model, 'land_plot') and hasattr(queryset.model.land_plot.field.model, 'owners'):
-                return queryset.filter(land_plot__owners__organization=self.request.current_organization).distinct()
+            # Для модели LandPlot - фильтруем через владельцев
+            if queryset.model.__name__ == 'LandPlot':
+                return queryset.filter(owners__memberships__organization=org, owners__memberships__status='active').distinct()
+            
+            # Для модели Assessment - фильтруем через владельца
+            if hasattr(queryset.model, 'owner'):
+                return queryset.filter(owner__memberships__organization=org, owner__memberships__status='active').distinct()
         
         return queryset.none()
     
     def perform_create(self, serializer):
-        """При создании автоматически подставляем организацию"""
-        if hasattr(self.request, 'current_organization') and self.request.current_organization:
-            serializer.save(organization=self.request.current_organization)
-        else:
-            super().perform_create(serializer)
+        """При создании автоматически добавляем членство в организацию"""
+        instance = serializer.save()
+        
+        # Для Owner - автоматически создаем членство в организации пользователя
+        if isinstance(instance, Owner) and hasattr(self.request, 'current_organization') and self.request.current_organization:
+            from organizations.models import OrganizationMembership
+            OrganizationMembership.objects.get_or_create(
+                owner=instance,
+                organization=self.request.current_organization,
+                defaults={'status': 'active'}
+            )
+        
+        return instance

@@ -32,16 +32,7 @@ class Owner(models.Model):
         'Дата обновления',
         auto_now=True
     )
-    # Связь с СНТ
-    organization = models.ForeignKey(
-        'organizations.Organization',
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='owners',
-        verbose_name='СНТ',
-        help_text='СНТ, в котором владелец имеет участки'
-    )
+    
     
     class Meta:
         verbose_name = 'Владелец'
@@ -114,6 +105,17 @@ class Owner(models.Model):
         """Получение прав собственности, отсортированных по дате"""
         return self.ownerships.order_by('ownership_since')
 
+    @property
+    def organization(self):
+        """Получить основное СНТ владельца (первое активное членство)"""
+        membership = self.memberships.filter(status='active').first()
+        return membership.organization if membership else None
+    
+    @property
+    def organization_name(self):
+        """Название СНТ владельца"""
+        org = self.organization
+        return org.short_name if org else None
 
 class Ownership(models.Model):
     """

@@ -128,21 +128,22 @@ class OwnerListSerializer(serializers.ModelSerializer):
     primary_phone = serializers.CharField(read_only=True)
     primary_email = serializers.CharField(read_only=True)
     plots_count = serializers.IntegerField(read_only=True)
+    organization_name = serializers.SerializerMethodField()  # Изменено на метод
 
     class Meta:
         model = Owner
         fields = [
             'id', 'full_name', 'primary_phone', 'primary_email', 
-            'plots_count', 'created_at',
+            'plots_count', 'created_at', 'organization_name',
         ]
+
+    def get_organization_name(self, obj):
+        return obj.organization_name
 
 
 class OwnerDetailSerializer(serializers.ModelSerializer):
     """
-    Полный сериализатор владельца:
-    — все контакты,
-    — все участки с долями,
-    — основные телефоны / email.
+    Полный сериализатор владельца.
     """
     contacts = ContactInfoSerializer(many=True, read_only=True)
     ownerships = OwnershipSerializer(many=True, read_only=True)
@@ -152,6 +153,7 @@ class OwnerDetailSerializer(serializers.ModelSerializer):
     updated_at = serializers.DateTimeField(read_only=True, format='%d.%m.%Y %H:%M')
     total_debt = serializers.SerializerMethodField()
     is_debtor = serializers.SerializerMethodField()
+    memberships = serializers.SerializerMethodField()  # Добавить членства
 
     class Meta:
         model = Owner
@@ -159,7 +161,7 @@ class OwnerDetailSerializer(serializers.ModelSerializer):
             'id', 'full_name',
             'primary_phone', 'primary_email',
             'contacts', 'ownerships',
-            'total_debt', 'is_debtor',
+            'total_debt', 'is_debtor', 'memberships',  # Добавить memberships
             'created_at', 'updated_at',
         ]
 
@@ -168,12 +170,17 @@ class OwnerDetailSerializer(serializers.ModelSerializer):
 
     def get_is_debtor(self, obj):
         return obj.is_debtor
+    
+    def get_memberships(self, obj):
+        """Получить все членства владельца в СНТ"""
+        from organizations.serializers import OrganizationMembershipSerializer
+        memberships = obj.memberships.select_related('organization').all()
+        return OrganizationMembershipSerializer(memberships, many=True).data
 
 
 class OwnerCreateUpdateSerializer(serializers.ModelSerializer):
     """
     Сериализатор для создания и редактирования владельца.
-    Не включает связи — они управляются отдельными эндпоинтами.
     """
     full_name = serializers.CharField(
         max_length=150,
@@ -187,13 +194,11 @@ class OwnerCreateUpdateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Owner
-        fields = ['id', 'full_name', 'organization']
+        fields = ['id', 'full_name']
 
     def validate_full_name(self, value):
         """Нормализация ФИО"""
-        # Убираем лишние пробелы
         value = ' '.join(value.split())
-        # Приводим к заглавным буквам
         return value.title()
     
     def create(self, validated_data):

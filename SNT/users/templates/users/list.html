@@ -34,6 +34,13 @@
             <option value="-created_at">Сначала новые</option>
         </select>
     </div>
+    <div class="filter-group">
+        <label>🏢 СНТ:</label>
+        <select id="organization-filter" onchange="changeFilter()">
+            <option value="">Все СНТ</option>
+            <!-- Опции будут загружены динамически -->
+        </select>
+    </div>
     <button class="btn btn-secondary" onclick="resetFilters()">Сбросить</button>
     <span style="margin-left: auto; font-size: 0.85rem; color: var(--gray-600);" id="results-count">Загрузка...</span>
 </div>
@@ -49,6 +56,7 @@
                 <th>ФИО</th>
                 <th>Телефон</th>
                 <th>Email</th>
+                <th>СНТ</th>
                 <th>Участков</th>
                 <th>Дата добавления</th>
                 <th>Действия</th>
@@ -93,7 +101,7 @@
     let searchQuery = '';
     let currentSort = 'full_name';
     let selectedOwners = new Set();
-
+    let orgFilter = '';
     
     function debounceSearch() {
         clearTimeout(searchTimeout);
@@ -108,6 +116,7 @@
 
     function changeFilter() {
         currentSort = document.getElementById('sort-select').value;
+        orgFilter = document.getElementById('organization-filter').value;
         currentPage = 1;
         selectedOwners.clear();
         document.getElementById('select-all').checked = false;
@@ -117,12 +126,26 @@
     function resetFilters() {
         document.getElementById('search-input').value = '';
         document.getElementById('sort-select').value = 'full_name';
+        document.getElementById('organization-filter').value = '';
         searchQuery = '';
         currentSort = 'full_name';
+        orgFilter = '';
         currentPage = 1;
         selectedOwners.clear();
         document.getElementById('select-all').checked = false;
         loadOwners();
+    }
+
+    // Функция загрузки списка СНТ для фильтра
+    async function loadOrganizationsFilter() {
+        const orgsData = await apiFetch('/api/organizations/?limit=100');
+        if (orgsData && orgsData.results) {
+            const filterSelect = document.getElementById('organization-filter');
+            const options = orgsData.results.map(org => 
+                `<option value="${org.id}">${escapeHtml(org.short_name)}</option>`
+            ).join('');
+            filterSelect.innerHTML = '<option value="">Все СНТ</option>' + options;
+        }
     }
 
     function toggleSelectAll() {
@@ -356,6 +379,7 @@
             ordering: currentSort,
         });
         if (searchQuery) params.append('search', searchQuery);
+        if (orgFilter) params.append('organization', orgFilter);
 
         const data = await apiFetch(`/api/owners/?${params}`);
         if (!data) return;
@@ -404,6 +428,9 @@
                         '<span style="color: var(--gray-400);">—</span>'}
                 </td>
                 <td>
+                    <span class="badge-status badge-info">${escapeHtml(owner.organization_name || '—')}</span>
+                </td>
+                <td>
                     <span style="font-weight: 600;">${owner.plots_count || 0}</span>
                 </td>
                 <td>
@@ -416,7 +443,7 @@
                         <button class="btn-icon danger" onclick="confirmDeleteOwner(${owner.id}, '${escapeHtml(owner.full_name)}')" title="Удалить">🗑️</button>
                     </div>
                 </td>
-            </tr>
+            </td>
         `).join('');
 
         renderPagination(data);
@@ -900,6 +927,9 @@ function showReceiptsList(results, receiptsHtml) {
         return div.innerHTML;
     }
 
-    document.addEventListener('DOMContentLoaded', loadOwners);
+    document.addEventListener('DOMContentLoaded', () => {
+        loadOrganizationsFilter();
+        loadOwners();
+    });
 </script>
 {% endblock %}
