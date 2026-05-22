@@ -1,0 +1,547 @@
+{% extends "base.html" %}
+
+{% block title %}Управление СНТ | CRM СНТ{% endblock %}
+
+{% block breadcrumb %}
+<a href="/">Главная</a> <span>/</span> <span>СНТ</span>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div>
+            <h2>🏢 Садоводческие некоммерческие товарищества</h2>
+            <p>Управление организациями СНТ и их реквизитами</p>
+        </div>
+        <div style="display: flex; gap: 8px;">
+            <button class="btn btn-primary" onclick="openAddOrganizationModal()">+ Добавить СНТ</button>
+        </div>
+    </div>
+</div>
+
+<!-- Фильтры -->
+<div class="filters-bar">
+    <div class="filter-group">
+        <label>🔍 Поиск:</label>
+        <input type="text" id="search-input" placeholder="Название, ИНН..." onkeyup="debounceSearch()">
+    </div>
+    <div class="filter-group">
+        <label>Статус:</label>
+        <select id="status-filter" onchange="changeFilter()">
+            <option value="">Все</option>
+            <option value="true">Активные</option>
+            <option value="false">Неактивные</option>
+        </select>
+    </div>
+    <button class="btn btn-secondary" onclick="resetFilters()">Сбросить</button>
+    <span style="margin-left: auto; font-size: 0.85rem; color: var(--gray-600);" id="results-count">Загрузка...</span>
+</div>
+
+<!-- Таблица СНТ -->
+<div class="table-container">
+    <table>
+        <thead>
+            <tr>
+                <th>Краткое название</th>
+                <th>ИНН</th>
+                <th>Председатель</th>
+                <th>Бухгалтер</th>
+                <th>Кол-во участков</th>
+                <th>Статус</th>
+                <th>Действия</th>
+            </tr>
+        </thead>
+        <tbody id="organizations-table-body">
+            <tr>
+                <td colspan="7">
+                    <div class="empty-state">
+                        <div class="empty-icon">⏳</div>
+                        <h3>Загрузка данных...</h3>
+                    </div>
+                </td>
+            </tr>
+        </tbody>
+    </table>
+    <div class="pagination" id="pagination"></div>
+</div>
+
+<!-- Статистика -->
+<div class="stats-grid" style="margin-top: 24px;">
+    <div class="stat-card">
+        <div class="stat-label">🏢 Всего СНТ</div>
+        <div class="stat-value" id="stat-total">—</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">✅ Активных</div>
+        <div class="stat-value" id="stat-active" style="color: var(--primary);">—</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">👤 Всего владельцев</div>
+        <div class="stat-value" id="stat-owners">—</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">🏠 Всего участков</div>
+        <div class="stat-value" id="stat-plots">—</div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    
+    let currentPage = 1;
+    let searchQuery = '';
+    let statusFilter = '';
+
+    function debounceSearch() {
+        clearTimeout(searchTimeout);
+        searchTimeout = setTimeout(() => {
+            searchQuery = document.getElementById('search-input').value.trim();
+            currentPage = 1;
+            loadOrganizations();
+        }, 300);
+    }
+
+    function changeFilter() {
+        statusFilter = document.getElementById('status-filter').value;
+        currentPage = 1;
+        loadOrganizations();
+    }
+
+    function resetFilters() {
+        document.getElementById('search-input').value = '';
+        document.getElementById('status-filter').value = '';
+        searchQuery = '';
+        statusFilter = '';
+        currentPage = 1;
+        loadOrganizations();
+    }
+
+    async function loadOrganizations() {
+        const params = new URLSearchParams({
+            page: currentPage,
+            ordering: 'short_name',
+        });
+        if (searchQuery) params.append('search', searchQuery);
+        if (statusFilter) params.append('is_active', statusFilter);
+
+        const data = await apiFetch(`/api/organizations/?${params}`);
+        if (!data) return;
+
+        document.getElementById('results-count').textContent = 
+            `Найдено: ${data.count || 0} ${pluralize(data.count || 0, 'СНТ', 'СНТ', 'СНТ')}`;
+
+        const tbody = document.getElementById('organizations-table-body');
+
+        if (!data.results || data.results.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="7">
+                        <div class="empty-state">
+                            <div class="empty-icon">🏢</div>
+                            <h3>СНТ не найдены</h3>
+                            <p>Попробуйте изменить параметры поиска или добавьте новое СНТ</p>
+                            <button class="btn btn-primary" onclick="openAddOrganizationModal()">+ Добавить СНТ</button>
+                        </div>
+                    </td>
+                </tr>`;
+            document.getElementById('pagination').innerHTML = '';
+            return;
+        }
+
+        tbody.innerHTML = data.results.map(org => `
+            <tr>
+                <td>
+                    <a href="/organizations/${org.id}/" style="color: var(--primary); text-decoration: none; font-weight: 600;">
+                        ${escapeHtml(org.short_name)}
+                    </a>
+                </td>
+                <td style="font-family: monospace;">${escapeHtml(org.inn)}</td>
+                <td>${org.chairman_name || '<span style="color: var(--gray-400);">—</span>'}</td>
+                <td><span style="color: var(--gray-500);">${org.accountant_name || '—'}</span></td>
+                <td><span class="badge-status badge-info">—</span></td>
+                <td>
+                    ${org.is_active 
+                        ? '<span class="badge-status badge-active">Активно</span>' 
+                        : '<span class="badge-status badge-inactive">Неактивно</span>'}
+                </td>
+                <td>
+                    <div class="table-actions">
+                        <button class="btn-icon" onclick="window.location.href='/organizations/${org.id}/'" title="Просмотр">👁️</button>
+                        <button class="btn-icon" onclick="openEditOrganizationModal(${org.id})" title="Редактировать">✏️</button>
+                        <button class="btn-icon" onclick="viewMembers(${org.id})" title="Члены СНТ">👥</button>
+                    </div>
+                </td>
+            </tr>
+        `).join('');
+
+        renderPagination(data);
+        updateStats(data);
+    }
+
+    function renderPagination(data) {
+        const paginationDiv = document.getElementById('pagination');
+        if (!data.next && !data.previous) {
+            paginationDiv.innerHTML = '';
+            return;
+        }
+
+        const totalPages = Math.ceil(data.count / 25);
+        let html = '';
+        
+        html += `<button onclick="currentPage=1;loadOrganizations()" ${currentPage === 1 ? 'disabled' : ''}>«</button>`;
+        html += `<button onclick="currentPage=${currentPage-1};loadOrganizations()" ${!data.previous ? 'disabled' : ''}>‹</button>`;
+        
+        for (let i = 1; i <= totalPages; i++) {
+            if (i === 1 || i === totalPages || (i >= currentPage - 2 && i <= currentPage + 2)) {
+                html += `<button class="${i === currentPage ? 'active' : ''}" onclick="currentPage=${i};loadOrganizations()">${i}</button>`;
+            } else if (i === currentPage - 3 || i === currentPage + 3) {
+                html += `<button disabled>…</button>`;
+            }
+        }
+        
+        html += `<button onclick="currentPage=${currentPage+1};loadOrganizations()" ${!data.next ? 'disabled' : ''}>›</button>`;
+        html += `<button onclick="currentPage=${totalPages};loadOrganizations()" ${currentPage === totalPages ? 'disabled' : ''}>»</button>`;
+        
+        paginationDiv.innerHTML = html;
+    }
+
+    function updateStats(data) {
+        if (!data.stats) {
+            safeSetText('stat-total', data.count || 0);
+            const activeCount = (data.results || []).filter(o => o.is_active).length;
+            safeSetText('stat-active', activeCount);
+        } else {
+            safeSetText('stat-total', data.stats.total || 0);
+            safeSetText('stat-active', data.stats.active || 0);
+        }
+        
+        // Дополнительная статистика
+        loadGlobalStats();
+    }
+
+    async function loadGlobalStats() {
+        try {
+            const ownersData = await apiFetch('/api/owners/?limit=1');
+            if (ownersData) safeSetText('stat-owners', ownersData.count || 0);
+
+            // Временно отключаем запрос к участкам, который вызывает ошибку
+            const plotsData = await apiFetch('/api/plots/?limit=1');
+            if (plotsData) safeSetText('stat-plots', plotsData.count || 0);
+
+            // Вместо этого используем данные из stats API
+            const orgStats = await apiFetch(`/api/organizations/${orgId}/stats/`);
+            if (orgStats) {
+                safeSetText('stat-plots', orgStats.total_plots || 0);
+            }
+        } catch (e) {
+            console.error('Error loading stats:', e);
+        }
+    }
+
+    // ==================== ДОБАВЛЕНИЕ СНТ ====================
+
+    function openAddOrganizationModal() {
+        openModal('Добавить СНТ', `
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                <div class="form-group">
+                    <label>Полное наименование *</label>
+                    <input type="text" id="org-name" placeholder="Садоводческое некоммерческое товарищество &quot;Строитель-43&quot;">
+                </div>
+                <div class="form-group">
+                    <label>Краткое наименование *</label>
+                    <input type="text" id="org-short-name" placeholder="СНТ &quot;Строитель-43&quot;">
+                </div>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                <div class="form-group">
+                    <label>ИНН *</label>
+                    <input type="text" id="org-inn" placeholder="10 или 12 цифр" maxlength="12">
+                </div>
+                <div class="form-group">
+                    <label>КПП</label>
+                    <input type="text" id="org-kpp" placeholder="9 цифр" maxlength="9">
+                </div>
+            </div>
+            <div class="form-group">
+                <label>ОГРН</label>
+                <input type="text" id="org-ogrn" placeholder="13 или 15 цифр">
+            </div>
+            <div class="form-group">
+                <label>Юридический адрес *</label>
+                <textarea id="org-legal-address" rows="2" placeholder="Полный юридический адрес"></textarea>
+            </div>
+            <div class="form-group">
+                <label>Фактический адрес</label>
+                <textarea id="org-actual-address" rows="2" placeholder="Если отличается от юридического"></textarea>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                <div class="form-group">
+                    <label>Телефон</label>
+                    <input type="text" id="org-phone" placeholder="+7 (XXX) XXX-XX-XX">
+                </div>
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" id="org-email" placeholder="info@snt.ru">
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Сайт</label>
+                <input type="url" id="org-website" placeholder="https://snt.ru">
+            </div>
+            <div class="form-group">
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                    <input type="checkbox" id="org-is-active" checked> СНТ активно
+                </label>
+            </div>
+            <hr style="margin: 16px 0;">
+            <h4 style="margin-bottom: 12px;">Банковские реквизиты</h4>
+            <div class="form-group">
+                <label>Банк *</label>
+                <input type="text" id="org-bank-name" placeholder="Полное наименование банка">
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                <div class="form-group">
+                    <label>БИК *</label>
+                    <input type="text" id="org-bank-bik" placeholder="9 цифр" maxlength="9">
+                </div>
+                <div class="form-group">
+                    <label>Расчётный счёт *</label>
+                    <input type="text" id="org-bank-account" placeholder="20 цифр" maxlength="20">
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Корреспондентский счёт *</label>
+                <input type="text" id="org-bank-corr" placeholder="20 цифр" maxlength="20">
+            </div>
+        `, 'Создать', async () => {
+            const payload = {
+                name: document.getElementById('org-name').value.trim(),
+                short_name: document.getElementById('org-short-name').value.trim(),
+                inn: document.getElementById('org-inn').value.trim(),
+                kpp: document.getElementById('org-kpp').value.trim(),
+                ogrn: document.getElementById('org-ogrn').value.trim(),
+                legal_address: document.getElementById('org-legal-address').value.trim(),
+                actual_address: document.getElementById('org-actual-address').value.trim(),
+                phone: document.getElementById('org-phone').value.trim(),
+                email: document.getElementById('org-email').value.trim(),
+                website: document.getElementById('org-website').value.trim(),
+                bank_name: document.getElementById('org-bank-name').value.trim(),
+                bank_bik: document.getElementById('org-bank-bik').value.trim(),
+                bank_account: document.getElementById('org-bank-account').value.trim(),
+                bank_corr_account: document.getElementById('org-bank-corr').value.trim(),
+                is_active: document.getElementById('org-is-active').checked,
+            };
+
+            // Валидация
+            if (!payload.name || !payload.short_name || !payload.inn || !payload.legal_address ||
+                !payload.bank_name || !payload.bank_bik || !payload.bank_account || !payload.bank_corr_account) {
+                showAlert('Заполните все обязательные поля (*)', 'error');
+                return;
+            }
+
+            if (!/^\d{10}$|^\d{12}$/.test(payload.inn)) {
+                showAlert('ИНН должен содержать 10 или 12 цифр', 'error');
+                return;
+            }
+
+            const result = await apiFetch('/api/organizations/', {
+                method: 'POST',
+                body: JSON.stringify(payload),
+            });
+
+            if (result) {
+                showAlert('СНТ успешно создано', 'success');
+                closeModal();
+                loadOrganizations();
+            }
+        });
+    }
+
+    // ==================== РЕДАКТИРОВАНИЕ СНТ ====================
+
+    async function openEditOrganizationModal(id) {
+        const org = await apiFetch(`/api/organizations/${id}/`);
+        if (!org) return;
+
+        openModal(`Редактировать: ${escapeHtml(org.short_name)}`, `
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                <div class="form-group">
+                    <label>Полное наименование *</label>
+                    <input type="text" id="org-name" value="${escapeHtml(org.name || '')}">
+                </div>
+                <div class="form-group">
+                    <label>Краткое наименование *</label>
+                    <input type="text" id="org-short-name" value="${escapeHtml(org.short_name || '')}">
+                </div>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                <div class="form-group">
+                    <label>ИНН *</label>
+                    <input type="text" id="org-inn" value="${escapeHtml(org.inn || '')}" maxlength="12">
+                </div>
+                <div class="form-group">
+                    <label>КПП</label>
+                    <input type="text" id="org-kpp" value="${escapeHtml(org.kpp || '')}" maxlength="9">
+                </div>
+            </div>
+            <div class="form-group">
+                <label>ОГРН</label>
+                <input type="text" id="org-ogrn" value="${escapeHtml(org.ogrn || '')}">
+            </div>
+            <div class="form-group">
+                <label>Юридический адрес *</label>
+                <textarea id="org-legal-address" rows="2">${escapeHtml(org.legal_address || '')}</textarea>
+            </div>
+            <div class="form-group">
+                <label>Фактический адрес</label>
+                <textarea id="org-actual-address" rows="2">${escapeHtml(org.actual_address || '')}</textarea>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                <div class="form-group">
+                    <label>Телефон</label>
+                    <input type="text" id="org-phone" value="${escapeHtml(org.phone || '')}">
+                </div>
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" id="org-email" value="${escapeHtml(org.email || '')}">
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Сайт</label>
+                <input type="url" id="org-website" value="${escapeHtml(org.website || '')}">
+            </div>
+            <div class="form-group">
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                    <input type="checkbox" id="org-is-active" ${org.is_active ? 'checked' : ''}> СНТ активно
+                </label>
+            </div>
+            <hr style="margin: 16px 0;">
+            <h4 style="margin-bottom: 12px;">Банковские реквизиты</h4>
+            <div class="form-group">
+                <label>Банк *</label>
+                <input type="text" id="org-bank-name" value="${escapeHtml(org.bank_name || '')}">
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                <div class="form-group">
+                    <label>БИК *</label>
+                    <input type="text" id="org-bank-bik" value="${escapeHtml(org.bank_bik || '')}" maxlength="9">
+                </div>
+                <div class="form-group">
+                    <label>Расчётный счёт *</label>
+                    <input type="text" id="org-bank-account" value="${escapeHtml(org.bank_account || '')}" maxlength="20">
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Корреспондентский счёт *</label>
+                <input type="text" id="org-bank-corr" value="${escapeHtml(org.bank_corr_account || '')}" maxlength="20">
+            </div>
+        `, 'Сохранить', async () => {
+            const payload = {
+                name: document.getElementById('org-name').value.trim(),
+                short_name: document.getElementById('org-short-name').value.trim(),
+                inn: document.getElementById('org-inn').value.trim(),
+                kpp: document.getElementById('org-kpp').value.trim(),
+                ogrn: document.getElementById('org-ogrn').value.trim(),
+                legal_address: document.getElementById('org-legal-address').value.trim(),
+                actual_address: document.getElementById('org-actual-address').value.trim(),
+                phone: document.getElementById('org-phone').value.trim(),
+                email: document.getElementById('org-email').value.trim(),
+                website: document.getElementById('org-website').value.trim(),
+                bank_name: document.getElementById('org-bank-name').value.trim(),
+                bank_bik: document.getElementById('org-bank-bik').value.trim(),
+                bank_account: document.getElementById('org-bank-account').value.trim(),
+                bank_corr_account: document.getElementById('org-bank-corr').value.trim(),
+                is_active: document.getElementById('org-is-active').checked,
+            };
+
+            const result = await apiFetch(`/api/organizations/${id}/`, {
+                method: 'PATCH',
+                body: JSON.stringify(payload),
+            });
+
+            if (result) {
+                showAlert('СНТ обновлено', 'success');
+                closeModal();
+                loadOrganizations();
+            }
+        });
+    }
+
+    // ==================== ПРОСМОТР ЧЛЕНОВ СНТ ====================
+
+    async function viewMembers(orgId) {
+        const org = await apiFetch(`/api/organizations/${orgId}/`);
+        if (!org) return;
+
+        const members = await apiFetch(`/api/organizations/${orgId}/members/`);
+        
+        let membersHtml = '';
+        if (members && members.results && members.results.length > 0) {
+            membersHtml = `
+                <div style="max-height: 400px; overflow-y: auto;">
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <thead>
+                            <tr style="background: var(--gray-50);">
+                                <th style="padding: 8px; text-align: left;">Владелец</th>
+                                <th style="padding: 8px; text-align: left;">Статус</th>
+                                <th style="padding: 8px; text-align: left;">Член с</th>
+                            <tr>
+                        </thead>
+                        <tbody>
+                            ${members.results.map(m => `
+                                <tr style="border-bottom: 1px solid var(--gray-100);">
+                                    <td style="padding: 8px;">
+                                        <a href="/owners/${m.owner}/" style="color: var(--primary);">${escapeHtml(m.owner_name)}</a>
+                                    </td>
+                                    <td style="padding: 8px;">
+                                        <span class="badge-status ${getStatusClass(m.status)}">
+                                            ${escapeHtml(m.status_display)}
+                                        </span>
+                                    </td>
+                                    <td style="padding: 8px;">${m.member_since || '—'}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        } else {
+            membersHtml = '<div class="empty-state"><div class="empty-icon">👥</div><h3>Нет членов СНТ</h3><p>Привяжите владельцев к этой организации</p></div>';
+        }
+
+        openModal(`Члены СНТ: ${escapeHtml(org.short_name)}`, membersHtml, 'Закрыть', null);
+    }
+
+    function getStatusClass(status) {
+        const map = {
+            'active': 'badge-active',
+            'inactive': 'badge-inactive',
+            'excluded': 'badge-danger',
+            'deceased': 'badge-inactive',
+            'left': 'badge-warning',
+        };
+        return map[status] || 'badge-inactive';
+    }
+
+    function pluralize(n, one, few, many) {
+        const mod10 = n % 10;
+        const mod100 = n % 100;
+        if (mod10 === 1 && mod100 !== 11) return one;
+        if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return few;
+        return many;
+    }
+
+    function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        loadOrganizations();
+        loadGlobalStats();
+    });
+</script>
+{% endblock %}

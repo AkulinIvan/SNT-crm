@@ -153,6 +153,12 @@
         if (roleFilter) params.append('role', roleFilter);
         if (statusFilter) params.append('is_active', statusFilter);
 
+        // Добавляем фильтр по организации для не-админов
+        const userData = await apiFetch('/api/auth/me/');
+        if (userData && userData.role !== 'admin' && !userData.is_superuser) {
+            params.append('organization', userData.organization);
+        }
+
         const data = await apiFetch(`/api/users/?${params}`);
         if (!data) return;
 

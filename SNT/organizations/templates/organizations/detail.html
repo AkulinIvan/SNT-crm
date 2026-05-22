@@ -1,0 +1,536 @@
+{% extends "base.html" %}
+
+{% block title %}Карточка СНТ | CRM СНТ{% endblock %}
+
+{% block breadcrumb %}
+<a href="/">Главная</a> <span>/</span> <a href="/organizations/">СНТ</a> <span>/</span> <span id="breadcrumb-name">Загрузка...</span>
+{% endblock %}
+
+{% block content %}
+<div id="org-detail">
+    <div class="page-header" style="display: flex; justify-content: space-between; align-items: flex-start;">
+        <div>
+            <h2 id="org-title">🏢 Загрузка...</h2>
+            <p id="org-meta" style="color: var(--gray-500);">...</p>
+        </div>
+        <div style="display: flex; gap: 8px;">
+            <button class="btn btn-secondary" onclick="window.location.href='/organizations/'">← К списку</button>
+            <button class="btn btn-primary" onclick="openEditOrganizationModal()">✏️ Редактировать</button>
+        </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
+        <!-- Основная информация -->
+        <div class="table-container">
+            <div class="table-toolbar">
+                <span style="font-weight: 600;">📋 Основная информация</span>
+                <span id="org-status-badge"></span>
+            </div>
+            <table style="width: 100%; border-collapse: collapse;">
+                <tbody>
+                    <tr><td style="color: var(--gray-500); width: 40%;">Полное наименование</td><td id="info-name">—</td></tr>
+                    <tr><td style="color: var(--gray-500);">Краткое наименование</td><td id="info-short-name">—</td></tr>
+                    <tr><td style="color: var(--gray-500);">ИНН</td><td id="info-inn">—</td></tr>
+                    <tr><td style="color: var(--gray-500);">КПП</td><td id="info-kpp">—</td></tr>
+                    <tr><td style="color: var(--gray-500);">ОГРН</td><td id="info-ogrn">—</td></tr>
+                    <tr><td style="color: var(--gray-500);">Юридический адрес</td><td id="info-legal-address">—</td></tr>
+                    <tr><td style="color: var(--gray-500);">Фактический адрес</td><td id="info-actual-address">—</td></tr>
+                    <tr><td style="color: var(--gray-500);">Телефон</td><td id="info-phone">—</td></tr>
+                    <tr><td style="color: var(--gray-500);">Email</td><td id="info-email">—</td></tr>
+                    <tr><td style="color: var(--gray-500);">Сайт</td><td id="info-website">—</td></tr>
+                    <tr><td style="color: var(--gray-500);">Дата создания</td><td id="info-created">—</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Банковские реквизиты и руководство -->
+        <div>
+            <div class="table-container" style="margin-bottom: 24px;">
+                <div class="table-toolbar">
+                    <span style="font-weight: 600;">🏦 Банковские реквизиты</span>
+                </div>
+                <table style="width: 100%; border-collapse: collapse;">
+                    <tbody>
+                        <tr><td style="color: var(--gray-500); width: 40%;">Банк</td><td id="info-bank-name">—</td></tr>
+                        <tr><td style="color: var(--gray-500);">БИК</td><td id="info-bank-bik">—</td></tr>
+                        <tr><td style="color: var(--gray-500);">Расчётный счёт</td><td id="info-bank-account">—</td></tr>
+                        <tr><td style="color: var(--gray-500);">Корр. счёт</td><td id="info-bank-corr">—</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="table-container">
+                <div class="table-toolbar">
+                    <span style="font-weight: 600;">👔 Руководство</span>
+                </div>
+                <table style="width: 100%; border-collapse: collapse;">
+                    <tbody>
+                        <tr><td style="color: var(--gray-500); width: 40%;">Председатель</td><td id="info-chairman">—</td></tr>
+                        <tr><td style="color: var(--gray-500);">Бухгалтер</td><td id="info-accountant">—</td></tr>
+                        <tr><td style="color: var(--gray-500);">Активность</td><td id="info-is-active">—</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Статистика по СНТ -->
+    <div class="stats-grid" style="margin-top: 24px;">
+        <div class="stat-card" style="cursor: pointer;" onclick="window.location.href='/owners/'">
+            <div class="stat-label">👥 Владельцы</div>
+            <div class="stat-value" id="stat-owners">—</div>
+            <div class="stat-change positive">Всего владельцев →</div>
+        </div>
+        <div class="stat-card" style="cursor: pointer;" onclick="window.location.href='/plots/'">
+            <div class="stat-label">🏠 Участки</div>
+            <div class="stat-value" id="stat-plots">—</div>
+            <div class="stat-change positive">Всего участков →</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">💰 Задолженность</div>
+            <div class="stat-value" id="stat-debt">—</div>
+            <div class="stat-change negative">Общая задолженность</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">⚠️ Просрочено</div>
+            <div class="stat-value" id="stat-overdue">—</div>
+            <div class="stat-change negative">Начислений просрочено</div>
+        </div>
+    </div>
+
+    <!-- Владельцы СНТ -->
+    <div class="table-container" style="margin-top: 24px;">
+        <div class="table-toolbar">
+            <span style="font-weight: 600;">👥 Владельцы, привязанные к СНТ</span>
+            <button class="btn btn-primary btn-sm" onclick="openAddMemberModal()">+ Добавить владельца</button>
+        </div>
+        <table style="width: 100%; border-collapse: collapse;">
+            <thead>
+                <tr>
+                    <th>ФИО владельца</th>
+                    <th>Статус членства</th>
+                    <th>Член с</th>
+                    <th>Номер членского билета</th>
+                    <th>Действия</th>
+                </tr>
+            </thead>
+            <tbody id="members-table-body">
+                <tr>
+                    <td colspan="5">
+                        <div class="empty-state">
+                            <div class="empty-icon">👥</div>
+                            <h3>Загрузка...</h3>
+                        </div>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Получаем ID организации из URL
+    const pathParts = window.location.pathname.split('/');
+    const orgId = parseInt(pathParts[pathParts.length - 2]);
+    let orgData = null;
+
+    async function loadOrganizationDetail() {
+        orgData = await apiFetch(`/api/organizations/${orgId}/`);
+        if (!orgData) {
+            document.getElementById('org-detail').innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-icon">❌</div>
+                    <h3>СНТ не найдено</h3>
+                    <p>Возможно, запись была удалена</p>
+                    <button class="btn btn-primary" onclick="window.location.href='/organizations/'">← К списку</button>
+                </div>`;
+            return;
+        }
+
+        document.getElementById('org-title').textContent = `🏢 ${orgData.short_name || orgData.name}`;
+        document.getElementById('breadcrumb-name').textContent = orgData.short_name || orgData.name;
+        document.getElementById('org-meta').textContent = `ИНН: ${orgData.inn}`;
+
+        // Основная информация
+        safeSetText('info-name', orgData.name);
+        safeSetText('info-short-name', orgData.short_name);
+        safeSetText('info-inn', orgData.inn);
+        safeSetText('info-kpp', orgData.kpp || '—');
+        safeSetText('info-ogrn', orgData.ogrn || '—');
+        safeSetText('info-legal-address', orgData.legal_address);
+        safeSetText('info-actual-address', orgData.actual_address || '—');
+        safeSetText('info-phone', orgData.phone || '—');
+        safeSetText('info-email', orgData.email || '—');
+        safeSetText('info-website', orgData.website || '—');
+        safeSetText('info-created', formatDate(orgData.created_at));
+
+        // Банковские реквизиты
+        safeSetText('info-bank-name', orgData.bank_name);
+        safeSetText('info-bank-bik', orgData.bank_bik);
+        safeSetText('info-bank-account', formatAccount(orgData.bank_account));
+        safeSetText('info-bank-corr', formatAccount(orgData.bank_corr_account));
+
+        // Руководство
+        safeSetText('info-chairman', orgData.chairman_name || '—');
+        safeSetText('info-accountant', orgData.accountant_name || '—');
+        
+        const statusHtml = orgData.is_active 
+            ? '<span class="badge-status badge-active">Активно</span>' 
+            : '<span class="badge-status badge-inactive">Неактивно</span>';
+        safeSetHTML('info-is-active', statusHtml);
+        safeSetHTML('org-status-badge', statusHtml);
+
+        // Загружаем статистику и членов
+        loadOrgStats();
+        loadMembers();
+    }
+
+    function formatAccount(account) {
+        if (!account) return '—';
+        const digits = account.replace(/\D/g, '');
+        const groups = digits.match(/.{1,4}/g);
+        return groups ? groups.join(' ') : account;
+    }
+
+    async function loadOrgStats() {
+        const stats = await apiFetch(`/api/organizations/${orgId}/stats/`);
+        if (stats) {
+            safeSetText('stat-owners', stats.total_members || 0);
+            safeSetText('stat-plots', stats.total_plots || 0);
+            safeSetText('stat-debt', stats.total_debt ? stats.total_debt.toLocaleString('ru-RU') + ' ₽' : '0 ₽');
+            safeSetText('stat-overdue', stats.overdue_count || 0);
+        }
+    }
+
+    async function loadMembers() {
+        const data = await apiFetch(`/api/organizations/${orgId}/members/`);
+        const tbody = document.getElementById('members-table-body');
+
+        if (!data || !data.results || data.results.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="5">
+                        <div class="empty-state">
+                            <div class="empty-icon">👥</div>
+                            <h3>Нет привязанных владельцев</h3>
+                            <p>Добавьте владельцев в это СНТ</p>
+                            <button class="btn btn-primary" onclick="openAddMemberModal()">+ Добавить владельца</button>
+                        </div>
+                    </td>
+                </tr>`;
+            return;
+        }
+
+        tbody.innerHTML = data.results.map(m => `
+            <tr>
+                <td>
+                    <a href="/owners/${m.owner}/" style="color: var(--primary); text-decoration: none; font-weight: 500;">
+                        ${escapeHtml(m.owner_name)}
+                    </a>
+                </td>
+                <td>
+                    <span class="badge-status ${getStatusClass(m.status)}">
+                        ${escapeHtml(m.status_display)}
+                    </span>
+                </td>
+                <td>${m.member_since || '—'}</td>
+                <td>${escapeHtml(m.member_card_number || '—')}</td>
+                <td>
+                    <div class="table-actions">
+                        <button class="btn-icon" onclick="openEditMemberModal(${m.id}, '${escapeHtml(m.owner_name)}', '${m.status}', '${m.member_since || ''}', '${escapeHtml(m.member_card_number || '')}')" title="Редактировать">✏️</button>
+                        <button class="btn-icon danger" onclick="removeMember(${m.id}, '${escapeHtml(m.owner_name)}')" title="Удалить">🗑️</button>
+                    </div>
+                </td>
+            </tr>
+        `).join('');
+    }
+
+    function getStatusClass(status) {
+        const map = {
+            'active': 'badge-active',
+            'inactive': 'badge-inactive',
+            'excluded': 'badge-danger',
+            'deceased': 'badge-inactive',
+            'left': 'badge-warning',
+        };
+        return map[status] || 'badge-inactive';
+    }
+
+    // ==================== ДОБАВЛЕНИЕ ЧЛЕНА СНТ ====================
+
+    async function openAddMemberModal() {
+        // Загружаем список владельцев
+        const ownersData = await apiFetch('/api/owners/?limit=100');
+        if (!ownersData || !ownersData.results) {
+            showAlert('Не удалось загрузить список владельцев', 'error');
+            return;
+        }
+
+        // Получаем уже привязанных владельцев
+        const membersData = await apiFetch(`/api/organizations/${orgId}/members/`);
+        const existingOwnerIds = new Set();
+        if (membersData && membersData.results) {
+            membersData.results.forEach(m => existingOwnerIds.add(m.owner));
+        }
+
+        const availableOwners = ownersData.results.filter(o => !existingOwnerIds.has(o.id));
+        
+        if (availableOwners.length === 0) {
+            showAlert('Все владельцы уже привязаны к этому СНТ', 'info');
+            return;
+        }
+
+        const ownerOptions = availableOwners.map(o => 
+            `<option value="${o.id}">${escapeHtml(o.full_name)}${o.primary_phone ? ' (' + o.primary_phone + ')' : ''}</option>`
+        ).join('');
+
+        const modalContent = `
+            <div class="form-group">
+                <label>Владелец *</label>
+                <select id="member-owner" required style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
+                    <option value="">— Выберите владельца —</option>
+                    ${ownerOptions}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Статус членства</label>
+                <select id="member-status" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
+                    <option value="active">Активный член</option>
+                    <option value="inactive">Неактивный член</option>
+                    <option value="excluded">Исключён</option>
+                    <option value="left">Вышел добровольно</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Член с</label>
+                <input type="date" id="member-since" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
+            </div>
+            <div class="form-group">
+                <label>Номер членского билета</label>
+                <input type="text" id="member-card-number" placeholder="например: 00123" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
+            </div>
+            <div class="form-group">
+                <label>Примечания</label>
+                <textarea id="member-notes" rows="2" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ddd;"></textarea>
+            </div>
+        `;
+
+        openModal('Привязать владельца к СНТ', modalContent, 'Привязать', async () => {
+            const ownerSelect = document.getElementById('member-owner');
+            if (!ownerSelect || !ownerSelect.value) {
+                showAlert('Выберите владельца', 'error');
+                return;
+            }
+            
+            const selectedOwnerId = parseInt(ownerSelect.value);
+            const status = document.getElementById('member-status').value;
+            const memberSince = document.getElementById('member-since').value;
+            const cardNumber = document.getElementById('member-card-number').value.trim();
+            const notes = document.getElementById('member-notes').value.trim();
+
+            const result = await apiFetch(`/api/organizations/${orgId}/add-member/`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    owner: selectedOwnerId,
+                    status: status,
+                    member_since: memberSince || null,
+                    member_card_number: cardNumber,
+                    notes: notes,
+                }),
+            });
+
+            if (result) {
+                showAlert('Владелец привязан к СНТ', 'success');
+                closeModal();
+                loadMembers();
+                loadOrgStats();
+            }
+        });
+    }
+
+    // ==================== РЕДАКТИРОВАНИЕ ЧЛЕНА ====================
+
+    function openEditMemberModal(memberId, ownerName, currentStatus, currentSince, currentCardNumber) {
+        openModal(`Редактировать членство: ${escapeHtml(ownerName)}`, `
+            <div class="form-group">
+                <label>Статус членства</label>
+                <select id="edit-member-status">
+                    <option value="active" ${currentStatus === 'active' ? 'selected' : ''}>Активный член</option>
+                    <option value="inactive" ${currentStatus === 'inactive' ? 'selected' : ''}>Неактивный член</option>
+                    <option value="excluded" ${currentStatus === 'excluded' ? 'selected' : ''}>Исключён</option>
+                    <option value="left" ${currentStatus === 'left' ? 'selected' : ''}>Вышел добровольно</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Член с</label>
+                <input type="date" id="edit-member-since" value="${currentSince}">
+            </div>
+            <div class="form-group">
+                <label>Номер членского билета</label>
+                <input type="text" id="edit-member-card-number" value="${escapeHtml(currentCardNumber)}" placeholder="например: 00123">
+            </div>
+        `, 'Сохранить', async () => {
+            const status = document.getElementById('edit-member-status').value;
+            const memberSince = document.getElementById('edit-member-since').value;
+            const cardNumber = document.getElementById('edit-member-card-number').value.trim();
+
+            const result = await apiFetch(`/api/organization-members/${memberId}/`, {
+                method: 'PATCH',
+                body: JSON.stringify({
+                    status: status,
+                    member_since: memberSince || null,
+                    member_card_number: cardNumber,
+                }),
+            });
+
+            if (result) {
+                showAlert('Членство обновлено', 'success');
+                closeModal();
+                loadMembers();
+            }
+        });
+    }
+
+    // ==================== УДАЛЕНИЕ ЧЛЕНА ====================
+
+    function removeMember(memberId, ownerName) {
+        openModal('Отвязать владельца', `
+            <p>Вы действительно хотите отвязать владельца <strong>${escapeHtml(ownerName)}</strong> от этого СНТ?</p>
+            <p style="color: var(--warning); font-size: 0.85rem;">Членство будет прекращено, но данные владельца сохранятся.</p>
+        `, 'Отвязать', async () => {
+            const result = await apiFetch(`/api/organization-members/${memberId}/`, {
+                method: 'DELETE',
+            });
+            if (result !== null) {
+                showAlert('Владелец отвязан от СНТ', 'success');
+                closeModal();
+                loadMembers();
+                loadOrgStats();
+            }
+        });
+    }
+
+    // ==================== РЕДАКТИРОВАНИЕ СНТ ====================
+
+    function openEditOrganizationModal() {
+        if (!orgData) return;
+
+        openModal(`Редактировать: ${escapeHtml(orgData.short_name)}`, `
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                <div class="form-group">
+                    <label>Полное наименование *</label>
+                    <input type="text" id="edit-name" value="${escapeHtml(orgData.name || '')}">
+                </div>
+                <div class="form-group">
+                    <label>Краткое наименование *</label>
+                    <input type="text" id="edit-short-name" value="${escapeHtml(orgData.short_name || '')}">
+                </div>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                <div class="form-group">
+                    <label>ИНН *</label>
+                    <input type="text" id="edit-inn" value="${escapeHtml(orgData.inn || '')}" maxlength="12">
+                </div>
+                <div class="form-group">
+                    <label>КПП</label>
+                    <input type="text" id="edit-kpp" value="${escapeHtml(orgData.kpp || '')}" maxlength="9">
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Юридический адрес *</label>
+                <textarea id="edit-legal-address" rows="2">${escapeHtml(orgData.legal_address || '')}</textarea>
+            </div>
+            <div class="form-group">
+                <label>Телефон</label>
+                <input type="text" id="edit-phone" value="${escapeHtml(orgData.phone || '')}">
+            </div>
+            <div class="form-group">
+                <label>Email</label>
+                <input type="email" id="edit-email" value="${escapeHtml(orgData.email || '')}">
+            </div>
+            <hr style="margin: 16px 0;">
+            <div class="form-group">
+                <label>Банк *</label>
+                <input type="text" id="edit-bank-name" value="${escapeHtml(orgData.bank_name || '')}">
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                <div class="form-group">
+                    <label>БИК *</label>
+                    <input type="text" id="edit-bank-bik" value="${escapeHtml(orgData.bank_bik || '')}" maxlength="9">
+                </div>
+                <div class="form-group">
+                    <label>Расчётный счёт *</label>
+                    <input type="text" id="edit-bank-account" value="${escapeHtml(orgData.bank_account || '')}" maxlength="20">
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Корреспондентский счёт *</label>
+                <input type="text" id="edit-bank-corr" value="${escapeHtml(orgData.bank_corr_account || '')}" maxlength="20">
+            </div>
+            <div class="form-group">
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                    <input type="checkbox" id="edit-is-active" ${orgData.is_active ? 'checked' : ''}> СНТ активно
+                </label>
+            </div>
+        `, 'Сохранить', async () => {
+            const payload = {
+                name: document.getElementById('edit-name').value.trim(),
+                short_name: document.getElementById('edit-short-name').value.trim(),
+                inn: document.getElementById('edit-inn').value.trim(),
+                kpp: document.getElementById('edit-kpp').value.trim(),
+                legal_address: document.getElementById('edit-legal-address').value.trim(),
+                phone: document.getElementById('edit-phone').value.trim(),
+                email: document.getElementById('edit-email').value.trim(),
+                bank_name: document.getElementById('edit-bank-name').value.trim(),
+                bank_bik: document.getElementById('edit-bank-bik').value.trim(),
+                bank_account: document.getElementById('edit-bank-account').value.trim(),
+                bank_corr_account: document.getElementById('edit-bank-corr').value.trim(),
+                is_active: document.getElementById('edit-is-active').checked,
+            };
+
+            const result = await apiFetch(`/api/organizations/${orgId}/`, {
+                method: 'PATCH',
+                body: JSON.stringify(payload),
+            });
+
+            if (result) {
+                showAlert('СНТ обновлено', 'success');
+                closeModal();
+                loadOrganizationDetail();
+            }
+        });
+    }
+
+    // ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
+
+    function safeSetText(id, text) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = text || '—';
+    }
+
+    function safeSetHTML(id, html) {
+        const el = document.getElementById(id);
+        if (el) el.innerHTML = html;
+    }
+
+    function formatDate(dateString) {
+        if (!dateString) return '—';
+        try {
+            const date = new Date(dateString);
+            return date.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        } catch (e) { return dateString; }
+    }
+
+    function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    // Инициализация
+    document.addEventListener('DOMContentLoaded', loadOrganizationDetail);
+</script>
+{% endblock %}

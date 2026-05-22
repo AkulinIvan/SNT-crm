@@ -298,7 +298,7 @@ class UsersListView(View):
         if not (request.user.is_admin or request.user.has_perm('accounts.can_manage_users')):
             messages.error(request, 'У вас нет прав для просмотра этой страницы')
             return redirect('dashboard')
-        return render(request, 'users/list.html', {
+        return render(request, 'accounts/users_list.html', {
             'users': users,
             'active_page': 'users'
         })

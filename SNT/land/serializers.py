@@ -6,10 +6,9 @@ from .models import LandPlot
 class LandPlotListSerializer(serializers.ModelSerializer):
     """
     Краткий сериализатор для списка участков.
-    Включает основную информацию и количество владельцев.
     """
     status_display = serializers.CharField(source='get_status_display', read_only=True)
-    owners_count = serializers.IntegerField(read_only=True)  # Только для чтения!
+    owners_count = serializers.SerializerMethodField(read_only=True)  # Используем SerializerMethodField
     has_coordinates = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
@@ -20,10 +19,14 @@ class LandPlotListSerializer(serializers.ModelSerializer):
             'latitude', 'longitude', 'has_coordinates',
             'owners_count', 'created_at',
         ]
-        read_only_fields = ['id', 'created_at', 'owners_count', 'has_coordinates']
+        read_only_fields = ['id', 'created_at', 'has_coordinates']
 
     def get_has_coordinates(self, obj):
         return obj.has_coordinates
+    
+    def get_owners_count(self, obj):
+        """Получаем количество владельцев через property модели"""
+        return obj.owners_count
 
 
 class LandPlotDetailSerializer(serializers.ModelSerializer):
@@ -34,17 +37,11 @@ class LandPlotDetailSerializer(serializers.ModelSerializer):
     created_at = serializers.DateTimeField(read_only=True, format='%d.%m.%Y %H:%M')
     updated_at = serializers.DateTimeField(read_only=True, format='%d.%m.%Y %H:%M')
     has_coordinates = serializers.SerializerMethodField(read_only=True)
-    
-    owners_count = serializers.IntegerField(read_only=True, required=False)
-    
-    plot_number = serializers.CharField(
-        max_length=10,
-        help_text='Номер участка (может содержать буквы, например: 42А)'
-    )
-
+    owners_count = serializers.SerializerMethodField(read_only=True)
     has_boundaries = serializers.SerializerMethodField(read_only=True)
     boundaries_loaded = serializers.SerializerMethodField(read_only=True)
     rosreestr_updated = serializers.DateTimeField(read_only=True, format='%d.%m.%Y %H:%M')
+    
     class Meta:
         model = LandPlot
         fields = [
@@ -64,6 +61,10 @@ class LandPlotDetailSerializer(serializers.ModelSerializer):
     
     def get_has_coordinates(self, obj):
         return obj.has_coordinates
+    
+    def get_owners_count(self, obj):
+        """Получаем количество владельцев через property модели"""
+        return obj.owners_count
 
     def validate_plot_number(self, value):
         """Нормализация и валидация номера участка"""

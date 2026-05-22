@@ -1,5 +1,6 @@
 from typing import List
 
+from django.db import models
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -13,6 +14,7 @@ from django.utils import timezone
 import logging
 from rest_framework import permissions
 from .services import rosreestr_service
+from SNT.common.mixins import OrganizationMixin
 
 from accounts.permissions import IsManagerOrAbove
 
@@ -22,7 +24,7 @@ from .serializers import (
     LandPlotDetailSerializer,
     LandPlotGeoSerializer,
 )
-from .services import RosreestrService
+
 
 logger = logging.getLogger(__name__)
 
@@ -30,45 +32,20 @@ logger = logging.getLogger(__name__)
 class LandPlotViewSet(viewsets.ModelViewSet):
     """
     ViewSet для управления земельными участками.
-    
-    list      — список всех участков (краткий)
-    retrieve  — детальная информация об участке
-    create    — создание нового
-    update    — полное обновление
-    partial_update — частичное обновление
-    destroy   — удаление
-    
-    Дополнительные action'ы:
-    geo/      — получение координат всех активных участков для карты
-    stats/    — расширенная статистика по участкам
-    near/     — поиск ближайших участков
-    export/   — экспорт данных в CSV
-    bulk-update/ — массовое обновление статусов
     """
-    queryset = LandPlot.objects.prefetch_related('ownerships__owner').all()
+    queryset = LandPlot.objects.prefetch_related('ownerships__owner')
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['status']
     search_fields = ['plot_number', 'cadastral_number', 'address']
-    ordering_fields = [
-        'plot_number', 'area_sqm', 'cadastral_number', 
-        'created_at', 'status'
-    ]
+    ordering_fields = ['plot_number', 'area_sqm', 'cadastral_number', 'created_at', 'status']
     ordering = ['plot_number']
+
     def get_permissions(self):
-        """
-        Права доступа:
-        - Чтение (list, retrieve): все авторизованные
-        - Создание, изменение, удаление: только менеджеры и выше
-        """
         if self.action in ('create', 'update', 'partial_update', 'destroy', 'deactivate', 'activate'):
             return [permissions.IsAuthenticated(), IsManagerOrAbove()]
         return [permissions.IsAuthenticated()]
-                
+
     def get_serializer_class(self):
-        """
-        Для списка — краткий сериализатор, для детального просмотра — полный,
-        для geo — географический.
-        """
         if self.action == 'list':
             return LandPlotListSerializer
         elif self.action == 'geo':
@@ -76,24 +53,11 @@ class LandPlotViewSet(viewsets.ModelViewSet):
         return LandPlotDetailSerializer
 
     def get_queryset(self):
-        """Расширенная фильтрация с аннотациями"""
+        """Расширенная фильтрация"""
         # Базовый queryset с предзагрузкой связей
-        queryset = LandPlot.objects.prefetch_related(
-            'ownerships__owner'
-        ).all()
+        queryset = LandPlot.objects.prefetch_related('ownerships__owner').all()
         
-        # Аннотируем количество владельцев ТОЛЬКО для чтения
-        queryset = queryset.annotate(
-            _owners_count=Count('ownerships', distinct=True)
-        )
-        
-        # Фильтрация по наличию владельцев
-        has_owners = self.request.query_params.get('has_owners')
-        if has_owners is not None:
-            if has_owners.lower() == 'true':
-                queryset = queryset.filter(_owners_count__gt=0)
-            else:
-                queryset = queryset.filter(_owners_count=0)
+        # НЕ ДОБАВЛЯЕМ аннотацию owners_count здесь!
         
         # Фильтрация по наличию координат
         has_coordinates = self.request.query_params.get('has_coordinates')
@@ -135,14 +99,11 @@ class LandPlotViewSet(viewsets.ModelViewSet):
             response = self.get_paginated_response(serializer.data)
             
             # Статистика по отфильтрованным участкам
-            # Используем _owners_count (аннотация) вместо owners_count (property)
             total_area = queryset.aggregate(total=Sum('area_sqm'))['total'] or 0
             
             response.data['stats'] = {
                 'total': queryset.count(),
                 'total_area': round(total_area, 2),
-                'with_owners': queryset.filter(_owners_count__gt=0).count(),  # ← _owners_count
-                'without_owners': queryset.filter(_owners_count=0).count(),   # ← _owners_count
                 'by_status': {
                     'active': queryset.filter(status='active').count(),
                     'abandoned': queryset.filter(status='abandoned').count(),
@@ -153,6 +114,7 @@ class LandPlotViewSet(viewsets.ModelViewSet):
         
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
+
 
     def destroy(self, request, *args, **kwargs):
         """Безопасное удаление с проверками"""

@@ -5,13 +5,13 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
-from django.db.models import Q, Count, Sum, Prefetch
-from django.db import transaction
+from django.db.models import Count
 from django.utils import timezone
 import logging
 from rest_framework import permissions
 
-from accounts.permissions import IsAdminOrSuperuser, IsManagerOrAbove
+from SNT.common.mixins import OrganizationMixin
+from accounts.permissions import IsManagerOrAbove
 from .models import Owner, Ownership, ContactInfo
 from .serializers import (
     OwnerListSerializer,
@@ -25,7 +25,7 @@ from land.models import LandPlot
 logger = logging.getLogger(__name__)
 
 
-class OwnerViewSet(viewsets.ModelViewSet):
+class OwnerViewSet(OrganizationMixin, viewsets.ModelViewSet):
     """
     ViewSet для управления владельцами.
     
@@ -49,6 +49,7 @@ class OwnerViewSet(viewsets.ModelViewSet):
     ).annotate(
         plots_count=Count('land_plots', distinct=True)
     )
+    serializer_class = OwnerDetailSerializer
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     search_fields = ['full_name', 'contacts__value']
     ordering_fields = ['full_name', 'created_at', 'plots_count']

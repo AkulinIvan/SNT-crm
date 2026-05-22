@@ -187,7 +187,7 @@ class OwnerCreateUpdateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Owner
-        fields = ['id', 'full_name']
+        fields = ['id', 'full_name', 'organization']
 
     def validate_full_name(self, value):
         """Нормализация ФИО"""
@@ -195,3 +195,10 @@ class OwnerCreateUpdateSerializer(serializers.ModelSerializer):
         value = ' '.join(value.split())
         # Приводим к заглавным буквам
         return value.title()
+    
+    def create(self, validated_data):
+        """Автоматически подставляем организацию из запроса"""
+        request = self.context.get('request')
+        if request and hasattr(request, 'current_organization') and request.current_organization:
+            validated_data['organization'] = request.current_organization
+        return super().create(validated_data)

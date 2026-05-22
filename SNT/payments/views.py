@@ -13,9 +13,11 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from django.http import HttpResponse, JsonResponse
 from django.template.loader import render_to_string
+from django.core.exceptions import PermissionDenied
 import json
 import logging
 
+from SNT.common.mixins import OrganizationMixin
 from .email_service import EmailReceiptService
 from land.models import LandPlot
 from users.models import Owner
@@ -137,7 +139,7 @@ def generate_mass_receipts_pdf(receipts_html, period, category):
     return response
 
 
-class AssessmentViewSet(viewsets.ModelViewSet):
+class AssessmentViewSet(OrganizationMixin, viewsets.ModelViewSet):
     queryset = Assessment.objects.select_related('owner', 'land_plot', 'category', 'period')
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['owner', 'land_plot', 'category', 'period', 'status']
@@ -145,6 +147,20 @@ class AssessmentViewSet(viewsets.ModelViewSet):
     ordering_fields = ['amount', 'created_at', 'period__year']
     ordering = ['-created_at']
 
+    def get_queryset(self):
+        """Фильтрация по организации"""
+        return super().get_queryset()  # OrganizationMixin уже отфильтрует
+
+    def perform_create(self, serializer):
+        """При создании проверяем, что owner принадлежит организации пользователя"""
+        owner = serializer.validated_data.get('owner')
+        
+        # Проверяем, что владелец принадлежит организации
+        if self.request.current_organization:
+            if owner.organization != self.request.current_organization:
+                raise PermissionDenied("Этот владелец не принадлежит вашему СНТ")
+        
+        super().perform_create(serializer)
     def get_serializer_class(self):
         if self.action == 'list':
             return AssessmentListSerializer

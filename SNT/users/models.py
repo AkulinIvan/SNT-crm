@@ -32,7 +32,17 @@ class Owner(models.Model):
         'Дата обновления',
         auto_now=True
     )
-
+    # Связь с СНТ
+    organization = models.ForeignKey(
+        'organizations.Organization',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='owners',
+        verbose_name='СНТ',
+        help_text='СНТ, в котором владелец имеет участки'
+    )
+    
     class Meta:
         verbose_name = 'Владелец'
         verbose_name_plural = 'Владельцы'

@@ -49,6 +49,7 @@ INSTALLED_APPS = [
     'users',
     'calls',
     'payments',
+    'organizations',
     
 ]
 
@@ -83,6 +84,7 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'accounts.middleware.UserActivityMiddleware',
+    'accounts.middleware.OrganizationMiddleware',
 ]
 
 ROOT_URLCONF = 'SNT.urls'
@@ -244,7 +246,7 @@ EMAIL_HOST = 'smtp.yandex.ru'
 EMAIL_PORT = 465
 EMAIL_USE_SSL = True
 EMAIL_HOST_USER = 'akuliniwan@yandex.ru'
-EMAIL_HOST_PASSWORD = 'yofkosfhsmmungbx'
+EMAIL_HOST_PASSWORD = 'password'
 DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 
 # Для разработки (чтобы не отправлять реальные письма)

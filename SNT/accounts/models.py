@@ -91,7 +91,16 @@ class User(AbstractUser):
         'Дата обновления',
         auto_now=True
     )
-
+    # Связь с СНТ (для сотрудников)
+    organization = models.ForeignKey(
+        'organizations.Organization',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='staff_members',
+        verbose_name='СНТ',
+        help_text='СНТ, в котором работает сотрудник'
+    )
     class Meta:
         verbose_name = 'Пользователь'
         verbose_name_plural = 'Пользователи'
