@@ -902,7 +902,11 @@
             <div class="sidebar-logo">
                 <h1>
                     <span class="logo-icon">🌿</span>
-                    СНТ Строитель-43
+                    {% if user_organization_name %}
+                        {{ user_organization_name }}
+                    {% else %}
+                        Ваш СНТ
+                    {% endif %}
                 </h1>
                 <span>Система управления</span>
             </div>

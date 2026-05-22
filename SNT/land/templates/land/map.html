@@ -114,22 +114,7 @@
     <div id="map-container" style="width: 100%; height: 100%;"></div>
 </div>
 
-<!-- Управление координатами -->
-<div class="filters-bar" style="margin-top: 16px;">
-    <span style="font-weight: 500;">⚡ Действия с границами:</span>
-    {% comment %} <button class="btn btn-sm btn-primary" onclick="bulkLoadBoundaries()">
-        🗺️ Загрузить границы из Росреестра
-    </button> {% endcomment %}
-    <button class="btn btn-sm btn-secondary" onclick="loadMapData()">
-        🔄 Обновить карту
-    </button>
-    <button class="btn btn-sm btn-primary" onclick="openManualBoundariesModal()">
-        ✏️ Ввести границы вручную
-    </button>
-    <button class="btn btn-sm btn-secondary" onclick="openNSPDHelper()">
-        🗺️ Открыть карту НСПД (копировать координаты)
-    </button>
-</div>
+
 
 <!-- Список участков без координат с пагинацией -->
 <div class="table-container" style="margin-top: 24px;" id="no-coords-container">
@@ -279,117 +264,7 @@ function getStatusIcon(status) {
     });
 }
 
-// Открыть модалку для ручного ввода границ
-async function openManualBoundariesModal(plotId = null, plotNumber = null) {
-    // Если не передан ID, показываем выбор участка
-    if (!plotId) {
-        // Получаем список участков без границ
-        try {
-            const data = await apiFetch('/api/plots/?has_boundaries=false&limit=100');
-            if (!data || !data.results || data.results.length === 0) {
-                showAlert('Все участки уже имеют границы!', 'info');
-                return;
-            }
-            
-            let options = data.results.map(p => 
-                `<option value="${p.id}">Уч. №${escapeHtml(p.plot_number)} — ${escapeHtml(p.cadastral_number || 'без кад. номера')}</option>`
-            ).join('');
-            
-            const content = `
-                <div class="form-group">
-                    <label>Выберите участок:</label>
-                    <select id="manual-boundaries-plot" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
-                        <option value="">— Выберите участок —</option>
-                        ${options}
-                    </select>
-                </div>
-                <div id="boundaries-input-area" style="display: none;">
-                    <div class="form-group">
-                        <label>Координаты границ (формат: широта,долгота — по одной точке на строку):</label>
-                        <textarea id="manual-boundaries-text" rows="10" 
-                            placeholder="55.7558,37.6173&#10;55.7560,37.6180&#10;55.7555,37.6185&#10;55.7553,37.6175"
-                            style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ddd; font-family: monospace;"></textarea>
-                    </div>
-                    <div style="margin: 12px 0; padding: 12px; background: #f0f8ff; border-radius: 8px; border: 1px solid #b8daff;">
-                        <p style="margin: 0; font-size: 0.85rem;">
-                            💡 <strong>Как получить координаты:</strong><br>
-                            1. Нажмите кнопку "Открыть карту НСПД"<br>
-                            2. Найдите участок по кадастровому номеру<br>
-                            3. Нажмите на участок → "Информация" → скопируйте координаты<br>
-                            4. Вставьте сюда в формате: <b>широта,долгота</b> (по одной точке на строку)
-                        </p>
-                    </div>
-                </div>
-            `;
-            
-            openModal('✏️ Ручной ввод границ участка', content, '💾 Сохранить', async () => {
-                const selectedPlotId = document.getElementById('manual-boundaries-plot').value;
-                const boundariesText = document.getElementById('manual-boundaries-text').value;
-                
-                if (!selectedPlotId) {
-                    showAlert('Выберите участок', 'error');
-                    return;
-                }
-                
-                const boundaries = parseBoundariesText(boundariesText);
-                if (!boundaries) {
-                    showAlert('Введите корректные координаты (минимум 3 точки)', 'error');
-                    return;
-                }
-                
-                await saveBoundariesToServer(selectedPlotId, boundaries);
-            });
-            
-            // Показываем поле ввода при выборе участка
-            setTimeout(() => {
-                const select = document.getElementById('manual-boundaries-plot');
-                if (select) {
-                    select.addEventListener('change', function() {
-                        document.getElementById('boundaries-input-area').style.display = 
-                            this.value ? 'block' : 'none';
-                    });
-                }
-            }, 100);
-            
-        } catch (error) {
-            showAlert('Ошибка загрузки списка участков', 'error');
-        }
-        return;
-    }
-    
-    // Если передан ID — сразу показываем поле ввода
-    const content = `
-        <p style="margin-bottom: 12px;">
-            Участок: <b>№${escapeHtml(plotNumber)}</b>
-        </p>
-        <div class="form-group">
-            <label>Координаты границ (широта,долгота — по одной точке на строку):</label>
-            <textarea id="manual-boundaries-text" rows="10" 
-                placeholder="55.7558,37.6173&#10;55.7560,37.6180&#10;55.7555,37.6185&#10;55.7553,37.6175"
-                style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ddd; font-family: monospace;"></textarea>
-        </div>
-        <div style="margin: 12px 0; padding: 12px; background: #f0f8ff; border-radius: 8px; border: 1px solid #b8daff;">
-            <p style="margin: 0; font-size: 0.85rem;">
-                💡 <strong>Как получить координаты:</strong><br>
-                1. Нажмите "Открыть карту НСПД"<br>
-                2. Найдите участок и скопируйте координаты<br>
-                3. Вставьте сюда в формате: <b>широта,долгота</b>
-            </p>
-        </div>
-    `;
-    
-    openModal(`✏️ Границы участка №${escapeHtml(plotNumber)}`, content, '💾 Сохранить', async () => {
-        const boundariesText = document.getElementById('manual-boundaries-text').value;
-        const boundaries = parseBoundariesText(boundariesText);
-        
-        if (!boundaries) {
-            showAlert('Введите минимум 3 координаты в формате: широта,долгота', 'error');
-            return;
-        }
-        
-        await saveBoundariesToServer(plotId, boundaries);
-    });
-}
+
 
 // Парсинг текста с координатами
 function parseBoundariesText(text) {
@@ -440,27 +315,7 @@ async function saveBoundariesToServer(plotId, boundaries) {
     }
 }
 
-// Открыть карту НСПД для копирования координат
-function openNSPDHelper() {
-    const cadastralNumber = prompt(
-        'Введите кадастровый номер участка для поиска на карте НСПД:\n' +
-        '(Например: 50:20:0010101:123)\n\n' +
-        'На открывшейся карте:\n' +
-        '1. Найдите участок\n' +
-        '2. Кликните по нему\n' +
-        '3. Выберите "Информация об объекте"\n' +
-        '4. Скопируйте координаты\n' +
-        '5. Вернитесь сюда и вставьте в поле ввода',
-        ''
-    );
-    
-    if (cadastralNumber) {
-        window.open(
-            `https://nspd.gov.ru/map?thematic=PKK&search=${encodeURIComponent(cadastralNumber)}`,
-            '_blank'
-        );
-    }
-}
+
 
 // Основная функция загрузки данных карты
 async function loadMapData() {

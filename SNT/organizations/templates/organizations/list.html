@@ -13,9 +13,7 @@
             <h2>🏢 Садоводческие некоммерческие товарищества</h2>
             <p>Управление организациями СНТ и их реквизитами</p>
         </div>
-        <div style="display: flex; gap: 8px;">
-            <button class="btn btn-primary" onclick="openAddOrganizationModal()">+ Добавить СНТ</button>
-        </div>
+        
     </div>
 </div>
 
@@ -133,21 +131,7 @@
 
         const tbody = document.getElementById('organizations-table-body');
 
-        if (!data.results || data.results.length === 0) {
-            tbody.innerHTML = `
-                <tr>
-                    <td colspan="8">
-                        <div class="empty-state">
-                            <div class="empty-icon">🏢</div>
-                            <h3>СНТ не найдены</h3>
-                            <p>Попробуйте изменить параметры поиска или добавьте новое СНТ</p>
-                            <button class="btn btn-primary" onclick="openAddOrganizationModal()">+ Добавить СНТ</button>
-                        </div>
-                    </td>
-                </tr>`;
-            document.getElementById('pagination').innerHTML = '';
-            return;
-        }
+        
 
         // Загружаем статистику для каждого СНТ
         tbody.innerHTML = '<tr><td colspan="8"><div class="empty-state"><div class="empty-icon">⏳</div><h3>Загрузка статистики...</h3></div></td></tr>';

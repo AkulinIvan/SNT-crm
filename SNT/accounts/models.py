@@ -171,6 +171,12 @@ class User(AbstractUser):
             self.role = 'admin'
         super().save(*args, **kwargs)
 
+    @property
+    def organization_name(self):
+        """Название СНТ пользователя"""
+        if self.organization:
+            return self.organization.short_name
+        return None
 
 class UserActionLog(models.Model):
     """
