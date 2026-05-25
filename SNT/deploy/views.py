@@ -1,59 +1,29 @@
-import os
-import subprocess
-import hmac
-import hashlib
-from django.http import HttpResponse, HttpResponseForbidden
+# deploy/views.py
+import json
+import logging
+from django.http import HttpResponse, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
-from django.conf import settings
+from django.views.decorators.http import require_http_methods
+
+logger = logging.getLogger(__name__)
 
 @csrf_exempt
+@require_http_methods(["POST"])
 def github_webhook(request):
-    # 1. Проверка подписи (Безопасность)
-    # Получаем подпись из заголовка GitHub
-    # signature = request.headers.get('X-Hub-Signature-256')
-    # if not signature:
-    #     return HttpResponseForbidden('No signature')
+    """Минимальный тестовый обработчик"""
     
-    # Вычисляем нашу подпись
-    secret = settings.GITHUB_WEBHOOK_SECRET
-    payload = request.body
-    expected_signature = 'sha256=' + hmac.new(
-        secret.encode(), payload, hashlib.sha256
-    ).hexdigest()
+    # 1. Логируем ВСЁ, что пришло
+    logger.info("=== Webhook received ===")
+    logger.info(f"Headers: {dict(request.headers)}")
+    logger.info(f"Body: {request.body[:500]}")  # Первые 500 байт
     
-    # Сравниваем
-    if not hmac.compare_digest(expected_signature):
-        return HttpResponseForbidden('Invalid signature')
-    
-    # 2. Проверка события (чтобы не срабатывало на любые действия)
-    event = request.headers.get('X-GitHub-Event')
-    if event == 'ping':
-        return HttpResponse('Pong')
-    
-    if event == 'push':
-        # 3. Выполнение команд деплоя
-        # Путь к папке проекта на сервере
-        repo_dir = '/home/aiv/SNT/SNT-crm' 
-        
-        # Переменные окружения для Django (если используете .env)
-        env = os.environ.copy()
-        env['DJANGO_SETTINGS_MODULE'] = 'core.settings.production'
-        
-        try:
-            # Забираем код
-            subprocess.run(['git', 'pull'], cwd=repo_dir, env=env, check=True)
-            # Устанавливаем/обновляем зависимости
-            subprocess.run(['pip', 'install', '-r', 'requirements.txt'], cwd=repo_dir, env=env, check=True)
-            # Применяем миграции
-            subprocess.run(['python', 'manage.py', 'migrate'], cwd=repo_dir, env=env, check=True)
-            # Собираем статику
-            subprocess.run(['python', 'manage.py', 'collectstatic', '--noinput'], cwd=repo_dir, env=env, check=True)
-            # Перезапускаем сервер (пример для systemd + Gunicorn)
-            subprocess.run(['su -', 'systemctl', 'restart', 'crm-snt'], check=True)
-            
-            return HttpResponse('Deploy completed', status=200)
-        except subprocess.CalledProcessError as e:
-            # Логируйте ошибку
-            return HttpResponse(f'Deploy failed: {str(e)}', status=500)
-    
-    return HttpResponse('OK')
+    # 2. Простой ответ без всякой логики
+    return HttpResponse(
+        json.dumps({
+            "status": "ok",
+            "message": "Webhook received successfully",
+            "headers_count": len(request.headers)
+        }),
+        content_type="application/json",
+        status=200
+    )
