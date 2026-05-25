@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+
+{% block title %}Оплата | CRM СНТ{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2>💳 Оплата тарифа</h2>
+    <p>Завершите оплату для активации тарифа</p>
+</div>
+
+<div class="table-container" style="max-width: 500px; margin: 0 auto;">
+    <div style="padding: 24px;">
+        <div style="text-align: center; margin-bottom: 24px;">
+            <div style="font-size: 2rem; font-weight: 700; color: var(--primary);">
+                {{ payment.amount }} ₽
+            </div>
+            <div style="color: var(--gray-500); margin-top: 8px;">
+                {{ payment.description }}
+            </div>
+        </div>
+        
+        <div class="form-group">
+            <label>Способ оплаты</label>
+            <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                    <input type="radio" name="payment_method" value="card" checked> 💳 Банковская карта
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                    <input type="radio" name="payment_method" value="sberbank"> 🏦 Сбербанк Онлайн
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                    <input type="radio" name="payment_method" value="tinkoff"> 🏦 Тинькофф
+                </label>
+            </div>
+        </div>
+        
+        <!-- Демо-карта для тестирования -->
+        <div style="background: #f8f9fa; border-radius: 8px; padding: 16px; margin: 20px 0;">
+            <div style="font-weight: 600; margin-bottom: 8px;">💡 Тестовые данные:</div>
+            <div style="font-size: 0.85rem; color: #666;">
+                Номер карты: <strong>4242 4242 4242 4242</strong><br>
+                Срок: <strong>12/25</strong><br>
+                CVV: <strong>123</strong>
+            </div>
+        </div>
+        
+        <form method="post" id="payment-form">
+            {% csrf_token %}
+            <div class="form-group">
+                <label>Номер карты</label>
+                <input type="text" id="card-number" placeholder="0000 0000 0000 0000" class="card-input">
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                <div class="form-group">
+                    <label>Срок (MM/YY)</label>
+                    <input type="text" id="card-expiry" placeholder="MM/YY">
+                </div>
+                <div class="form-group">
+                    <label>CVV</label>
+                    <input type="text" id="card-cvv" placeholder="123">
+                </div>
+            </div>
+            
+            <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 16px;">
+                💳 Оплатить {{ payment.amount }} ₽
+            </button>
+        </form>
+        
+        <p style="text-align: center; margin-top: 16px; font-size: 0.8rem; color: var(--gray-500);">
+            🔒 Безопасная оплата. Данные защищены.
+        </p>
+    </div>
+</div>
+
+<script>
+    document.getElementById('payment-form').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        
+        showAlert('Обработка платежа...', 'info');
+        
+        // Симуляция оплаты
+        setTimeout(() => {
+            window.location.href = `/subscription/pay/{{ payment.id }}/?simulate=true`;
+        }, 1500);
+    });
+    
+    // Форматирование номера карты
+    document.getElementById('card-number').addEventListener('input', function(e) {
+        let value = e.target.value.replace(/\D/g, '');
+        if (value.length > 16) value = value.slice(0, 16);
+        value = value.replace(/(\d{4})(?=\d)/g, '$1 ');
+        e.target.value = value;
+    });
+    
+    // Форматирование срока
+    document.getElementById('card-expiry').addEventListener('input', function(e) {
+        let value = e.target.value.replace(/\D/g, '');
+        if (value.length > 4) value = value.slice(0, 4);
+        if (value.length >= 3) {
+            value = value.slice(0, 2) + '/' + value.slice(2);
+        }
+        e.target.value = value;
+    });
+    
+    // Ограничение CVV
+    document.getElementById('card-cvv').addEventListener('input', function(e) {
+        let value = e.target.value.replace(/\D/g, '');
+        if (value.length > 3) value = value.slice(0, 3);
+        e.target.value = value;
+    });
+</script>
+{% endblock %}

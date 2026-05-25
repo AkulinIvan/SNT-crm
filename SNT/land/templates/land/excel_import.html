@@ -1,0 +1,261 @@
+{% extends "base.html" %}
+
+{% block title %}Импорт из Excel | CRM СНТ{% endblock %}
+
+{% block breadcrumb %}
+<a href="/">Главная</a> <span>/</span> <a href="/plots/">Участки</a> <span>/</span> <span>Импорт из Excel</span>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div>
+            <h2>📊 Импорт данных из Excel</h2>
+            <p>Загрузка участков и владельцев из файла Excel</p>
+        </div>
+        <button class="btn btn-secondary" onclick="window.location.href='/plots/'">← К списку участков</button>
+    </div>
+</div>
+
+<div class="table-container">
+    <div style="padding: 24px;">
+        <div style="border: 2px dashed var(--gray-300); border-radius: 12px; padding: 40px; text-align: center;" id="drop-zone">
+            <div class="empty-icon" style="font-size: 3rem;">📁</div>
+            <h3>Перетащите файл Excel сюда или нажмите для выбора</h3>
+            <p style="color: var(--gray-500); margin-top: 8px;">
+                Поддерживаются файлы .xlsx, .xls
+            </p>
+            <input type="file" id="excel-file" accept=".xlsx,.xls" style="display: none;">
+            <button class="btn btn-primary" style="margin-top: 16px;" onclick="document.getElementById('excel-file').click()">
+                Выбрать файл
+            </button>
+        </div>
+        
+        <div id="file-info" style="display: none; margin-top: 20px; padding: 16px; background: var(--gray-50); border-radius: 8px;">
+            <strong>Выбран файл:</strong> <span id="file-name"></span>
+            <button class="btn btn-primary" style="margin-left: 12px;" onclick="uploadFile()">🚀 Начать импорт</button>
+        </div>
+        
+        <div id="progress-section" style="display: none; margin-top: 20px;">
+            <div style="background: var(--gray-200); border-radius: 10px; height: 20px; overflow: hidden;">
+                <div id="progress-bar" style="width: 0%; height: 100%; background: linear-gradient(90deg, #2c7a47, #4CAF50); transition: width 0.3s;"></div>
+            </div>
+            <p style="text-align: center; margin-top: 8px;" id="progress-text">Обработка...</p>
+        </div>
+        
+        <div id="result-section" style="display: none; margin-top: 24px;">
+            <div class="table-toolbar">
+                <span style="font-weight: 600;">📋 Результаты импорта</span>
+            </div>
+            <div id="result-content" style="padding: 20px;"></div>
+        </div>
+        
+        <div style="margin-top: 24px; background: #f0f8ff; border-radius: 8px; padding: 16px;">
+            <h4 style="margin-bottom: 12px;">📝 Инструкция по загрузке</h4>
+            <p>Файл Excel должен содержать следующие столбцы:</p>
+            <ul style="margin-left: 20px; margin-top: 8px;">
+                <li><strong>№участка</strong> (обязательно) - номер участка</li>
+                <li><strong>ФИО собственника</strong> (обязательно) - полное ФИО владельца</li>
+                <li><strong>метраж</strong> - площадь участка в м²</li>
+                <li><strong>Дата выдачи</strong> - дата вступления во владение</li>
+                <li><strong>Кадастровый номер</strong> - кадастровый номер участка</li>
+                <li><strong>элект.почта</strong> - email владельца</li>
+                <li><strong>телефон</strong> - телефон владельца</li>
+                <li><strong>примечания</strong> - дополнительные заметки</li>
+            </ul>
+            <p style="margin-top: 12px;">
+                <a href="#" class="btn btn-secondary btn-sm" onclick="downloadTemplate()">📥 Скачать шаблон Excel</a>
+            </p>
+        </div>
+    </div>
+</div>
+
+<script>
+    let selectedFile = null;
+    
+    // Drag & Drop
+    const dropZone = document.getElementById('drop-zone');
+    dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropZone.style.borderColor = 'var(--primary)';
+        dropZone.style.background = 'var(--primary-light)';
+    });
+    
+    dropZone.addEventListener('dragleave', () => {
+        dropZone.style.borderColor = 'var(--gray-300)';
+        dropZone.style.background = 'transparent';
+    });
+    
+    dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.style.borderColor = 'var(--gray-300)';
+        dropZone.style.background = 'transparent';
+        const file = e.dataTransfer.files[0];
+        if (file && (file.name.endsWith('.xlsx') || file.name.endsWith('.xls'))) {
+            selectFile(file);
+        } else {
+            showAlert('Пожалуйста, выберите файл Excel (.xlsx или .xls)', 'error');
+        }
+    });
+    
+    document.getElementById('excel-file').addEventListener('change', (e) => {
+        if (e.target.files[0]) {
+            selectFile(e.target.files[0]);
+        }
+    });
+    
+    function selectFile(file) {
+        selectedFile = file;
+        document.getElementById('file-info').style.display = 'block';
+        document.getElementById('file-name').textContent = file.name;
+    }
+    
+    async function uploadFile() {
+        if (!selectedFile) {
+            showAlert('Выберите файл', 'error');
+            return;
+        }
+        
+        const progressSection = document.getElementById('progress-section');
+        const progressBar = document.getElementById('progress-bar');
+        const progressText = document.getElementById('progress-text');
+        
+        progressSection.style.display = 'block';
+        progressBar.style.width = '30%';
+        progressText.textContent = 'Загрузка файла...';
+        
+        const formData = new FormData();
+        formData.append('excel_file', selectedFile);
+        
+        try {
+            progressBar.style.width = '60%';
+            progressText.textContent = 'Обработка данных...';
+            
+            const response = await fetch('/api/plots/import-excel/', {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': getCSRFToken(),
+                },
+                body: formData
+            });
+            
+            progressBar.style.width = '90%';
+            
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.error || 'Ошибка импорта');
+            }
+            
+            const result = await response.json();
+            progressBar.style.width = '100%';
+            progressText.textContent = 'Готово!';
+            
+            showResults(result);
+            
+        } catch (error) {
+            console.error('Import error:', error);
+            showAlert('Ошибка: ' + error.message, 'error');
+            progressSection.style.display = 'none';
+        }
+    }
+    
+    function showResults(result) {
+        const resultSection = document.getElementById('result-section');
+        const resultContent = document.getElementById('result-content');
+        
+        const stats = result.stats;
+        
+        let html = `
+            <div class="stats-grid" style="margin-bottom: 20px;">
+                <div class="stat-card">
+                    <div class="stat-label">📄 Всего строк</div>
+                    <div class="stat-value">${stats.total_rows}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">👤 Создано владельцев</div>
+                    <div class="stat-value" style="color: var(--primary);">${stats.owners_created}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">🏠 Создано участков</div>
+                    <div class="stat-value" style="color: var(--primary);">${stats.plots_created}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">📞 Добавлено контактов</div>
+                    <div class="stat-value" style="color: var(--info);">${stats.contacts_added}</div>
+                </div>
+            </div>
+        `;
+        
+        if (result.errors && result.errors.length > 0) {
+            html += `
+                <div style="background: var(--danger-light); border-left: 4px solid var(--danger); padding: 16px; margin-bottom: 16px; border-radius: 4px;">
+                    <strong style="color: var(--danger);">❌ Ошибки (${result.errors.length}):</strong>
+                    <ul style="margin-top: 8px; margin-left: 20px;">
+                        ${result.errors.map(e => `<li>${escapeHtml(e)}</li>`).join('')}
+                    </ul>
+                </div>
+            `;
+        }
+        
+        if (result.warnings && result.warnings.length > 0) {
+            html += `
+                <div style="background: var(--warning-light); border-left: 4px solid var(--warning); padding: 16px; margin-bottom: 16px; border-radius: 4px;">
+                    <strong style="color: var(--warning);">⚠️ Предупреждения (${result.warnings.length}):</strong>
+                    <ul style="margin-top: 8px; margin-left: 20px;">
+                        ${result.warnings.map(w => `<li>${escapeHtml(w)}</li>`).join('')}
+                    </ul>
+                </div>
+            `;
+        }
+        
+        if (result.success) {
+            html += `
+                <div style="background: var(--primary-light); padding: 16px; border-radius: 8px; text-align: center;">
+                    <strong style="color: var(--primary);">✅ Импорт успешно завершен!</strong>
+                    <br>
+                    <button class="btn btn-primary" style="margin-top: 12px;" onclick="window.location.href='/plots/'">
+                        Перейти к списку участков
+                    </button>
+                </div>
+            `;
+        }
+        
+        resultContent.innerHTML = html;
+        resultSection.style.display = 'block';
+        
+        // Скрываем прогресс
+        setTimeout(() => {
+            document.getElementById('progress-section').style.display = 'none';
+        }, 2000);
+    }
+    
+    function downloadTemplate() {
+        // Создаем шаблон Excel
+        const template = [
+            ['№участка', 'ФИО собственника', 'метраж', 'Дата выдачи', 'Кадастровый номер', 'элект.почта', 'телефон', 'примечания'],
+            ['1', 'Иванов Иван Иванович', '600', '15.01.2020', '50:20:0010101:123', 'ivanov@example.com', '+79161234567', ''],
+            ['2', 'Петров Петр Петрович', '800', '20.03.2019', '50:20:0010101:456', 'petrov@example.com', '+79167654321', ''],
+        ];
+        
+        // Создаем CSV для скачивания
+        const csvContent = template.map(row => row.join(',')).join('\n');
+        const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        const url = URL.createObjectURL(blob);
+        link.href = url;
+        link.setAttribute('download', 'template_import.csv');
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        
+        showAlert('Шаблон скачан. Вы можете открыть его в Excel и заполнить данными.', 'success');
+    }
+    
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+</script>
+{% endblock %}

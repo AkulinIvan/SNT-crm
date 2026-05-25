@@ -19,6 +19,8 @@ from django.utils import timezone
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.utils.decorators import method_decorator
 
+from subscriptions.models import Subscription, Tariff
+
 from .models import User, UserActionLog
 from .serializers import (
     UserLoginSerializer,
@@ -132,7 +134,16 @@ class AuthViewSet(viewsets.ViewSet):
         
         data = request.data
         org_data = data.get('organization', {})
-        
+        # Создаем подписку (базовый тариф)
+        tariff = Tariff.objects.filter(slug='basic', is_active=True).first()
+        if tariff:
+            Subscription.objects.create(
+                organization=organization,
+                tariff=tariff,
+                status='trial',
+                start_date=timezone.now(),
+                end_date=timezone.now() + timezone.timedelta(days=tariff.trial_days)
+            )
         # Проверяем, не существует ли пользователь
         if User.objects.filter(username=data.get('username')).exists():
             return Response(

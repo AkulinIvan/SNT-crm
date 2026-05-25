@@ -11,12 +11,16 @@ from django.views import View
 from django.db.models import Count, Q, Avg, Sum
 from django.db import transaction
 from django.utils import timezone
+from django.utils.decorators import method_decorator
+from django.contrib.auth.decorators import login_required
+from django.views.decorators.csrf import csrf_exempt
 import logging
 from rest_framework import permissions
 from .services import rosreestr_service
 from common.mixins import OrganizationMixin
 
 from accounts.permissions import IsManagerOrAbove
+from subscriptions.decorators import subscription_required
 
 from .models import LandPlot
 from .serializers import (
@@ -25,6 +29,8 @@ from .serializers import (
     LandPlotGeoSerializer,
 )
 
+from django.http import JsonResponse
+from .excel_importer import ExcelImporter
 
 logger = logging.getLogger(__name__)
 
@@ -657,6 +663,55 @@ class LandPlotViewSet(OrganizationMixin, viewsets.ModelViewSet):
         
         return response
 
+    @action(detail=False, methods=['post'], url_path='import-excel')
+    def import_excel(self, request):
+        """Импорт данных из Excel"""
+        file = request.FILES.get('excel_file')
+        
+        if not file:
+            return Response({'error': 'Файл не выбран'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Проверяем расширение
+        if not file.name.endswith(('.xlsx', '.xls')):
+            return Response({'error': 'Поддерживаются только файлы Excel (.xlsx, .xls)'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Получаем организацию
+        organization_id = None
+        if hasattr(request, 'current_organization') and request.current_organization:
+            organization_id = request.current_organization.id
+        
+        # Сохраняем файл временно
+        import tempfile
+        import os
+        
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp_file:
+                for chunk in file.chunks():
+                    tmp_file.write(chunk)
+                tmp_file_path = tmp_file.name
+            
+            # Импортируем данные
+            from .excel_importer import ExcelImporter
+            importer = ExcelImporter(tmp_file_path, organization_id)
+            stats = importer.import_data()
+            
+            return Response({
+                'success': True,
+                'stats': stats,
+                'errors': importer.errors[:20],
+                'warnings': importer.warnings[:20],
+            })
+            
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+        finally:
+            # Удаляем временный файл
+            if os.path.exists(tmp_file_path):
+                os.unlink(tmp_file_path)
+    
     @action(detail=False, methods=['post'], url_path='bulk-update-status')
     def bulk_update_status(self, request):
         """
@@ -778,12 +833,76 @@ class LandPlotDetailView(View):
 
 
 class LandPlotMapView(View):
-    """Страница с картой СНТ."""
+    """Страница с картой СНТ (требует подписки)"""
+    @method_decorator(login_required)
+    @method_decorator(subscription_required(feature='map', redirect_url='subscription_plans'))
     def get(self, request):
         return render(request, 'land/map.html', {'active_page': 'map'})
     
 
 class DashboardView(View):
-    """Главная страница дашборда (если ещё не создана)."""
+    """Главная страница дашборда"""
     def get(self, request):
         return render(request, 'users/dashboard.html', {'active_page': 'dashboard'})
+    
+    
+class ExcelImportView(View):
+    """Импорт данных из Excel"""
+    
+    @method_decorator(login_required)
+    def get(self, request):
+        return render(request, 'land/excel_import.html', {'active_page': 'import'})
+    
+    @method_decorator(login_required)
+    @method_decorator(csrf_exempt)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+    
+    def post(self, request):
+        """Обработка POST запроса для импорта"""
+        file = request.FILES.get('excel_file')
+        
+        if not file:
+            return JsonResponse({'error': 'Файл не выбран'}, status=400)
+        
+        # Проверяем расширение
+        if not file.name.endswith(('.xlsx', '.xls')):
+            return JsonResponse({'error': 'Поддерживаются только файлы Excel (.xlsx, .xls)'}, status=400)
+        
+        # Получаем организацию
+        organization_id = None
+        if hasattr(request, 'current_organization') and request.current_organization:
+            organization_id = request.current_organization.id
+        
+        # Сохраняем файл временно
+        import tempfile
+        import os
+        
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp_file:
+                for chunk in file.chunks():
+                    tmp_file.write(chunk)
+                tmp_file_path = tmp_file.name
+            
+            # Импортируем данные
+            importer = ExcelImporter(tmp_file_path, organization_id)
+            stats = importer.import_data()
+            
+            result = {
+                'success': True,
+                'stats': stats,
+                'errors': importer.errors[:20],  # Первые 20 ошибок
+                'warnings': importer.warnings[:20],
+            }
+            
+            return JsonResponse(result)
+            
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return JsonResponse({'error': str(e)}, status=500)
+        
+        finally:
+            # Удаляем временный файл
+            if os.path.exists(tmp_file_path):
+                os.unlink(tmp_file_path)

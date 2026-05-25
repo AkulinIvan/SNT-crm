@@ -1,0 +1,65 @@
+[
+    {
+        "model": "subscriptions.tariff",
+        "pk": 1,
+        "fields": {
+            "name": "Базовый",
+            "slug": "basic",
+            "description": "Базовые возможности для начала работы",
+            "price": 0,
+            "price_period": "year",
+            "can_view_map": false,
+            "can_manage_payments": false,
+            "can_import_bank": false,
+            "can_export_data": false,
+            "can_manage_assessments": false,
+            "max_users": 1,
+            "max_owners": 50,
+            "max_plots": 50,
+            "is_active": true,
+            "order": 1
+        }
+    },
+    {
+        "model": "subscriptions.tariff",
+        "pk": 2,
+        "fields": {
+            "name": "Стандарт",
+            "slug": "standard",
+            "description": "Расширенные возможности для активного СНТ",
+            "price": 5000,
+            "price_period": "year",
+            "can_view_map": true,
+            "can_manage_payments": true,
+            "can_import_bank": false,
+            "can_export_data": true,
+            "can_manage_assessments": true,
+            "max_users": 3,
+            "max_owners": 200,
+            "max_plots": 200,
+            "is_active": true,
+            "order": 2
+        }
+    },
+    {
+        "model": "subscriptions.tariff",
+        "pk": 3,
+        "fields": {
+            "name": "Премиум",
+            "slug": "premium",
+            "description": "Все возможности для большого СНТ",
+            "price": 15000,
+            "price_period": "year",
+            "can_view_map": true,
+            "can_manage_payments": true,
+            "can_import_bank": true,
+            "can_export_data": true,
+            "can_manage_assessments": true,
+            "max_users": 10,
+            "max_owners": 1000,
+            "max_plots": 1000,
+            "is_active": true,
+            "order": 3
+        }
+    }
+]

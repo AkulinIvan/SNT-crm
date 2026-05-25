@@ -943,6 +943,12 @@
                         <span class="icon">🏦</span> Импорт из банка
                     </a>
                 </div>
+                <div class="nav-section">
+                    <div class="nav-section-title">Настройки</div>
+                    <a href="/subscription/plans/" class="nav-link {% if active_page == 'subscriptions' %}active{% endif %}">
+                        <span class="icon">⭐</span> Тарифы
+                    </a>
+                </div>
                 {% if user.is_authenticated and user.is_admin %}
                 <div class="nav-section">
                     <div class="nav-section-title">Администрирование</div>
@@ -1470,10 +1476,58 @@
             const el = document.getElementById(id);
             if (el) el.innerHTML = html;
         }
+        async function checkFeatureAccess() {
+            try {
+                const result = await apiFetch('/api/subscription/features/');
+                if (result && result.features) {
+                    // Скрываем/показываем пункты меню в зависимости от доступа
+                    const financeSection = document.querySelector('.nav-section:has(.nav-link[href="/payments/"])');
+                    const mapLink = document.querySelector('.nav-link[href="/map/"]');
+                    const paymentsLink = document.querySelector('.nav-link[href="/payments/"]');
+                    const assessmentsLink = document.querySelector('.nav-link[href="/payments/assessments/"]');
+                    const bankImportLink = document.querySelector('.nav-link[href="/payments/import/"]');
+
+                    if (mapLink) {
+                        if (!result.features.map) {
+                            mapLink.style.opacity = '0.5';
+                            mapLink.style.pointerEvents = 'none';
+                            mapLink.title = 'Доступно только в платных тарифах';
+                        }
+                    }
+
+                    if (paymentsLink) {
+                        if (!result.features.payments) {
+                            paymentsLink.style.opacity = '0.5';
+                            paymentsLink.style.pointerEvents = 'none';
+                            paymentsLink.title = 'Доступно только в платных тарифах';
+                        }
+                    }
+
+                    if (assessmentsLink) {
+                        if (!result.features.assessments) {
+                            assessmentsLink.style.opacity = '0.5';
+                            assessmentsLink.style.pointerEvents = 'none';
+                            assessmentsLink.title = 'Доступно только в платных тарифах';
+                        }
+                    }
+
+                    if (bankImportLink) {
+                        if (!result.features.bank_import) {
+                            bankImportLink.style.opacity = '0.5';
+                            bankImportLink.style.pointerEvents = 'none';
+                            bankImportLink.title = 'Доступно только в платных тарифах';
+                        }
+                    }
+                }
+            } catch (e) {
+                console.error('Error checking feature access:', e);
+            }
+        }
 
         // ==================== ИНИЦИАЛИЗАЦИЯ ====================
 
         document.addEventListener('DOMContentLoaded', function() {
+            checkFeatureAccess();
             // Авто-скрытие сообщений Django
             const messages = document.querySelectorAll('.alert');
             messages.forEach(msg => {

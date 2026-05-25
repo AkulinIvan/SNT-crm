@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+
+{% block title %}Проверка подписки | CRM СНТ{% endblock %}
+
+{% block content %}
+<div class="empty-state">
+    <div class="empty-icon">🔒</div>
+    <h3>Требуется подписка</h3>
+    <p>Для доступа к этой функции необходимо оформить подписку</p>
+    <a href="/subscription/plans/" class="btn btn-primary">Выбрать тариф</a>
+</div>
+{% endblock %}

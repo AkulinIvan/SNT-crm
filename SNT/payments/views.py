@@ -16,13 +16,15 @@ from django.template.loader import render_to_string
 from django.core.exceptions import PermissionDenied
 import json
 import logging
+from django.utils.decorators import method_decorator
+from django.contrib.auth.decorators import login_required
 
 from common.mixins import OrganizationMixin
 from .email_service import EmailReceiptService
 from land.models import LandPlot
 from users.models import Owner
 from .qr_generator import QRCodeGenerator, SNTDetailsGenerator
-
+from subscriptions.decorators import subscription_required
 from .models import (
     ConsolidatedAssessment, ConsolidatedAssessmentLine, PaymentCategory, PaymentPeriod, Assessment,
     Payment, BankStatement, BankTransaction, ReceiptTemplate
@@ -775,10 +777,10 @@ class AssessmentViewSet(OrganizationMixin, viewsets.ModelViewSet):
     def stats(self, request):
         """Статистика по начислениям с фильтрацией по организации"""
         from django.db.models import Count, Sum
-        
+
         # Базовый queryset
         assessments = Assessment.objects.all()
-        
+
         # Фильтруем по организации текущего пользователя (если не админ)
         if not request.user.is_superuser and not request.user.is_admin:
             if hasattr(request, 'current_organization') and request.current_organization:
@@ -796,15 +798,15 @@ class AssessmentViewSet(OrganizationMixin, viewsets.ModelViewSet):
                     'by_status': {},
                     'by_category': {},
                 })
-        
+
         total_amount = assessments.aggregate(s=Sum('amount'))['s'] or 0
         total_paid = assessments.aggregate(s=Sum('paid_amount'))['s'] or 0
-        
+
         # Расчёт общей задолженности
         total_debt = 0
         for a in assessments.filter(status__in=['pending', 'partial', 'overdue']):
             total_debt += a.debt
-        
+
         data = {
             'total_amount': float(total_amount),
             'total_paid': float(total_paid),
@@ -816,7 +818,7 @@ class AssessmentViewSet(OrganizationMixin, viewsets.ModelViewSet):
                 assessments.values_list('category__name').annotate(c=Count('id'))
             ),
         }
-        
+
         return Response(data)
 
     @action(detail=True, methods=['post'], url_path='add-payment')
@@ -1519,16 +1521,22 @@ class QuickPaymentViewSet(viewsets.ViewSet):
 
 # Веб-представления
 class PaymentsDashboardView(View):
+    @method_decorator(login_required)
+    @method_decorator(subscription_required(feature='payments', redirect_url='subscription_plans'))
     def get(self, request):
         return render(request, 'payments/dashboard.html', {'active_page': 'payments'})
 
 
 class AssessmentsListView(View):
+    @method_decorator(login_required)
+    @method_decorator(subscription_required(feature='assessments', redirect_url='subscription_plans'))
     def get(self, request):
         return render(request, 'payments/assessments.html', {'active_page': 'assessments'})
 
 
 class BankImportView(View):
+    @method_decorator(login_required)
+    @method_decorator(subscription_required(feature='bank_import', redirect_url='subscription_plans'))
     def get(self, request):
         return render(request, 'payments/bank_import.html', {'active_page': 'bank-import'})
 

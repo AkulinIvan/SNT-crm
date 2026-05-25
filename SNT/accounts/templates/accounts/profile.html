@@ -265,11 +265,42 @@
         });
     }
 
+    async function loadSubscriptionInfo() {
+        const subscription = await apiFetch('/api/subscription/current/');
+        const container = document.getElementById('subscription-info');
+        
+        if (subscription && subscription.id) {
+            container.innerHTML = `
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <strong>${subscription.tariff_name}</strong><br>
+                        <span style="font-size: 0.85rem; color: var(--gray-500);">
+                            Действует до: ${formatDate(subscription.end_date)}
+                            ${subscription.days_left ? ` (осталось ${subscription.days_left} дней)` : ''}
+                        </span>
+                    </div>
+                    <a href="/subscription/plans/" class="btn btn-secondary btn-sm">Изменить тариф</a>
+                </div>
+            `;
+        } else {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-icon">⭐</div>
+                    <h3>Нет активной подписки</h3>
+                    <a href="/subscription/plans/" class="btn btn-primary">Выбрать тариф</a>
+                </div>
+            `;
+        }
+    }
+
     async function handleLogout() {
         await apiFetch('/api/auth/logout/', { method: 'POST' });
         window.location.href = '/login/';
     }
 
-    document.addEventListener('DOMContentLoaded', loadProfile);
+    document.addEventListener('DOMContentLoaded', () => {
+        loadProfile();
+        loadSubscriptionInfo();
+    });
 </script>
 {% endblock %}

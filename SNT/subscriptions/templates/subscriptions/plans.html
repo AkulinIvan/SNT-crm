@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+
+{% block title %}Тарифы | CRM СНТ{% endblock %}
+
+{% block breadcrumb %}
+<a href="/">Главная</a> <span>/</span> <span>Тарифы</span>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2>⭐ Выберите тарифный план</h2>
+    <p>Расширьте возможности вашего СНТ</p>
+</div>
+
+{% if current_subscription %}
+<div class="alert alert-info" style="background: var(--info-light); padding: 16px; border-radius: 8px; margin-bottom: 24px;">
+    <strong>Ваш текущий тариф:</strong> {{ current_subscription.tariff.name }}
+    <br>
+    <span style="font-size: 0.85rem;">
+        Действует до: {{ current_subscription.end_date|date:"d.m.Y" }}
+        {% if current_subscription.days_left %}
+            (осталось {{ current_subscription.days_left }} дней)
+        {% endif %}
+    </span>
+</div>
+{% endif %}
+
+<div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 24px;">
+    {% for tariff in tariffs %}
+    <div class="stat-card" style="display: flex; flex-direction: column; cursor: default; transition: transform 0.2s;">
+        <div style="text-align: center; margin-bottom: 16px;">
+            <div style="font-size: 2rem; font-weight: 700; color: var(--primary);">
+                {{ tariff.price }} ₽
+            </div>
+            <div style="font-size: 0.85rem; color: var(--gray-500);">
+                {{ tariff.get_price_period_display }}
+            </div>
+        </div>
+        
+        <h3 style="text-align: center; margin-bottom: 16px;">{{ tariff.name }}</h3>
+        
+        <ul style="list-style: none; padding: 0; margin: 0 0 20px 0; flex: 1;">
+            <li style="padding: 8px 0; border-bottom: 1px solid var(--gray-100);">
+                {% if tariff.can_view_map %}✅{% else %}❌{% endif %} Карта СНТ
+            </li>
+            <li style="padding: 8px 0; border-bottom: 1px solid var(--gray-100);">
+                {% if tariff.can_manage_payments %}✅{% else %}❌{% endif %} Управление платежами
+            </li>
+            <li style="padding: 8px 0; border-bottom: 1px solid var(--gray-100);">
+                {% if tariff.can_import_bank %}✅{% else %}❌{% endif %} Импорт из банка
+            </li>
+            <li style="padding: 8px 0; border-bottom: 1px solid var(--gray-100);">
+                {% if tariff.can_export_data %}✅{% else %}❌{% endif %} Экспорт данных
+            </li>
+            <li style="padding: 8px 0; border-bottom: 1px solid var(--gray-100);">
+                {% if tariff.can_manage_assessments %}✅{% else %}❌{% endif %} Управление начислениями
+            </li>
+            <li style="padding: 8px 0; border-bottom: 1px solid var(--gray-100);">
+                👥 До {{ tariff.max_users }} пользователей
+            </li>
+            <li style="padding: 8px 0;">
+                🏠 До {{ tariff.max_plots }} участков
+            </li>
+        </ul>
+        
+        {% if current_subscription and current_subscription.tariff.id == tariff.id %}
+            <button class="btn btn-secondary" disabled style="width: 100%;">
+                ✅ Текущий тариф
+            </button>
+        {% elif tariff.price == 0 %}
+            <button class="btn btn-primary" onclick="selectTariff({{ tariff.id }})" style="width: 100%;">
+                Бесплатно
+            </button>
+        {% else %}
+            <button class="btn btn-primary" onclick="selectTariff({{ tariff.id }})" style="width: 100%;">
+                Выбрать тариф
+            </button>
+        {% endif %}
+            </div>
+            {% endfor %}
+</div>
+
+<script>
+    async function selectTariff(tariffId) {
+        showAlert('Обработка запроса...', 'info');
+        
+        try {
+            const result = await apiFetch('/api/subscription/upgrade/', {
+                method: 'POST',
+                body: JSON.stringify({ tariff_id: tariffId })
+            });
+
+            if (result && result.success) {
+                if (result.payment_url) {
+                    // Переход на страницу оплаты
+                    window.location.href = result.payment_url;
+                } else {
+                    showAlert(result.message, 'success');
+                    window.location.reload();
+                }
+            } else {
+                showAlert(result?.detail || 'Ошибка при выборе тарифа', 'error');
+            }
+        } catch (error) {
+            showAlert('Ошибка: ' + error.message, 'error');
+        }
+    }
+
+    async function updateSubscriptionStatus() {
+        try {
+            const subscription = await apiFetch('/api/subscription/current/');
+            if (subscription && subscription.tariff_name) {
+                const currentTariffElement = document.getElementById('current-tariff-name');
+                if (currentTariffElement) {
+                    currentTariffElement.textContent = subscription.tariff_name;
+                }
+            }
+        } catch (e) {
+            console.error('Error updating subscription status:', e);
+        }
+    }
+
+    // Вызываем после загрузки страницы
+    document.addEventListener('DOMContentLoaded', () => {
+        updateSubscriptionStatus();
+    });
+</script>
+{% endblock %}
