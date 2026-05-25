@@ -316,8 +316,8 @@ class AssessmentViewSet(OrganizationMixin, viewsets.ModelViewSet):
         total_created = 0
         all_receipts_html = []  
 
-        qr_gen = QRCodeGenerator()
-        snt_gen = SNTDetailsGenerator()
+        qr_gen = QRCodeGenerator(request=self.request)
+        snt_gen = SNTDetailsGenerator(request=self.request)
         snt_details = snt_gen.get_details() 
 
         with db_transaction.atomic():
@@ -854,7 +854,7 @@ class AssessmentViewSet(OrganizationMixin, viewsets.ModelViewSet):
         """Получить данные для квитанции с QR-кодом"""
         assessment = self.get_object()
         
-        qr_gen = QRCodeGenerator()
+        qr_gen = QRCodeGenerator(request=self.request)
         qr_data = qr_gen.generate_qr_data(
             owner_name=assessment.owner.full_name,
             plot_number=assessment.land_plot.plot_number,
@@ -891,8 +891,8 @@ class AssessmentViewSet(OrganizationMixin, viewsets.ModelViewSet):
         assessment = self.get_object()
 
         # Инициализируем генераторы
-        qr_gen = QRCodeGenerator()
-        snt_gen = SNTDetailsGenerator()
+        qr_gen = QRCodeGenerator(request=self.request)
+        snt_gen = SNTDetailsGenerator(request=self.request)
 
         # Генерируем данные для QR-кода
         qr_data = qr_gen.generate_qr_data(
@@ -983,7 +983,7 @@ class AssessmentViewSet(OrganizationMixin, viewsets.ModelViewSet):
             print("WARNING: No Cyrillic font found, using default (may show squares)")
 
         # Генерируем QR-код
-        qr_gen = QRCodeGenerator()
+        qr_gen = QRCodeGenerator(request=self.request)
         qr_data = qr_gen.generate_qr_data(
             owner_name=assessment.owner.full_name,
             plot_number=assessment.land_plot.plot_number,
@@ -1102,8 +1102,8 @@ class AssessmentViewSet(OrganizationMixin, viewsets.ModelViewSet):
         if period_id:
             assessments = assessments.filter(period_id=period_id)
         
-        qr_gen = QRCodeGenerator()
-        snt_gen = SNTDetailsGenerator()
+        qr_gen = QRCodeGenerator(request=self.request)
+        snt_gen = SNTDetailsGenerator(request=self.request)
         snt_details = snt_gen.get_details()
         
         receipts = []
@@ -1169,8 +1169,8 @@ class AssessmentViewSet(OrganizationMixin, viewsets.ModelViewSet):
                 'assessments': []
             }, status=status.HTTP_200_OK)
 
-        qr_gen = QRCodeGenerator()
-        snt_gen = SNTDetailsGenerator()
+        qr_gen = QRCodeGenerator(request=self.request)
+        snt_gen = SNTDetailsGenerator(request=self.request)
         snt_details = snt_gen.get_details()
         receipts_data = []
 
@@ -1630,8 +1630,8 @@ class ConsolidatedAssessmentViewSet(viewsets.ModelViewSet):
         """Квитанция для составного начисления"""
         consolidated = self.get_object()
 
-        qr_gen = QRCodeGenerator()
-
+        qr_gen = QRCodeGenerator(request=self.request)
+        
         lines_desc = []
         for line in consolidated.lines.all():
             lines_desc.append(f"{line.description}: {line.amount} ₽")

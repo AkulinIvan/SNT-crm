@@ -18,19 +18,40 @@ logger = logging.getLogger(__name__)
 def get_current_organization_details(request=None):
     """
     Получить реквизиты текущего СНТ из базы данных.
-    Если request передан, берем организацию текущего пользователя.
-    Иначе возвращаем первую активную организацию или None.
+    Приоритет:
+    1. request.current_organization (из OrganizationMixin)
+    2. organization пользователя (если пользователь привязан к одной организации)
+    3. Первая активная организация (fallback)
     """
     from organizations.models import Organization
     
-    if request and hasattr(request, 'current_organization') and request.current_organization:
-        org = request.current_organization
-    else:
-        # Если нет request, берем первую активную организацию
+    org = None
+    
+    if request:
+        # Способ 1: через OrganizationMixin (если используется)
+        if hasattr(request, 'current_organization') and request.current_organization:
+            org = request.current_organization
+        # Способ 2: организация пользователя
+        elif hasattr(request, 'user') and request.user.is_authenticated:
+            # Проверяем, есть ли у пользователя организация
+            if hasattr(request.user, 'organization') and request.user.organization:
+                org = request.user.organization
+            # Если пользователь председатель или бухгалтер
+            elif hasattr(request.user, 'chaired_organization') and request.user.chaired_organization:
+                org = request.user.chaired_organization
+    
+    # Fallback: первая активная организация
+    if not org:
         org = Organization.objects.filter(is_active=True).first()
+        if org:
+            import logging
+            logging.getLogger(__name__).warning(
+                f"Не удалось определить организацию из request, используется первая активная: {org.short_name}"
+            )
     
     if not org:
-        logger.warning("Не найдена активная организация СНТ")
+        import logging
+        logging.getLogger(__name__).warning("Не найдена активная организация СНТ")
         return None
     
     return {
