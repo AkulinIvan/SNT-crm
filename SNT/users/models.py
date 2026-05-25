@@ -271,39 +271,38 @@ class ContactInfo(models.Model):
         self.value = self.value.strip() if self.value else ''
         
         if self.type == self.PHONE:
+            # Извлекаем только цифры
             digits = ''.join(c for c in self.value if c.isdigit())
+            
             if len(digits) < 10:
                 raise ValidationError({
                     'value': 'Номер телефона должен содержать не менее 10 цифр.'
                 })
-            # Форматируем номер
-            if len(digits) == 11:
-                self.value = f'+7 ({digits[1:4]}) {digits[4:7]}-{digits[7:9]}-{digits[9:11]}'
-            elif len(digits) == 10:
-                self.value = f'+7 ({digits[0:3]}) {digits[3:6]}-{digits[6:8]}-{digits[8:10]}'
-        elif self.type == self.EMAIL:
-            validator = EmailValidator()
-            try:
-                validator(self.value)
-            except ValidationError:
-                raise ValidationError({
-                    'value': 'Введите корректный email-адрес.'
-                })
-            self.value = self.value.lower()
-
-        # Проверка на существующий активный контакт такого же типа
-        if self.is_active and self.owner_id:
-            duplicate = ContactInfo.objects.filter(
-                owner_id=self.owner_id,
-                type=self.type,
-                value=self.value,
-                is_active=True
-            ).exclude(pk=self.pk).first()
             
-            if duplicate:
-                raise ValidationError({
-                    'value': f'Такой контакт уже существует (ID: {duplicate.id})'
-                })
+            # Приводим к единому формату
+            if len(digits) == 11:
+                if digits.startswith('8'):
+                    digits = '7' + digits[1:]
+                elif not digits.startswith('7'):
+                    raise ValidationError({
+                        'value': 'Номер должен начинаться с +7 или 8'
+                    })
+            elif len(digits) == 10:
+                digits = '7' + digits
+            else:
+                # Для номеров длиннее 11 цифр - возможно добавочный номер
+                pass
+            
+            # Форматируем номер в единый вид
+            if len(digits) >= 11 and digits.startswith('7'):
+                if len(digits) == 11:
+                    self.value = f"+7 ({digits[1:4]}) {digits[4:7]}-{digits[7:9]}-{digits[9:11]}"
+                else:
+                    # Номер с добавочным
+                    main = f"+7 ({digits[1:4]}) {digits[4:7]}-{digits[7:9]}-{digits[9:11]}"
+                    extra = digits[11:]
+                    self.value = f"{main} доб.{extra}"
+
 
     def save(self, *args, **kwargs):
         """При сохранении — полная очистка."""

@@ -33,7 +33,7 @@ class ExcelImporter:
     def normalize_cadastral(self, value):
         """
         Нормализация кадастрового номера.
-        Принимает различные форматы и приводит к единому виду.
+        Принимает различные форматы и приводит к единому виду XX:XX:XXXXXXX:XXXX
         """
         if not value:
             return None
@@ -44,8 +44,8 @@ class ExcelImporter:
         if len(cadastral) < 5 or not any(c.isdigit() for c in cadastral):
             return None
         
-        # Заменяем точки на двоеточия
-        cadastral = cadastral.replace('.', ':')
+        # Заменяем точки и пробелы на двоеточия
+        cadastral = cadastral.replace('.', ':').replace(' ', ':')
         
         # Убираем лишние пробелы
         cadastral = re.sub(r'\s+', '', cadastral)
@@ -62,41 +62,59 @@ class ExcelImporter:
             cadastral = cadastral.split(',')[0].strip()
         
         # Если номер заканчивается на двоеточие - удаляем его
-        if cadastral.endswith(':'):
-            cadastral = cadastral[:-1]
+        cadastral = cadastral.rstrip(':')
         
         # Разбиваем на части
         parts = cadastral.split(':')
         
-        # Обработка одночастных номеров типа "24500700439:229"
-        if len(parts) == 1 and ':' not in cadastral and len(cadastral) > 10:
-            # Пробуем разделить по позиции (первые 11 цифр - первая часть)
-            if len(cadastral) > 11:
-                cadastral = f"{cadastral[:11]}:{cadastral[11:]}"
-                parts = cadastral.split(':')
-        
-        # Обработка двухчастных номеров
-        if len(parts) == 2:
-            # Добавляем недостающие части
-            if len(parts[0]) >= 11:
-                # Формат типа 24500700439:229
-                # Разбиваем первую часть на регион и район/квартал
-                region = parts[0][:2]
-                rest = parts[0][2:]
-                if len(rest) >= 6:
-                    district = rest[:2]
-                    quarter = rest[2:8] if len(rest) >= 8 else rest[2:].ljust(6, '0')
+        # Если нет разделителей, пробуем разобрать длинный номер
+        if len(parts) == 1 and ':' not in cadastral:
+            digits = ''.join(c for c in cadastral if c.isdigit())
+            if len(digits) >= 13:
+                # Формат: 24500700439229 -> 24:50:0700439:229
+                region = digits[:2]
+                district = digits[2:4]
+                quarter = digits[4:11]
+                parcel = digits[11:]
+                if quarter.startswith('0'):
+                    quarter = quarter[1:]  # Убираем ведущий ноль для 7-значного квартала
                 else:
-                    district = '00'
-                    quarter = rest.ljust(6, '0')
-                cadastral = f"{region}:{district}:{quarter}:{parts[1].zfill(3)}"
+                    quarter = quarter[:6]  # Берем первые 6 цифр для квартала
+                return f"{region}:{district}:{quarter.zfill(6)}:{parcel.zfill(3)}"
+            elif len(digits) >= 11:
+                # Формат: 500700439229 -> 50:07:004392:29
+                region = digits[:2]
+                district = digits[2:4]
+                quarter = digits[4:10] if len(digits) >= 10 else digits[4:].zfill(6)
+                parcel = digits[10:] if len(digits) > 10 else '1'
+                return f"{region}:{district}:{quarter.zfill(6)}:{parcel.zfill(3)}"
+        
+        # Обработка двухчастных номеров типа "24500700439:229"
+        if len(parts) == 2:
+            first_part = parts[0]
+            second_part = parts[1].zfill(3)
+            
+            # Определяем регион (первые 2 цифры)
+            region = first_part[:2]
+            
+            # Определяем район (следующие 2 цифры)
+            if len(first_part) >= 4:
+                district = first_part[2:4]
             else:
-                # Общий случай
-                cadastral = f"{parts[0].zfill(2)}:00:000000:{parts[1].zfill(3)}"
+                district = '00'
+            
+            # Определяем квартал (оставшиеся цифры, обычно 6-7)
+            remaining = first_part[4:]
+            if len(remaining) >= 6:
+                quarter = remaining[:7] if remaining[0] == '0' and len(remaining) >= 7 else remaining[:6]
+            else:
+                quarter = remaining.zfill(6)
+            
+            return f"{region}:{district}:{quarter.zfill(6)}:{second_part}"
         
         # Обработка трехчастных номеров
         elif len(parts) == 3:
-            cadastral = f"{parts[0].zfill(2)}:{parts[1].zfill(2)}:{parts[2].zfill(6)}:0001"
+            return f"{parts[0].zfill(2)}:{parts[1].zfill(2)}:{parts[2].zfill(6)}:001"
         
         # Обработка четырехчастных номеров
         elif len(parts) == 4:
@@ -110,65 +128,49 @@ class ExcelImporter:
                     cleaned_parts.append('0')
             
             if len(cleaned_parts) == 4:
-                cadastral = f"{cleaned_parts[0].zfill(2)}:{cleaned_parts[1].zfill(2)}:{cleaned_parts[2].zfill(6)}:{cleaned_parts[3].zfill(3)}"
+                # Форматируем каждую часть
+                region = cleaned_parts[0].zfill(2)[:2]
+                district = cleaned_parts[1].zfill(2)[:2]
+                quarter = cleaned_parts[2].zfill(6)[:7]  # Может быть 6 или 7 цифр
+                if len(quarter) == 7:
+                    quarter = quarter[:6]
+                parcel = cleaned_parts[3].zfill(3)[:10]
+                
+                return f"{region}:{district}:{quarter}:{parcel}"
         
-        # Проверяем формат
-        final_parts = cadastral.split(':')
-        if len(final_parts) == 4:
-            # Проверяем, что все части содержат только цифры
-            valid = True
-            for i, part in enumerate(final_parts):
-                if not part.isdigit():
-                    valid = False
-                    break
-                # Проверяем длину частей
-                if i == 0 and len(part) != 2:
-                    valid = False
-                elif i == 1 and len(part) != 2:
-                    valid = False
-                elif i == 2 and (len(part) < 6 or len(part) > 7):
-                    # Квартал может быть 6 или 7 цифр
-                    pass
-                elif i == 3 and len(part) == 0:
-                    valid = False
-            
-            if valid:
-                # Форматируем квартал до 6 цифр
-                if len(final_parts[2]) == 7:
-                    final_parts[2] = final_parts[2][:6]
-                cadastral = f"{final_parts[0]}:{final_parts[1]}:{final_parts[2]}:{final_parts[3]}"
-                return cadastral
-        
-        # Если не удалось нормализовать, возвращаем None
+        # Если не удалось нормализовать, возвращаем исходное значение
         return None
     
     def parse_phone(self, value):
         """Парсинг и форматирование телефона"""
         if not value:
             return None
-        
+
         # Извлекаем только цифры
         digits = re.sub(r'\D', '', str(value))
-        
+
         if not digits:
             return None
-        
-        # Если есть 10-11 цифр, это номер телефона
-        if len(digits) == 11 and digits.startswith('8'):
-            digits = '7' + digits[1:]
-        elif len(digits) == 10:
-            digits = '7' + digits
-        elif len(digits) == 11 and digits.startswith('7'):
-            pass
-        else:
-            # Если меньше 10 цифр - вероятно не телефон
-            if len(digits) < 10:
+
+        # Приводим к 11-значному формату с 7 в начале
+        if len(digits) == 11:
+            if digits.startswith('8'):
+                digits = '7' + digits[1:]  # Меняем 8 на 7
+            elif digits.startswith('7'):
+                pass  # Уже правильный формат
+            else:
                 return None
-        
-        # Форматируем: +7 (XXX) XXX-XX-XX
+        elif len(digits) == 10:
+            digits = '7' + digits  # Добавляем 7 в начало
+        else:
+            return None
+
+        # Проверяем, что получился валидный номер
         if len(digits) == 11 and digits.startswith('7'):
-            return f"+7 ({digits[1:4]}) {digits[4:7]}-{digits[7:9]}-{digits[9:11]}"
-        
+            # Форматируем: +7 (XXX) XXX-XX-XX
+            formatted = f"+7 ({digits[1:4]}) {digits[4:7]}-{digits[7:9]}-{digits[9:11]}"
+            return formatted
+
         return None
     
     def extract_phones(self, text):
@@ -179,22 +181,31 @@ class ExcelImporter:
         phones = []
         text = str(text)
         
-        # Ищем номера телефонов в разных форматах
-        patterns = [
-            r'(\+?7[-\s]?\(?\d{3}\)?[-\s]?\d{3}[-\s]?\d{2}[-\s]?\d{2})',
-            r'(8[-\s]?\(?\d{3}\)?[-\s]?\d{3}[-\s]?\d{2}[-\s]?\d{2})',
-            r'(\d{3}[-\s]?\d{3}[-\s]?\d{2}[-\s]?\d{2})',
-            r'(\d{10,11})',
-        ]
+        # Сначала убираем все не-цифровые символы и ищем последовательности цифр
+        # Ищем группы цифр длиной 10-11
+        digit_groups = re.findall(r'\d{10,11}', re.sub(r'\D', ' ', text))
         
-        for pattern in patterns:
-            matches = re.findall(pattern, text)
-            for match in matches:
-                phone = self.parse_phone(match)
-                if phone and phone not in phones:
-                    phones.append(phone)
+        for digits in digit_groups:
+            phone = self.parse_phone(digits)
+            if phone and phone not in phones:
+                phones.append(phone)
         
-        return phones
+        # Если не нашли, пробуем более сложные паттерны
+        if not phones:
+            patterns = [
+                r'(\+?7[-\s]?\(?\d{3}\)?[-\s]?\d{3}[-\s]?\d{2}[-\s]?\d{2})',
+                r'(8[-\s]?\(?\d{3}\)?[-\s]?\d{3}[-\s]?\d{2}[-\s]?\d{2})',
+                r'(\d{3}[-\s]?\d{3}[-\s]?\d{2}[-\s]?\d{2})',
+            ]
+            
+            for pattern in patterns:
+                matches = re.findall(pattern, text)
+                for match in matches:
+                    phone = self.parse_phone(match)
+                    if phone and phone not in phones:
+                        phones.append(phone)
+        
+        return phones[:3]  # Возвращаем не более 3 номеров
     
     def extract_email(self, text):
         """Извлечь email из текста"""
@@ -232,10 +243,16 @@ class ExcelImporter:
         
         date_str = str(value).strip()
         
-        # Убираем "г" и другие символы
+        # Убираем "г", "г." и другие символы
+        date_str = re.sub(r'[г\.]', '', date_str, flags=re.IGNORECASE)
         date_str = re.sub(r'[^\d\.\-/]', '', date_str)
         
-        formats = ['%d.%m.%Y', '%Y-%m-%d', '%d/%m/%Y', '%d.%m.%y', '%d.%m.%Y']
+        formats = [
+            '%d.%m.%Y', '%d.%m.%y', 
+            '%Y-%m-%d', 
+            '%d/%m/%Y', '%d/%m/%y',
+            '%d.%m.%Y', '%d.%m.%y',
+        ]
         
         for fmt in formats:
             try:
@@ -252,9 +269,10 @@ class ExcelImporter:
         
         name = str(name).strip()
         
-        # Убираем лишние символы и вопросы
-        name = re.sub(r'[?!@#$%^&*()]', '', name)
+        # Убираем лишние символы
+        name = re.sub(r'[?!@#$%^&*()]+', '', name)
         name = re.sub(r'\?+', '', name)
+        name = re.sub(r'!+', '', name)
         
         # Убираем слова-маркеры
         markers = ['СПК', 'СТ', 'С.Т', 'СНТ', 'ПК', 'Строитель', 'Строителб']
@@ -264,8 +282,13 @@ class ExcelImporter:
         # Убираем лишние пробелы
         name = ' '.join(name.split())
         
-        # Приводим к правильному регистру
-        name = name.title()
+        # Приводим к правильному регистру (первая буква заглавная)
+        name_parts = name.split()
+        formatted_parts = []
+        for part in name_parts:
+            if part:
+                formatted_parts.append(part.capitalize())
+        name = ' '.join(formatted_parts)
         
         return name if len(name) > 3 else None
     
@@ -299,37 +322,38 @@ class ExcelImporter:
             # Пропускаем заголовки (первая строка)
             start_row = 2
             
-            # Словарь для отслеживания уже созданных участков
-            created_plots = {}
-            
             for row_idx, row in enumerate(ws.iter_rows(min_row=start_row, values_only=True), start=start_row):
                 if not row or not any(row):
                     continue
                 
-                # Извлекаем данные по столбцам:
-                # A(0) - №№, B(1) - №участка, C(2) - ФИО, D(3) - метраж, 
-                # E(4) - дата, F(5) - кадастр, G(6) - email, H(7) - примечания
-                plot_number = self._get_cell_value(row, 1)  # B
-                owner_name_raw = self._get_cell_value(row, 2)  # C
-                area_raw = self._get_cell_value(row, 3)  # D
-                date_raw = self._get_cell_value(row, 4)  # E
-                cadastral_raw = self._get_cell_value(row, 5)  # F
-                email_raw = self._get_cell_value(row, 6)  # G
+                # Извлекаем данные по столбцам (индексы 0-7):
+                # 0 - №участка, 1 - ФИО, 2 - метраж, 3 - дата, 
+                # 4 - кадастр, 5 - email, 6 - телефон, 7 - примечания
+                plot_number = self._get_cell_value(row, 0)  # A
+                owner_name_raw = self._get_cell_value(row, 1)  # B
+                area_raw = self._get_cell_value(row, 2)  # C
+                date_raw = self._get_cell_value(row, 3)  # D
+                cadastral_raw = self._get_cell_value(row, 4)  # E
+                email_raw = self._get_cell_value(row, 5)  # F
+                phone_raw = self._get_cell_value(row, 6)  # G
                 notes_raw = self._get_cell_value(row, 7)  # H
                 
                 # Пропускаем строки без номера участка
                 if not plot_number:
                     continue
                 
+                # Обработка номеров участков с буквами (18а, 44а и т.д.)
+                plot_number_str = str(plot_number).strip().upper()
+                
                 # Нормализуем ФИО
                 owner_name = self.normalize_name(owner_name_raw)
                 
                 # Пропускаем служебные строки
-                if owner_name and ('правление' in owner_name.lower() or '????' in owner_name):
+                if owner_name and ('правление' in owner_name.lower()):
                     continue
                 
                 self.stats['total_rows'] += 1
-                print(f"\n[{row_idx}] Участок {plot_number} - {owner_name or 'Нет ФИО'}")
+                print(f"\n[{row_idx}] Участок {plot_number_str} - {owner_name or 'Нет ФИО'}")
                 
                 try:
                     # Обработка площади
@@ -346,6 +370,8 @@ class ExcelImporter:
                     cadastral = self.normalize_cadastral(cadastral_raw)
                     if cadastral:
                         print(f"  → Кадастровый номер: {cadastral}")
+                    elif cadastral_raw:
+                        print(f"  → Кадастровый номер (не удалось нормализовать): {cadastral_raw}")
                     
                     # Создаем или получаем владельца (если есть ФИО)
                     owner = None
@@ -353,36 +379,49 @@ class ExcelImporter:
                         owner = self._get_or_create_owner(owner_name)
                         if owner:
                             # Обрабатываем контакты
-                            self._process_contacts(owner, email_raw, notes_raw)
+                            self._process_contacts(owner, email_raw, phone_raw, notes_raw)
                     
                     # Создаем или получаем участок
-                    plot = self._get_or_create_plot(plot_number, cadastral, area, notes_raw)
+                    plot = self._get_or_create_plot(plot_number_str, cadastral, area, notes_raw)
                     
                     if plot:
-                        # Обновляем кадастровый номер если он есть
-                        if cadastral and not plot.cadastral_number:
-                            plot.cadastral_number = cadastral
-                            plot.save(update_fields=['cadastral_number'])
-                            self.stats['cadastral_updated'] += 1
-                            print(f"  → Кадастровый номер добавлен")
+                        # Обновляем кадастровый номер если он есть и отличается
+                        if cadastral and (not plot.cadastral_number or plot.cadastral_number != cadastral):
+                            # Проверяем, не занят ли кадастровый номер другим участком
+                            existing = LandPlot.objects.filter(cadastral_number=cadastral).exclude(id=plot.id).first()
+                            if existing:
+                                self._add_warning(row_idx, f"Кадастровый номер {cadastral} уже используется участком {existing.plot_number}")
+                            else:
+                                plot.cadastral_number = cadastral
+                                plot.save(update_fields=['cadastral_number'])
+                                self.stats['cadastral_updated'] += 1
+                                print(f"  → Кадастровый номер обновлен: {cadastral}")
                         
                         # Обновляем площадь если она есть и отличается
-                        if area and plot.area_sqm != area:
+                        if area and (not plot.area_sqm or abs(plot.area_sqm - area) > 0.01):
                             plot.area_sqm = area
                             plot.save(update_fields=['area_sqm'])
-                            print(f"  → Площадь обновлена")
+                            print(f"  → Площадь обновлена: {area} м²")
                         
                         # Связываем участок с владельцем
-                        if owner and not plot.owners.filter(id=owner.id).exists():
+                        if owner:
                             from users.models import Ownership
-                            Ownership.objects.create(
-                                owner=owner,
-                                land_plot=plot,
-                                share='1/1',
-                                ownership_since=issue_date,
-                                document_basis=f"Импорт из Excel {datetime.now().strftime('%d.%m.%Y')}"
-                            )
-                            print(f"  → Связан с владельцем")
+                            ownership_exists = Ownership.objects.filter(
+                                owner=owner, 
+                                land_plot=plot
+                            ).exists()
+                            
+                            if not ownership_exists:
+                                Ownership.objects.create(
+                                    owner=owner,
+                                    land_plot=plot,
+                                    share='1/1',
+                                    ownership_since=issue_date,
+                                    document_basis=f"Импорт из Excel {datetime.now().strftime('%d.%m.%Y')}"
+                                )
+                                print(f"  → Связан с владельцем")
+                            else:
+                                print(f"  → Связь с владельцем уже существует")
                     
                 except Exception as e:
                     self._add_error(row_idx, f"Ошибка: {str(e)}")
@@ -398,74 +437,86 @@ class ExcelImporter:
             print(f"  Добавлено контактов: {self.stats['contacts_added']}")
             print(f"  Обновлено кадастровых номеров: {self.stats['cadastral_updated']}")
             print(f"  Ошибок: {self.stats['errors']}")
+            print(f"  Предупреждений: {len(self.warnings)}")
             
             return self.stats
             
         except Exception as e:
             self.errors.append(f"Ошибка открытия файла: {str(e)}")
+            logger.exception("Ошибка импорта")
             return self.stats
     
-    def _process_contacts(self, owner, email_raw, notes_raw):
+    def _process_contacts(self, owner, email_raw, phone_raw, notes_raw):
         """Обработка контактов"""
-        # Email из отдельного столбца
+        # Обработка email из отдельного столбца
         if email_raw:
-            # Проверяем, похоже ли на email
-            if '@' in str(email_raw):
-                email = self.extract_email(email_raw)
-                if email:
-                    self._add_contact(owner, 'em', email)
-                    print(f"  → Email: {email}")
-            else:
-                # Возможно email в примечаниях
-                email_from_notes = self.extract_email(email_raw)
-                if email_from_notes:
-                    self._add_contact(owner, 'em', email_from_notes)
-                    print(f"  → Email: {email_from_notes}")
+            email = self.extract_email(email_raw)
+            if email:
+                self._add_contact(owner, 'em', email)
+                print(f"  → Email: {email}")
         
-        # Телефоны из примечаний
+        # Обработка телефона из отдельного столбца
+        if phone_raw:
+            phones = self.extract_phones(phone_raw)
+            for phone in phones[:2]:  # Максимум 2 телефона
+                if phone:
+                    self._add_contact(owner, 'ph', phone)
+                    print(f"  → Телефон: {phone}")
+        
+        # Поиск дополнительных контактов в примечаниях
         if notes_raw:
+            # Ищем телефоны в примечаниях
             phones = self.extract_phones(notes_raw)
             for phone in phones[:3]:
                 if phone:
                     self._add_contact(owner, 'ph', phone)
-                    print(f"  → Телефон: {phone}")
+                    print(f"  → Телефон из примечаний: {phone}")
             
-            # Если нет email, пробуем найти в примечаниях
+            # Ищем email в примечаниях
             if not email_raw:
-                email_from_notes = self.extract_email(notes_raw)
-                if email_from_notes:
-                    self._add_contact(owner, 'em', email_from_notes)
-                    print(f"  → Email: {email_from_notes}")
+                email = self.extract_email(notes_raw)
+                if email:
+                    self._add_contact(owner, 'em', email)
+                    print(f"  → Email из примечаний: {email}")
     
     def _get_or_create_owner(self, full_name):
         """Получить или создать владельца"""
         # Очищаем имя для поиска
         search_name = full_name.replace('ё', 'е')
         
-        # Ищем существующего владельца
-        owner = Owner.objects.filter(
-            models.Q(full_name__iexact=full_name) |
-            models.Q(full_name__iregex=r'^' + re.escape(full_name[:20]))
-        ).first()
+        # Ищем существующего владельца (точное совпадение)
+        owner = Owner.objects.filter(full_name__iexact=full_name).first()
         
         if owner:
             self.stats['owners_found'] += 1
             return owner
         
+        # Ищем похожего владельца
+        owner = Owner.objects.filter(full_name__icontains=full_name[:20]).first()
+        
+        if owner:
+            self.stats['owners_found'] += 1
+            self._add_warning(0, f"Найден похожий владелец для '{full_name}': {owner.full_name}")
+            return owner
+        
         # Создаем нового владельца
-        owner = Owner.objects.create(full_name=full_name)
-        self.stats['owners_created'] += 1
-        print(f"  ✓ Создан владелец: {full_name}")
-        
-        # Если есть организация, создаем членство
-        if self.organization:
-            OrganizationMembership.objects.get_or_create(
-                owner=owner,
-                organization=self.organization,
-                defaults={'status': 'active'}
-            )
-        
-        return owner
+        try:
+            owner = Owner.objects.create(full_name=full_name)
+            self.stats['owners_created'] += 1
+            print(f"  ✓ Создан владелец: {full_name}")
+            
+            # Если есть организация, создаем членство
+            if self.organization:
+                OrganizationMembership.objects.get_or_create(
+                    owner=owner,
+                    organization=self.organization,
+                    defaults={'status': 'active'}
+                )
+            
+            return owner
+        except Exception as e:
+            self._add_error(0, f"Ошибка создания владельца '{full_name}': {str(e)}")
+            return None
     
     def _get_or_create_plot(self, plot_number, cadastral_number, area_sqm, notes):
         """Получить или создать участок"""
@@ -479,13 +530,30 @@ class ExcelImporter:
             self.stats['plots_found'] += 1
             return plot
         
+        # Если нет кадастрового номера, создаем временный
+        if not cadastral_number:
+            # Генерируем уникальный временный кадастровый номер
+            import time
+            timestamp = str(int(time.time()))[-6:]
+            cadastral_number = f"00:00:000000:{timestamp}"
+            self._add_warning(0, f"Временный кадастровый номер для участка {plot_number}: {cadastral_number}")
+        
+        # Проверяем уникальность кадастрового номера
+        existing = LandPlot.objects.filter(cadastral_number=cadastral_number).first()
+        if existing:
+            self._add_error(0, f"Кадастровый номер {cadastral_number} уже занят участком {existing.plot_number}")
+            # Создаем с другим кадастровым номером
+            import time
+            timestamp = str(int(time.time()))[-6:]
+            cadastral_number = f"00:00:000000:{timestamp}"
+        
         # Создаем новый участок
         try:
             plot = LandPlot.objects.create(
                 plot_number=plot_number,
-                cadastral_number=cadastral_number or '',
-                area_sqm=area_sqm or 600,
-                notes=f"Импортировано из Excel. {notes[:200] if notes else ''}",
+                cadastral_number=cadastral_number,
+                area_sqm=area_sqm or 600.0,
+                notes=f"Импортировано из Excel. {notes[:200] if notes else ''}"[:500],
                 status='active',
                 organization=self.organization
             )
@@ -493,7 +561,7 @@ class ExcelImporter:
             print(f"  ✓ Создан участок: {plot_number} (площадь: {area_sqm or 600} м²)")
             return plot
         except Exception as e:
-            print(f"  ✗ Ошибка создания участка {plot_number}: {e}")
+            self._add_error(0, f"Ошибка создания участка {plot_number}: {str(e)}")
             return None
     
     def _add_contact(self, owner, contact_type, value):
@@ -524,9 +592,15 @@ class ExcelImporter:
             )
             self.stats['contacts_added'] += 1
         except Exception as e:
-            pass
+            self._add_warning(0, f"Не удалось добавить контакт {value}: {str(e)}")
     
     def _add_error(self, row, message):
         """Добавить ошибку"""
-        self.errors.append(f"Строка {row}: {message}")
+        error_msg = f"Строка {row}: {message}" if row > 0 else message
+        self.errors.append(error_msg)
         self.stats['errors'] += 1
+    
+    def _add_warning(self, row, message):
+        """Добавить предупреждение"""
+        warning_msg = f"Строка {row}: {message}" if row > 0 else message
+        self.warnings.append(warning_msg)
