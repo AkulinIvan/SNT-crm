@@ -230,28 +230,11 @@
     }
     
     function downloadTemplate() {
-        // Создаем шаблон Excel
-        const template = [
-            ['№участка', 'ФИО собственника', 'метраж', 'Дата выдачи', 'Кадастровый номер', 'элект.почта', 'телефон', 'примечания'],
-            ['1', 'Иванов Иван Иванович', '600', '15.01.2020', '50:20:0010101:123', 'ivanov@example.com', '+79161234567', ''],
-            ['2', 'Петров Петр Петрович', '800', '20.03.2019', '50:20:0010101:456', 'petrov@example.com', '+79167654321', ''],
-        ];
-        
-        // Создаем CSV для скачивания
-        const csvContent = template.map(row => row.join(',')).join('\n');
-        const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' });
-        const link = document.createElement('a');
-        const url = URL.createObjectURL(blob);
-        link.href = url;
-        link.setAttribute('download', 'template_import.csv');
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-        
-        showAlert('Шаблон скачан. Вы можете открыть его в Excel и заполнить данными.', 'success');
+        // Просто переходим по ссылке на серверный view
+        window.location.href = '/import/template/';
+        showAlert('Шаблон скачивается. Откройте его в Excel и заполните данными.', 'success');
     }
-    
+
     function escapeHtml(text) {
         const div = document.createElement('div');
         div.textContent = text;

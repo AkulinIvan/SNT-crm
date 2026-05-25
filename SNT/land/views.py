@@ -906,3 +906,108 @@ class ExcelImportView(View):
             # Удаляем временный файл
             if os.path.exists(tmp_file_path):
                 os.unlink(tmp_file_path)
+                
+                
+class ExcelTemplateView(View):
+    """Скачивание шаблона Excel для импорта"""
+    
+    def get(self, request):
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        from django.http import HttpResponse
+        from datetime import datetime
+        
+        # Создаем новую книгу
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Шаблон импорта"
+        
+        # Заголовки
+        headers = [
+            '№участка', 
+            'ФИО собственника', 
+            'метраж', 
+            'Дата выдачи', 
+            'Кадастровый номер', 
+            'элект.почта', 
+            'телефон', 
+            'примечания'
+        ]
+        
+        # Стили для заголовков
+        header_font = Font(name='Arial', size=11, bold=True, color='FFFFFF')
+        header_fill = PatternFill(start_color='2c7a47', end_color='2c7a47', fill_type='solid')
+        header_alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+        border = Border(
+            left=Side(style='thin'),
+            right=Side(style='thin'),
+            top=Side(style='thin'),
+            bottom=Side(style='thin')
+        )
+        
+        # Записываем заголовки
+        for col, header in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_alignment
+            cell.border = border
+        
+        # Примеры данных
+        examples = [
+            ['1', 'Иванов Иван Иванович', 600, '15.01.2020', '50:20:0010101:123', 'ivanov@example.com', '+7(916)123-45-67', 'Участок у дороги'],
+            ['2', 'Петров Петр Петрович', 800, '20.03.2019', '50:20:0010101:456', 'petrov@example.com', '+7(916)765-43-21', ''],
+            ['10А', 'Сидорова Мария Петровна', 650, '10.05.2021', '', 'maria@example.com', '', 'Телефон утерян'],
+            ['15', 'Кузнецов Алексей Сергеевич', 720, '01.07.2018', '50:20:0010101:789', 'kuznetsov@example.com', '+7(903)111-22-33', 'Два собственника'],
+            ['', '', '', '', '', '', '', ''],  # Пустая строка для заполнения
+        ]
+        
+        # Стили для данных
+        data_font = Font(name='Arial', size=10)
+        data_alignment = Alignment(horizontal='left', vertical='center')
+        
+        # Записываем примеры
+        for row_idx, row_data in enumerate(examples, 2):
+            for col_idx, value in enumerate(row_data, 1):
+                cell = ws.cell(row=row_idx, column=col_idx, value=value)
+                cell.font = data_font
+                cell.alignment = data_alignment
+                cell.border = border
+        
+        # Настраиваем ширину столбцов
+        column_widths = {
+            'A': 12,  # №участка
+            'B': 30,  # ФИО
+            'C': 10,  # метраж
+            'D': 12,  # Дата
+            'E': 25,  # Кадастровый номер
+            'F': 25,  # email
+            'G': 20,  # телефон
+            'H': 30,  # примечания
+        }
+        
+        for col_letter, width in column_widths.items():
+            ws.column_dimensions[col_letter].width = width
+        
+        # Высота строки заголовка
+        ws.row_dimensions[1].height = 30
+        
+        # Добавляем примечание к заголовкам
+        ws.cell(row=1, column=1).comment = None  # Можно добавить комментарии если нужно
+        
+        # Добавляем фильтры
+        ws.auto_filter.ref = f"A1:H{len(examples) + 1}"
+        
+        # Замораживаем первую строку
+        ws.freeze_panes = 'A2'
+        
+        # Создаем HTTP ответ
+        response = HttpResponse(
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        response['Content-Disposition'] = 'attachment; filename="template_import.xlsx"'
+        
+        # Сохраняем в ответ
+        wb.save(response)
+        
+        return response
