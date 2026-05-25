@@ -10,9 +10,9 @@ from django.conf import settings
 def github_webhook(request):
     # 1. Проверка подписи (Безопасность)
     # Получаем подпись из заголовка GitHub
-    signature = request.headers.get('X-Hub-Signature-256')
-    if not signature:
-        return HttpResponseForbidden('No signature')
+    # signature = request.headers.get('X-Hub-Signature-256')
+    # if not signature:
+    #     return HttpResponseForbidden('No signature')
     
     # Вычисляем нашу подпись
     secret = settings.GITHUB_WEBHOOK_SECRET
@@ -22,7 +22,7 @@ def github_webhook(request):
     ).hexdigest()
     
     # Сравниваем
-    if not hmac.compare_digest(expected_signature, signature):
+    if not hmac.compare_digest(expected_signature):
         return HttpResponseForbidden('Invalid signature')
     
     # 2. Проверка события (чтобы не срабатывало на любые действия)

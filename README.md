@@ -32,5 +32,5 @@
 - Redis (опционально, для кэширования)
 - Asterisk (опционально, для телефонии)
 - Системные зависимости для WeasyPrint:
-  ```bash
+
   apt-get install -y libcairo2-dev pkg-config python3-dev
