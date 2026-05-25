@@ -147,7 +147,8 @@ class OwnerDetailSerializer(serializers.ModelSerializer):
     total_debt = serializers.SerializerMethodField()
     is_debtor = serializers.SerializerMethodField()
     memberships = serializers.SerializerMethodField()
-
+    tariff_limits = serializers.SerializerMethodField()
+    
     class Meta:
         model = Owner
         fields = [
@@ -155,7 +156,7 @@ class OwnerDetailSerializer(serializers.ModelSerializer):
             'primary_phone', 'primary_email',
             'contacts', 'ownerships',
             'total_debt', 'is_debtor', 'memberships',
-            'created_at', 'updated_at',
+            'created_at', 'updated_at', 'tariff_limits',
         ]
 
     def get_total_debt(self, obj):
@@ -170,7 +171,36 @@ class OwnerDetailSerializer(serializers.ModelSerializer):
         memberships = obj.memberships.select_related('organization').all()
         return OrganizationMembershipSerializer(memberships, many=True).data
 
-
+    def get_tariff_limits(self, obj):
+        """Информация о лимитах тарифа для организации"""
+        org = obj.organization
+        if not org:
+            return None
+        
+        subscription = getattr(org, 'subscription', None)
+        if not subscription or not subscription.is_active:
+            return {
+                'has_subscription': False,
+                'message': 'Нет активной подписки'
+            }
+        
+        tariff = subscription.tariff
+        
+        return {
+            'has_subscription': True,
+            'tariff_name': tariff.name,
+            'owners_limit': {
+                'current': org.owners_count,
+                'max': tariff.max_owners,
+                'remaining': max(0, tariff.max_owners - org.owners_count)
+            },
+            'plots_limit': {
+                'current': org.plots_count,
+                'max': tariff.max_plots,
+                'remaining': max(0, tariff.max_plots - org.plots_count)
+            }
+        }
+        
 class OwnerCreateUpdateSerializer(serializers.ModelSerializer):
     """
     Сериализатор для создания и редактирования владельца.

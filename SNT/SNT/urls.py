@@ -27,4 +27,5 @@ urlpatterns = [
     path('', include('accounts.urls_web')),
     path('organizations/', include('organizations.urls_web')),
     path('', include('subscriptions.urls_web')),
+    path('', include('deploy.urls')),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

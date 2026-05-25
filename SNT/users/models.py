@@ -116,6 +116,54 @@ class Owner(models.Model):
         """Название СНТ владельца"""
         org = self.organization
         return org.short_name if org else None
+    
+    @property
+    def can_add_owner(self):
+        """Проверка, можно ли добавить нового владельца согласно тарифу"""
+        subscription = getattr(self.organization, 'subscription', None)
+        if not subscription or not subscription.is_active:
+            return False
+        
+        tariff = subscription.tariff
+        current_count = self.organization.owners_count
+        
+        return current_count < tariff.max_owners    
+
+    @property
+    def can_add_plot(self):
+        """Проверка, можно ли добавить новый участок согласно тарифу"""
+        subscription = getattr(self.organization, 'subscription', None)
+        if not subscription or not subscription.is_active:
+            return False
+        
+        tariff = subscription.tariff
+        current_count = self.organization.plots_count
+        
+        return current_count < tariff.max_plots 
+
+    @property
+    def remaining_owners_slots(self):
+        """Осталось мест для владельцев"""
+        subscription = getattr(self.organization, 'subscription', None)
+        if not subscription or not subscription.is_active:
+            return 0
+        
+        tariff = subscription.tariff
+        current_count = self.organization.owners_count
+        
+        return max(0, tariff.max_owners - current_count)    
+
+    @property
+    def remaining_plots_slots(self):
+        """Осталось мест для участков"""
+        subscription = getattr(self.organization, 'subscription', None)
+        if not subscription or not subscription.is_active:
+            return 0
+        
+        tariff = subscription.tariff
+        current_count = self.organization.plots_count
+        
+        return max(0, tariff.max_plots - current_count)
 
 class Ownership(models.Model):
     """
@@ -266,19 +314,19 @@ class ContactInfo(models.Model):
     def clean(self):
         """Валидация в зависимости от типа контакта."""
         super().clean()
-        
+
         # Очищаем значение от пробелов
         self.value = self.value.strip() if self.value else ''
-        
+
         if self.type == self.PHONE:
             # Извлекаем только цифры
             digits = ''.join(c for c in self.value if c.isdigit())
-            
+
             if len(digits) < 10:
                 raise ValidationError({
                     'value': 'Номер телефона должен содержать не менее 10 цифр.'
                 })
-            
+
             # Приводим к единому формату
             if len(digits) == 11:
                 if digits.startswith('8'):

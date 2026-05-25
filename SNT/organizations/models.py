@@ -106,6 +106,98 @@ class Organization(models.Model):
             self.phone = ''.join(c for c in self.phone if c.isdigit() or c in '+()- ')
         super().save(*args, **kwargs)
 
+    @property
+    def owners_count(self):
+        """Количество владельцев в организации"""
+        return self.memberships.filter(status='active').count()
+
+    @property
+    def plots_count(self):
+        """Количество участков в организации"""
+        return self.land_plots.count()
+
+    @property
+    def users_count(self):
+        """
+        Количество пользователей в организации.
+        Пользователи - это сотрудники/администраторы, привязанные к организации.
+        Если у вас нет модели UserOrganization, возвращаем 1 (владелец организации)
+        """
+        # Проверяем, есть ли связь User -> Organization
+        if hasattr(self, 'users'):
+            return self.users.count()
+        
+        # Базовая реализация: считаем уникальных пользователей через членства
+        # Если у вас есть поле user в OrganizationMembership
+        if hasattr(self.memberships.first(), 'user'):
+            return self.memberships.exclude(user__isnull=True).values('user').distinct().count()
+        
+        # По умолчанию возвращаем 1 (текущий пользователь или владелец)
+        return 1
+
+    def check_tariff_limit(self, resource_type='owners'):
+        """
+        Проверка лимитов тарифа
+        
+        Args:
+            resource_type: 'owners', 'plots', 'users'
+        
+        Returns:
+            (is_allowed, current, max, message)
+        """
+        subscription = getattr(self, 'subscription', None)
+        if not subscription or not subscription.is_active:
+            return False, 0, 0, "Нет активной подписки"
+        
+        tariff = subscription.tariff
+        
+        # Безопасное получение текущих значений
+        current_counts = {
+            'owners': self.owners_count,
+            'plots': self.plots_count,
+            'users': self._get_safe_users_count(),
+        }
+        
+        max_limits = {
+            'owners': tariff.max_owners,
+            'plots': tariff.max_plots,
+            'users': tariff.max_users,
+        }
+        
+        labels = {
+            'owners': 'владельцев',
+            'plots': 'участков',
+            'users': 'пользователей',
+        }
+        
+        if resource_type not in current_counts:
+            return True, 0, 0, ""
+        
+        current = current_counts[resource_type]
+        max_limit = max_limits[resource_type]
+        label = labels[resource_type]
+        
+        if current >= max_limit:
+            return False, current, max_limit, f"Достигнут лимит {label} ({current}/{max_limit})"
+        
+        return True, current, max_limit, f"Доступно {max_limit - current} {label}"
+
+    def _get_safe_users_count(self):
+        """Безопасное получение количества пользователей"""
+        try:
+            # Если есть модель UserOrganization
+            if hasattr(self, 'user_organizations'):
+                return self.user_organizations.count()
+            
+            # Если есть поле user в OrganizationMembership
+            first_membership = self.memberships.first()
+            if first_membership and hasattr(first_membership, 'user'):
+                return self.memberships.exclude(user__isnull=True).values('user').distinct().count()
+            
+            # Если пользователи не привязаны к организации, возвращаем 1
+            return 1
+        except Exception:
+            return 1
 
 class OrganizationMembership(models.Model):
     """

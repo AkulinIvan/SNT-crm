@@ -52,6 +52,7 @@ INSTALLED_APPS = [
     'payments',
     'organizations',
     'subscriptions',
+    'deploy',
     
 ]
 
@@ -88,6 +89,7 @@ MIDDLEWARE = [
     'accounts.middleware.UserActivityMiddleware',
     'accounts.middleware.OrganizationMiddleware',
     'common.middleware.RequestMiddleware',
+    'common.middleware.TariffLimitMiddleware',
 ]
 
 ROOT_URLCONF = 'SNT.urls'
@@ -256,4 +258,4 @@ DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 # Для разработки (чтобы не отправлять реальные письма)
 # EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
 
-# ,fhf,firf
+GITHUB_WEBHOOK_SECRET = os.getenv('GITHUB_WEBHOOK_SECRET', ''),

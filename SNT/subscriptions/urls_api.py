@@ -8,4 +8,5 @@ router.register(r'subscription', SubscriptionViewSet, basename='subscription')
 
 urlpatterns = [
     path('', include(router.urls)),
+    path('tariff-info/', SubscriptionViewSet.as_view({'get': 'tariff_info'}), name='tariff-info'),
 ]

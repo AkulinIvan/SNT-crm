@@ -815,7 +815,98 @@ class LandPlotViewSet(OrganizationMixin, viewsets.ModelViewSet):
             'error_details': errors[:10],  # Первые 10 ошибок
         })
 
+    def create(self, request, *args, **kwargs):
+        """Создание участка с проверкой лимитов тарифа"""
+        organization = request.current_organization
+        
+        if organization:
+            try:
+                is_allowed, current, max_limit, message = organization.check_tariff_limit('plots')
+                
+                if not is_allowed:
+                    return Response(
+                        {
+                            'detail': message,
+                            'code': 'tariff_limit_reached',
+                            'current': current,
+                            'max': max_limit,
+                            'tariff': organization.subscription.tariff.name if hasattr(organization, 'subscription') and organization.subscription else None
+                        },
+                        status=status.HTTP_403_FORBIDDEN
+                    )
+            except Exception as e:
+                # Логируем ошибку, но не блокируем создание
+                logger.error(f"Ошибка проверки лимитов тарифа: {e}")
+        
+        return super().create(request, *args, **kwargs)
     
+    @action(detail=False, methods=['get'], url_path='tariff-warning')
+    def tariff_warning(self, request):
+        """Проверка приближения к лимитам тарифа"""
+        organization = request.current_organization
+        
+        if not organization:
+            return Response({'detail': 'Организация не найдена'}, status=status.HTTP_404_NOT_FOUND)
+        
+        subscription = getattr(organization, 'subscription', None)
+        
+        if not subscription or not subscription.is_active:
+            return Response({
+                'has_subscription': False,
+                'warning': None,
+                'message': 'Нет активной подписки. Некоторые функции могут быть недоступны.'
+            })
+        
+        tariff = subscription.tariff
+        warnings = []
+        
+        # Проверка лимита владельцев
+        owners_current = organization.owners_count
+        owners_max = tariff.max_owners
+        owners_percent = (owners_current / owners_max * 100) if owners_max > 0 else 0
+        
+        if owners_percent >= 90:
+            warnings.append({
+                'type': 'owners',
+                'current': owners_current,
+                'max': owners_max,
+                'percent': round(owners_percent, 1),
+                'message': f'Достигнуто {owners_percent:.0f}% лимита владельцев ({owners_current}/{owners_max})'
+            })
+        
+        # Проверка лимита участков
+        plots_current = organization.plots_count
+        plots_max = tariff.max_plots
+        plots_percent = (plots_current / plots_max * 100) if plots_max > 0 else 0
+        
+        if plots_percent >= 90:
+            warnings.append({
+                'type': 'plots',
+                'current': plots_current,
+                'max': plots_max,
+                'percent': round(plots_percent, 1),
+                'message': f'Достигнуто {plots_percent:.0f}% лимита участков ({plots_current}/{plots_max})'
+            })
+        
+        # Проверка срока подписки
+        days_left = subscription.days_left
+        if days_left and days_left <= 30:
+            warnings.append({
+                'type': 'subscription',
+                'days_left': days_left,
+                'message': f'Подписка истекает через {days_left} дней. Рекомендуем продлить.'
+            })
+        
+        return Response({
+            'has_subscription': True,
+            'tariff': tariff.name,
+            'warnings': warnings,
+            'limits': {
+                'owners': {'current': owners_current, 'max': owners_max, 'percent': round(owners_percent, 1)},
+                'plots': {'current': plots_current, 'max': plots_max, 'percent': round(plots_percent, 1)},
+                'users': {'current': organization.users_count, 'max': tariff.max_users}
+            }
+        })
 
 class LandPlotListView(View):
     """Страница со списком участков."""

@@ -473,6 +473,83 @@ class OwnerViewSet(OrganizationMixin, viewsets.ModelViewSet):
         except (ValueError, IndexError):
             pass
         return False
+    
+    def create(self, request, *args, **kwargs):
+        """Создание владельца с проверкой лимитов тарифа"""
+        organization = request.current_organization
+        
+        if organization:
+            try:
+                is_allowed, current, max_limit, message = organization.check_tariff_limit('owners')
+                
+                if not is_allowed:
+                    return Response(
+                        {
+                            'detail': message,
+                            'code': 'tariff_limit_reached',
+                            'current': current,
+                            'max': max_limit,
+                            'tariff': organization.subscription.tariff.name if hasattr(organization, 'subscription') and organization.subscription else None
+                        },
+                        status=status.HTTP_403_FORBIDDEN
+                    )
+            except Exception as e:
+                # Логируем ошибку, но не блокируем создание
+                logger.error(f"Ошибка проверки лимитов тарифа: {e}")
+        
+        return super().create(request, *args, **kwargs)
+    
+    @action(detail=False, methods=['get'], url_path='tariff-info')
+    def tariff_info(self, request):
+        """Получить информацию о тарифных лимитах"""
+        organization = request.current_organization
+        
+        if not organization:
+            return Response({'detail': 'Организация не найдена'}, status=status.HTTP_404_NOT_FOUND)
+        
+        subscription = getattr(organization, 'subscription', None)
+        
+        if not subscription or not subscription.is_active:
+            return Response({
+                'has_subscription': False,
+                'message': 'Нет активной подписки'
+            })
+        
+        tariff = subscription.tariff
+        
+        return Response({
+            'has_subscription': True,
+            'tariff': {
+                'id': tariff.id,
+                'name': tariff.name,
+                'slug': tariff.slug,
+            },
+            'limits': {
+                'owners': {
+                    'current': organization.owners_count,
+                    'max': tariff.max_owners,
+                    'remaining': max(0, tariff.max_owners - organization.owners_count),
+                    'is_reached': organization.owners_count >= tariff.max_owners
+                },
+                'plots': {
+                    'current': organization.plots_count,
+                    'max': tariff.max_plots,
+                    'remaining': max(0, tariff.max_plots - organization.plots_count),
+                    'is_reached': organization.plots_count >= tariff.max_plots
+                },
+                'users': {
+                    'current': organization.users_count,
+                    'max': tariff.max_users,
+                    'remaining': max(0, tariff.max_users - organization.users_count),
+                    'is_reached': organization.users_count >= tariff.max_users
+                }
+            },
+            'subscription': {
+                'end_date': subscription.end_date,
+                'days_left': subscription.days_left,
+                'status': subscription.status
+            }
+        })
 
 
 class ContactInfoViewSet(viewsets.ModelViewSet):
