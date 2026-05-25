@@ -111,6 +111,19 @@
         <button class="btn btn-secondary" onclick="handleLogout()">🚪 Выйти из системы</button>
     </div>
 </div>
+
+<!-- Подписка -->
+<div class="table-container" style="margin-top: 24px;">
+    <div class="table-toolbar">
+        <span style="font-weight: 600;">⭐ Подписка</span>
+    </div>
+    <div id="subscription-info" style="padding: 20px;">
+        <div class="empty-state">
+            <div class="empty-icon">⏳</div>
+            <p>Загрузка информации о подписке...</p>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
@@ -124,13 +137,11 @@
             return;
         }
 
-        // Заголовок
         document.getElementById('profile-name').textContent = 
             '👤 ' + (userData.full_name || userData.username);
         document.getElementById('profile-role').textContent = 
             userData.role_display + (userData.position ? ' — ' + userData.position : '');
 
-        // Основная информация
         document.getElementById('info-username').textContent = userData.username;
         document.getElementById('info-last-name').textContent = userData.last_name || '—';
         document.getElementById('info-first-name').textContent = userData.first_name || '—';
@@ -139,7 +150,6 @@
         document.getElementById('info-phone').textContent = userData.phone || '—';
         document.getElementById('info-position').textContent = userData.position || '—';
 
-        // Системная информация
         document.getElementById('info-role-badge').innerHTML = getRoleBadge(userData.role);
         document.getElementById('info-status-badge').innerHTML = userData.is_active 
             ? '<span class="badge-status badge-active">Активен</span>' 
@@ -160,34 +170,32 @@
         return badges[role] || `<span class="badge-status badge-inactive">${role}</span>`;
     }
 
-    // Редактирование профиля
     function openEditProfileModal() {
         if (!userData) return;
-
         openModal('Редактировать профиль', `
             <div class="form-group">
                 <label>Имя</label>
-                <input type="text" id="edit-first-name" value="${escapeHtml(userData.first_name || '')}" placeholder="Иван">
+                <input type="text" id="edit-first-name" value="${escapeHtml(userData.first_name || '')}">
             </div>
             <div class="form-group">
                 <label>Фамилия</label>
-                <input type="text" id="edit-last-name" value="${escapeHtml(userData.last_name || '')}" placeholder="Иванов">
+                <input type="text" id="edit-last-name" value="${escapeHtml(userData.last_name || '')}">
             </div>
             <div class="form-group">
                 <label>Отчество</label>
-                <input type="text" id="edit-middle-name" value="${escapeHtml(userData.middle_name || '')}" placeholder="Иванович">
+                <input type="text" id="edit-middle-name" value="${escapeHtml(userData.middle_name || '')}">
             </div>
             <div class="form-group">
                 <label>Email</label>
-                <input type="email" id="edit-email" value="${escapeHtml(userData.email || '')}" placeholder="user@example.com">
+                <input type="email" id="edit-email" value="${escapeHtml(userData.email || '')}">
             </div>
             <div class="form-group">
                 <label>Телефон</label>
-                <input type="text" id="edit-phone" value="${escapeHtml(userData.phone || '')}" placeholder="+79161234567">
+                <input type="text" id="edit-phone" value="${escapeHtml(userData.phone || '')}">
             </div>
             <div class="form-group">
                 <label>Должность</label>
-                <input type="text" id="edit-position" value="${escapeHtml(userData.position || '')}" placeholder="Председатель">
+                <input type="text" id="edit-position" value="${escapeHtml(userData.position || '')}">
             </div>
         `, 'Сохранить', async () => {
             const payload = {
@@ -198,13 +206,10 @@
                 phone: document.getElementById('edit-phone').value.trim(),
                 position: document.getElementById('edit-position').value.trim(),
             };
-
-            // Обновляем профиль через API пользователей
             const result = await apiFetch(`/api/users/${userData.id}/`, {
                 method: 'PATCH',
                 body: JSON.stringify(payload),
             });
-
             if (result) {
                 showAlert('Профиль обновлён', 'success');
                 closeModal();
@@ -213,7 +218,6 @@
         });
     }
 
-    // Смена пароля
     function openChangePasswordModal() {
         openModal('Сменить пароль', `
             <div class="form-group">
@@ -223,7 +227,6 @@
             <div class="form-group">
                 <label>Новый пароль</label>
                 <input type="password" id="new-password" placeholder="Минимум 8 символов">
-                <small>Пароль должен содержать не менее 8 символов, включать буквы и цифры</small>
             </div>
             <div class="form-group">
                 <label>Подтверждение пароля</label>
@@ -233,22 +236,18 @@
             const oldPassword = document.getElementById('old-password').value;
             const newPassword = document.getElementById('new-password').value;
             const confirmPassword = document.getElementById('confirm-password').value;
-
             if (!oldPassword || !newPassword || !confirmPassword) {
                 showAlert('Заполните все поля', 'error');
                 return;
             }
-
             if (newPassword !== confirmPassword) {
                 showAlert('Пароли не совпадают', 'error');
                 return;
             }
-
             if (newPassword.length < 8) {
                 showAlert('Пароль должен содержать не менее 8 символов', 'error');
                 return;
             }
-
             const result = await apiFetch('/api/auth/change-password/', {
                 method: 'POST',
                 body: JSON.stringify({
@@ -257,7 +256,6 @@
                     confirm_password: confirmPassword,
                 }),
             });
-
             if (result) {
                 showAlert('Пароль успешно изменён', 'success');
                 closeModal();
@@ -268,6 +266,7 @@
     async function loadSubscriptionInfo() {
         const subscription = await apiFetch('/api/subscription/current/');
         const container = document.getElementById('subscription-info');
+        if (!container) return;
         
         if (subscription && subscription.id) {
             container.innerHTML = `
@@ -276,7 +275,7 @@
                         <strong>${subscription.tariff_name}</strong><br>
                         <span style="font-size: 0.85rem; color: var(--gray-500);">
                             Действует до: ${formatDate(subscription.end_date)}
-                            ${subscription.days_left ? ` (осталось ${subscription.days_left} дней)` : ''}
+                            ${subscription.days_left ? ' (осталось ' + subscription.days_left + ' дней)' : ''}
                         </span>
                     </div>
                     <a href="/subscription/plans/" class="btn btn-secondary btn-sm">Изменить тариф</a>

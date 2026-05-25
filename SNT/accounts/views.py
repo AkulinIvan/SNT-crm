@@ -130,40 +130,31 @@ class AuthViewSet(viewsets.ViewSet):
         POST /api/auth/register/
         Регистрация нового председателя с созданием СНТ.
         """
-        from organizations.models import Organization
-        
+        from organizations.models import Organization   
+
         data = request.data
-        org_data = data.get('organization', {})
-        # Создаем подписку (базовый тариф)
-        tariff = Tariff.objects.filter(slug='basic', is_active=True).first()
-        if tariff:
-            Subscription.objects.create(
-                organization=organization,
-                tariff=tariff,
-                status='trial',
-                start_date=timezone.now(),
-                end_date=timezone.now() + timezone.timedelta(days=tariff.trial_days)
-            )
+        org_data = data.get('organization', {}) 
+
         # Проверяем, не существует ли пользователь
         if User.objects.filter(username=data.get('username')).exists():
             return Response(
                 {'detail': 'Пользователь с таким логином уже существует'},
                 status=status.HTTP_400_BAD_REQUEST
-            )
-        
+            )   
+
         if data.get('email') and User.objects.filter(email=data.get('email')).exists():
             return Response(
                 {'detail': 'Пользователь с таким email уже существует'},
                 status=status.HTTP_400_BAD_REQUEST
-            )
-        
+            )   
+
         # Проверяем, не существует ли СНТ с таким ИНН
         if Organization.objects.filter(inn=org_data.get('inn')).exists():
             return Response(
                 {'detail': 'СНТ с таким ИНН уже зарегистрировано'},
                 status=status.HTTP_400_BAD_REQUEST
-            )
-        
+            )   
+
         # Создаем пользователя
         user = User.objects.create_user(
             username=data.get('username'),
@@ -174,12 +165,12 @@ class AuthViewSet(viewsets.ViewSet):
             phone=data.get('phone', ''),
             role='manager',  # Председатель
             is_active=True
-        )
-        
+        )   
+
         if data.get('middle_name'):
             user.middle_name = data.get('middle_name')
-            user.save()
-        
+            user.save() 
+
         # Создаем СНТ
         organization = Organization.objects.create(
             name=org_data.get('name'),
@@ -193,12 +184,23 @@ class AuthViewSet(viewsets.ViewSet):
             bank_corr_account=org_data.get('bank_corr_account'),
             chairman=user,
             is_active=True
-        )
-        
+        )   
+
         # Привязываем пользователя к СНТ
         user.organization = organization
-        user.save()
-        
+        user.save() 
+
+        # Создаем подписку (базовый тариф) — ПОСЛЕ создания организации
+        tariff = Tariff.objects.filter(slug='basic', is_active=True).first()
+        if tariff:
+            Subscription.objects.create(
+                organization=organization,
+                tariff=tariff,
+                status='trial',
+                start_date=timezone.now(),
+                end_date=timezone.now() + timezone.timedelta(days=tariff.trial_days)
+            )   
+
         # Логируем регистрацию
         UserActionLog.objects.create(
             user=user,
@@ -206,8 +208,8 @@ class AuthViewSet(viewsets.ViewSet):
             details=f'Регистрация нового СНТ: {organization.short_name}',
             ip_address=self._get_client_ip(request),
             user_agent=request.META.get('HTTP_USER_AGENT', ''),
-        )
-        
+        )   
+
         return Response({
             'detail': 'Регистрация успешно завершена',
             'user_id': user.id,

@@ -16,42 +16,34 @@ import logging
 logger = logging.getLogger(__name__)
 
 def get_current_organization_details(request=None):
-    """
-    Получить реквизиты текущего СНТ из базы данных.
-    Приоритет:
-    1. request.current_organization (из OrganizationMixin)
-    2. organization пользователя (если пользователь привязан к одной организации)
-    3. Первая активная организация (fallback)
-    """
     from organizations.models import Organization
     
     org = None
     
-    if request:
-        # Способ 1: через OrganizationMixin (если используется)
-        if hasattr(request, 'current_organization') and request.current_organization:
-            org = request.current_organization
-        # Способ 2: организация пользователя
-        elif hasattr(request, 'user') and request.user.is_authenticated:
-            # Проверяем, есть ли у пользователя организация
-            if hasattr(request.user, 'organization') and request.user.organization:
-                org = request.user.organization
-            # Если пользователь председатель или бухгалтер
-            elif hasattr(request.user, 'chaired_organization') and request.user.chaired_organization:
-                org = request.user.chaired_organization
-    
-    # Fallback: первая активная организация
-    if not org:
-        org = Organization.objects.filter(is_active=True).first()
-        if org:
-            import logging
-            logging.getLogger(__name__).warning(
-                f"Не удалось определить организацию из request, используется первая активная: {org.short_name}"
-            )
+    if request and hasattr(request, 'current_organization') and request.current_organization:
+        org = request.current_organization
     
     if not org:
-        import logging
-        logging.getLogger(__name__).warning("Не найдена активная организация СНТ")
+        try:
+            from django.db import connection
+            # Проверяем, существует ли таблица
+            with connection.cursor() as cursor:
+                cursor.execute("""
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables 
+                        WHERE table_name = 'organizations_organization'
+                    )
+                """)
+                table_exists = cursor.fetchone()[0]
+            
+            if table_exists:
+                org = Organization.objects.filter(is_active=True).first()
+            else:
+                return None
+        except Exception:
+            return None
+    
+    if not org:
         return None
     
     return {
