@@ -8,3 +8,13 @@ migrations/
 .env
 create_users.py
 debug.log
+
+
+*.log
+logs/
+media/
+static/
+__pycache__/
+*.pyc
+.idea/
+.vscode/

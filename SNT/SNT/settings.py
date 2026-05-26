@@ -51,9 +51,7 @@ INSTALLED_APPS = [
     'calls',
     'payments',
     'organizations',
-    'subscriptions',
-    'deploy',
-    
+    'subscriptions',    
 ]
 
 
@@ -257,5 +255,3 @@ DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 
 # Для разработки (чтобы не отправлять реальные письма)
 # EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
-
-GITHUB_WEBHOOK_SECRET = os.getenv('GITHUB_WEBHOOK_SECRET', ''),
