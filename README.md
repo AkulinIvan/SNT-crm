@@ -30,7 +30,7 @@
 - Python 3.10+
 - PostgreSQL 14+
 - Redis (опционально, для кэширования)
-- Asterisk (опционально, для телефонии)1
+- Asterisk (опционально, для телефонии)
 - Системные зависимости для WeasyPrint:
 
   apt-get install -y libcairo2-dev pkg-config python3-dev
