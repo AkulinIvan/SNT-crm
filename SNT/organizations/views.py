@@ -5,9 +5,9 @@ from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django.views.generic import TemplateView
-from django.contrib.auth import get_user_model  # Добавляем импорт
+from django.contrib.auth import get_user_model
 
-from .models import Organization, OrganizationMembership
+from .models import Organization, OrganizationMembership, OrganizationStaffAssignment
 from .serializers import (
     OrganizationSerializer, 
     OrganizationDetailSerializer,
@@ -124,10 +124,11 @@ class OrganizationViewSet(viewsets.ModelViewSet):
         # Получаем владельцев через членство
         active_memberships = organization.memberships.filter(status='active')
         owners = [m.owner for m in active_memberships]
+        owner_ids = [o.id for o in owners]
 
         # Получаем участки через владельцев
         from land.models import LandPlot
-        plots = LandPlot.objects.filter(owners__in=owners).distinct()
+        plots = LandPlot.objects.filter(owners__id__in=owner_ids).distinct()
 
         stats = {
             'id': organization.id,
@@ -143,8 +144,9 @@ class OrganizationViewSet(viewsets.ModelViewSet):
             from payments.models import Assessment
             total_debt = 0
             overdue_count = 0
+
             for owner in owners:
-                debt = owner.total_debt
+                debt = owner.total_debt if hasattr(owner, 'total_debt') else 0
                 total_debt += debt
 
                 # Считаем просроченные начисления
@@ -156,24 +158,228 @@ class OrganizationViewSet(viewsets.ModelViewSet):
 
             stats['total_debt'] = float(total_debt)
             stats['overdue_count'] = overdue_count
-        except ImportError:
+        except Exception as e:
+            print(f"Error calculating debt: {e}")
             stats['total_debt'] = 0
             stats['overdue_count'] = 0
 
         return Response(stats)
     
     def get_queryset(self):
+        """
+        Фильтрация организаций:
+        - Админы видят все
+        - Остальные видят только свои организации
+        """
         queryset = super().get_queryset()
+        user = self.request.user
         
-        # Не-админы видят только свое СНТ
-        if not self.request.user.is_superuser and not self.request.user.is_admin:
-            if hasattr(self.request, 'current_organization') and self.request.current_organization:
-                queryset = queryset.filter(id=self.request.current_organization.id)
-            else:
-                queryset = queryset.none()
+        # Админы и суперпользователи видят все
+        if user.is_superuser or user.is_admin:
+            return queryset
         
-        return queryset
+        # Собираем все организации пользователя
+        
+        
+        organization_ids = set()
+        
+        # 1. Организации, где пользователь - сотрудник
+        staff_orgs = OrganizationStaffAssignment.objects.filter(
+            user=user,
+            is_active=True
+        ).values_list('organization_id', flat=True)
+        organization_ids.update(staff_orgs)
+        
+        # 2. Организация, где пользователь - председатель
+        if hasattr(user, 'chaired_organizations'):
+            chaired = user.chaired_organizations.all().values_list('id', flat=True)
+            organization_ids.update(chaired)
+        elif user.chairman_profile:  # Старый способ
+            organization_ids.add(user.chairman_profile.id)
+        
+        # 3. Организация, где пользователь - бухгалтер
+        if hasattr(user, 'accountant_organizations'):
+            accountant_orgs = user.accountant_organizations.all().values_list('id', flat=True)
+            organization_ids.update(accountant_orgs)
+        
+        # 4. Организация через поле organization (старый способ)
+        if user.organization:
+            organization_ids.add(user.organization.id)
+        
+        # 5. Организации, где пользователь - владелец (член СНТ)
+        owner = getattr(user, 'owner_profile', None)
+        if owner:
+            member_orgs = OrganizationMembership.objects.filter(
+                owner=owner,
+                status='active'
+            ).values_list('organization_id', flat=True)
+            organization_ids.update(member_orgs)
+        
+        # Если пользователь хоть где-то состоит
+        if organization_ids:
+            return queryset.filter(id__in=organization_ids)
+        
+        # Если нигде не состоит - не показываем ничего
+        return queryset.none()
 
+    @action(detail=True, methods=['post'], url_path='assign-chairman')
+    def assign_chairman(self, request, pk=None):
+        """
+        Назначить нового председателя.
+        Автоматически деактивирует предыдущего.
+        """
+        organization = self.get_object()
+
+        user_id = request.data.get('user_id')
+        if not user_id:
+            return Response(
+                {'detail': 'Укажите user_id'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            user = User.objects.get(id=user_id, is_active=True)
+        except User.DoesNotExist:
+            return Response(
+                {'detail': 'Пользователь не найден'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        assignment_order = request.data.get('assignment_order', '')
+
+        # Создаем новое назначение (старое деактивируется автоматически)
+        assignment = OrganizationStaffAssignment.assign_staff(
+            organization=organization,
+            user=user,
+            role='chairman',
+            position_title='Председатель правления',
+            assignment_order=assignment_order
+        )
+
+        # Логируем
+        from accounts.models import UserActionLog
+        UserActionLog.objects.create(
+            user=request.user,
+            action='update',
+            model_name='Organization',
+            object_id=organization.id,
+            details=f'Назначен новый председатель: {user.full_name}',
+            ip_address=self._get_client_ip(request),
+        )
+
+        return Response({
+            'detail': 'Председатель назначен',
+            'chairman': {
+                'id': user.id,
+                'full_name': user.full_name,
+            },
+            'assigned_at': assignment.assigned_at,
+        })
+    
+    @action(detail=True, methods=['get'], url_path='staff-history')
+    def staff_history(self, request, pk=None):
+        """История всех назначений сотрудников"""
+        organization = self.get_object()
+        assignments = organization.staff_assignments.select_related('user').all()
+
+        role = request.query_params.get('role')
+        if role:
+            assignments = assignments.filter(role=role)
+
+        is_active = request.query_params.get('is_active')
+        if is_active is not None:
+            assignments = assignments.filter(is_active=is_active.lower() == 'true')
+
+        data = []
+        for assignment in assignments:
+            data.append({
+                'id': assignment.id,
+                'user_id': assignment.user_id,
+                'user_name': assignment.user.full_name,
+                'role': assignment.role,
+                'role_display': assignment.get_role_display(),
+                'position_title': assignment.position_title,
+                'assigned_at': assignment.assigned_at,
+                'assigned_until': assignment.assigned_until,
+                'is_active': assignment.is_active,
+                'assignment_order': assignment.assignment_order,
+            })
+
+        return Response({
+            'count': len(data),
+            'results': data,
+        })
+    
+    def update(self, request, *args, **kwargs):
+        """Обновление с поддержкой chairman_id и accountant_id"""
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+
+        data = request.data.copy()
+
+        # Обработка председателя
+        if 'chairman_id' in data:
+            chairman_id = data.pop('chairman_id')
+            if chairman_id:
+                try:
+                    chairman = User.objects.get(id=chairman_id)
+                    # Создаем запись в истории назначений
+                    OrganizationStaffAssignment.assign_staff(
+                        organization=instance,
+                        user=chairman,
+                        role='chairman',
+                        position_title='Председатель правления'
+                    )
+                    data['chairman'] = chairman.id
+                except User.DoesNotExist:
+                    pass
+            else:
+                # Деактивируем текущего председателя
+                OrganizationStaffAssignment.objects.filter(
+                    organization=instance,
+                    role='chairman',
+                    is_active=True
+                ).update(is_active=False, assigned_until=timezone.now())
+                data['chairman'] = None
+
+        # Обработка бухгалтера
+        if 'accountant_id' in data:
+            accountant_id = data.pop('accountant_id')
+            if accountant_id:
+                try:
+                    accountant = User.objects.get(id=accountant_id)
+                    OrganizationStaffAssignment.assign_staff(
+                        organization=instance,
+                        user=accountant,
+                        role='accountant',
+                        position_title='Бухгалтер'
+                    )
+                    data['accountant'] = accountant.id
+                except User.DoesNotExist:
+                    pass
+            else:
+                OrganizationStaffAssignment.objects.filter(
+                    organization=instance,
+                    role='accountant',
+                    is_active=True
+                ).update(is_active=False, assigned_until=timezone.now())
+                data['accountant'] = None
+
+        serializer = self.get_serializer(instance, data=data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+
+        if getattr(instance, '_prefetched_objects_cache', None):
+            instance._prefetched_objects_cache = {}
+
+        return Response(serializer.data)
+
+    
+    def _get_client_ip(self, request):
+        x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+        if x_forwarded_for:
+            return x_forwarded_for.split(',')[0].strip()
+        return request.META.get('REMOTE_ADDR')
 
 class OrganizationListView(TemplateView):
     template_name = 'organizations/list.html'

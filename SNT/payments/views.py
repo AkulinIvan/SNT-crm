@@ -575,7 +575,8 @@ class AssessmentViewSet(OrganizationMixin, viewsets.ModelViewSet):
         category_id = request.query_params.get('category_id')
         period_id = request.query_params.get('period_id')
         
-        from .email_service import email_sender
+        from .email_service import get_email_sender
+        email_sender = get_email_sender()
         result = email_sender.send_to_owners_without_email(
             period_id=int(period_id) if period_id else None,
             category_id=int(category_id) if category_id else None
@@ -715,8 +716,8 @@ class AssessmentViewSet(OrganizationMixin, viewsets.ModelViewSet):
         
         Массовая рассылка квитанций
         """
-        from .email_service import email_sender
-        
+        from .email_service import get_email_sender
+        email_sender = get_email_sender()
         assessment_ids = request.data.get('assessment_ids', [])
         category_id = request.data.get('category_id')
         period_id = request.data.get('period_id')

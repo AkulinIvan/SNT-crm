@@ -24,21 +24,60 @@ class TariffViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 class SubscriptionViewSet(viewsets.ViewSet):
-    """ViewSet для управления подпиской"""
-    permission_classes = [permissions.IsAuthenticated, IsManagerOrAbove]
+    """
+    ViewSet для работы с подписками.
+    """
+    permission_classes = [permissions.IsAuthenticated]
     
     @action(detail=False, methods=['get'], url_path='current')
     def current_subscription(self, request):
-        """Получить текущую подписку организации"""
-        if not hasattr(request, 'current_organization') or not request.current_organization:
-            return Response({'detail': 'Организация не найдена'}, status=status.HTTP_404_NOT_FOUND)
+        """Получить текущую подписку пользователя"""
+        organization = None
         
-        subscription = getattr(request.current_organization, 'subscription', None)
-        if subscription:
-            serializer = SubscriptionSerializer(subscription)
-            return Response(serializer.data)
+        # Определяем организацию
+        if hasattr(request, 'current_organization') and request.current_organization:
+            organization = request.current_organization
+        elif hasattr(request.user, 'organization') and request.user.organization:
+            organization = request.user.organization
+        elif hasattr(request.user, 'current_organization'):
+            organization = request.user.current_organization
         
-        return Response({'detail': 'Активная подписка не найдена'}, status=status.HTTP_404_NOT_FOUND)
+        if not organization:
+            return Response(
+                {'detail': 'Организация не найдена', 'has_subscription': False},
+                status=status.HTTP_200_OK  # Возвращаем 200, а не 404
+            )
+        
+        try:
+            subscription = Subscription.objects.filter(
+                organization=organization,
+                status__in=['active', 'trial']
+            ).select_related('tariff').first()
+            
+            if not subscription:
+                return Response({
+                    'has_subscription': False,
+                    'organization_id': organization.id,
+                    'organization_name': organization.short_name,
+                })
+            
+            return Response({
+                'id': subscription.id,
+                'has_subscription': True,
+                'tariff_name': subscription.tariff.name,
+                'tariff_slug': subscription.tariff.slug,
+                'status': subscription.status,
+                'start_date': subscription.start_date,
+                'end_date': subscription.end_date,
+                'days_left': (subscription.end_date - timezone.now()).days if subscription.end_date else None,
+                'organization_id': organization.id,
+                'organization_name': organization.short_name,
+            })
+        except Exception as e:
+            return Response({
+                'detail': str(e),
+                'has_subscription': False,
+            })
     
     @action(detail=False, methods=['post'], url_path='upgrade')
     def upgrade(self, request):
@@ -127,47 +166,77 @@ class SubscriptionViewSet(viewsets.ViewSet):
             })
     
     @action(detail=False, methods=['get'], url_path='features')
-    def available_features(self, request):
-        """Получить доступные функции для текущего тарифа"""
-        if not hasattr(request, 'current_organization') or not request.current_organization:
-            return Response({'detail': 'Организация не найдена'}, status=status.HTTP_404_NOT_FOUND)
+    def features(self, request):
+        """
+        Получить возможности текущего тарифа.
+        Этот эндпоинт запрашивается фронтендом.
+        """
+        organization = None
         
-        subscription = getattr(request.current_organization, 'subscription', None)
+        # Определяем организацию
+        if hasattr(request, 'current_organization') and request.current_organization:
+            organization = request.current_organization
+        elif hasattr(request.user, 'organization') and request.user.organization:
+            organization = request.user.organization
+        elif hasattr(request.user, 'current_organization'):
+            organization = request.user.current_organization
         
-        if not subscription or not subscription.is_active:
+        if not organization:
+            # Возвращаем базовые возможности для пользователя без организации
             return Response({
-                'has_subscription': False,
-                'features': {
-                    'map': False,
-                    'payments': False,
-                    'bank_import': False,
-                    'export': False,
-                    'assessments': False,
-                },
-                'tariff': None
+                'max_owners': 0,
+                'max_plots': 0,
+                'max_users': 1,
+                'has_finance_module': False,
+                'has_export': False,
+                'has_api_access': False,
+                'organization_exists': False,
             })
         
-        tariff = subscription.tariff
-        
-        return Response({
-            'has_subscription': True,
-            'tariff': {
-                'id': tariff.id,
-                'name': tariff.name,
-                'slug': tariff.slug,
-            },
-            'features': {
-                'map': tariff.can_view_map,
-                'payments': tariff.can_manage_payments,
-                'bank_import': tariff.can_import_bank,
-                'export': tariff.can_export_data,
-                'assessments': tariff.can_manage_assessments,
-            },
-            'subscription': {
-                'end_date': subscription.end_date,
-                'days_left': subscription.days_left,
-            }
-        })
+        try:
+            subscription = Subscription.objects.filter(
+                organization=organization,
+                status__in=['active', 'trial']
+            ).select_related('tariff').first()
+            
+            if not subscription:
+                # Нет подписки - базовые ограничения
+                return Response({
+                    'organization_id': organization.id,
+                    'organization_name': organization.short_name,
+                    'max_owners': 0,
+                    'max_plots': 0,
+                    'max_users': 1,
+                    'has_finance_module': False,
+                    'has_export': False,
+                    'has_api_access': False,
+                    'subscription_active': False,
+                })
+            
+            tariff = subscription.tariff
+            
+            return Response({
+                'organization_id': organization.id,
+                'organization_name': organization.short_name,
+                'tariff_name': tariff.name,
+                'tariff_slug': tariff.slug,
+                'max_owners': tariff.max_owners if hasattr(tariff, 'max_owners') else 999,
+                'max_plots': tariff.max_plots if hasattr(tariff, 'max_plots') else 999,
+                'max_users': tariff.max_users if hasattr(tariff, 'max_users') else 1,
+                'has_finance_module': getattr(tariff, 'has_finance_module', True),
+                'has_export': getattr(tariff, 'has_export', False),
+                'has_api_access': getattr(tariff, 'has_api_access', False),
+                'subscription_active': True,
+                'subscription_status': subscription.status,
+                'days_left': (subscription.end_date - timezone.now()).days if subscription.end_date else None,
+            })
+        except Exception as e:
+            return Response({
+                'detail': str(e),
+                'organization_exists': True,
+                'subscription_active': False,
+            })
+
     
     @action(detail=False, methods=['get'], url_path='check-access')
     def check_access(self, request):

@@ -98,9 +98,10 @@ class User(AbstractUser):
         null=True,
         blank=True,
         related_name='staff_members',
-        verbose_name='СНТ',
-        help_text='СНТ, в котором работает сотрудник'
+        verbose_name='Основное СНТ',
+        help_text='Основное СНТ пользователя'
     )
+    
     class Meta:
         verbose_name = 'Пользователь'
         verbose_name_plural = 'Пользователи'
@@ -172,11 +173,94 @@ class User(AbstractUser):
         super().save(*args, **kwargs)
 
     @property
-    def organization_name(self):
-        """Название СНТ пользователя"""
+    def current_organization(self):
+        """Получить текущую организацию пользователя"""
+        # 1. Основная организация
         if self.organization:
-            return self.organization.short_name
+            return self.organization
+        
+        # 2. Организация, где председатель
+        if hasattr(self, 'chaired_organization'):
+            org = self.chaired_organization
+            if org:
+                return org
+        
+        # 3. Активное назначение
+        from organizations.models import OrganizationStaffAssignment
+        assignment = OrganizationStaffAssignment.objects.filter(
+            user=self,
+            is_active=True
+        ).select_related('organization').first()
+        
+        if assignment:
+            return assignment.organization
+        
         return None
+    
+    @property
+    def chaired_organization(self):
+        """СНТ, где пользователь - действующий председатель"""
+        # Новый способ
+        from organizations.models import OrganizationStaffAssignment
+        assignment = OrganizationStaffAssignment.objects.filter(
+            user=self,
+            role='chairman',
+            is_active=True
+        ).select_related('organization').first()
+        
+        if assignment:
+            return assignment.organization
+        
+        # Старый способ (через related_name)
+        if hasattr(self, 'chaired_organizations'):
+            org = self.chaired_organizations.filter(is_active=True).first()
+            if org:
+                return org
+        
+        return None
+    
+    @property
+    def organization_name(self):
+        """Название основной организации"""
+        org = self.current_organization
+        return org.short_name if org else None
+
+    @property
+    def organizations_list(self):
+        """Список всех организаций пользователя"""
+        from organizations.models import OrganizationStaffAssignment, OrganizationMembership
+        
+        orgs = set()
+        
+        # Основная организация
+        if self.organization:
+            orgs.add(self.organization)
+        
+        # Организации, где сотрудник
+        assignments = OrganizationStaffAssignment.objects.filter(
+            user=self,
+            is_active=True
+        ).select_related('organization')
+        for a in assignments:
+            orgs.add(a.organization)
+        
+        # Организации, где председатель
+        if hasattr(self, 'chaired_organizations'):
+            for org in self.chaired_organizations.filter(is_active=True):
+                orgs.add(org)
+        
+        # Организации, где владелец
+        owner = getattr(self, 'owner_profile', None)
+        if owner:
+            memberships = OrganizationMembership.objects.filter(
+                owner=owner,
+                status='active'
+            ).select_related('organization')
+            for m in memberships:
+                orgs.add(m.organization)
+        
+        return list(orgs)
+
 
 class UserActionLog(models.Model):
     """

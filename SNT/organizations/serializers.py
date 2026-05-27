@@ -1,6 +1,5 @@
-# organizations/serializers.py
 from rest_framework import serializers
-from .models import Organization, OrganizationMembership
+from .models import Organization, OrganizationMembership, OrganizationStaffAssignment
 from users.serializers import OwnerListSerializer
 from accounts.models import User
 
@@ -60,3 +59,21 @@ class OrganizationMembershipCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = OrganizationMembership
         fields = ['owner', 'member_since', 'member_card_number', 'notes', 'status']
+        
+
+class ChairmanAssignmentSerializer(serializers.Serializer):
+    """Сериализатор для назначения председателя"""
+    user_id = serializers.IntegerField(required=True)
+    assignment_order = serializers.CharField(required=False, allow_blank=True)
+    notes = serializers.CharField(required=False, allow_blank=True)
+
+
+class StaffAssignmentSerializer(serializers.ModelSerializer):
+    """Сериализатор истории назначений"""
+    user_name = serializers.CharField(source='user.full_name', read_only=True)
+    role_display = serializers.CharField(source='get_role_display', read_only=True)
+    
+    class Meta:
+        model = OrganizationStaffAssignment
+        fields = '__all__'
+        read_only_fields = ['assigned_at', 'created_at', 'updated_at']

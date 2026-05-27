@@ -1,11 +1,11 @@
 from django.db import models
 from django.core.validators import RegexValidator
 from django.conf import settings
-
+from django.utils import timezone
 
 class Organization(models.Model):
     """
-    Модель СНТ (юридического лица).
+    +Модель СНТ (юридического лица).
     """
     # Основные реквизиты
     name = models.CharField(
@@ -62,14 +62,14 @@ class Organization(models.Model):
     website = models.URLField('Сайт', blank=True)
 
     # Руководство
-    chairman = models.OneToOneField(
+    chairman = models.ForeignKey(  # Было OneToOneField, стало ForeignKey
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name='chaired_organization',
+        related_name='chaired_organizations', 
         verbose_name='Председатель',
-        help_text='Председатель правления СНТ (пользователь системы)'
+        help_text='Председатель правления СНТ'
     )
     accountant = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -106,6 +106,20 @@ class Organization(models.Model):
             self.phone = ''.join(c for c in self.phone if c.isdigit() or c in '+()- ')
         super().save(*args, **kwargs)
 
+    @property
+    def chairman_history(self):
+        """История всех председателей"""
+        return self.chairman_assignments.select_related('user').order_by('-assigned_at')
+    
+    @property
+    def current_chairman(self):
+        """Текущий действующий председатель"""
+        current = self.chairman_assignments.filter(
+            is_active=True,
+            role='chairman'
+        ).select_related('user').first()
+        return current.user if current else None
+    
     @property
     def owners_count(self):
         """Количество владельцев в организации"""
@@ -199,6 +213,126 @@ class Organization(models.Model):
         except Exception:
             return 1
 
+class OrganizationStaffAssignment(models.Model):
+    """
+    Модель для отслеживания назначений сотрудников в СНТ.
+    Позволяет хранить историю и временные назначения.
+    """
+    ROLE_CHOICES = [
+        ('chairman', 'Председатель'),
+        ('accountant', 'Бухгалтер'),
+        ('manager', 'Управляющий'),
+        ('secretary', 'Секретарь'),
+        ('other', 'Другая должность'),
+    ]
+    
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name='staff_assignments',
+        verbose_name='СНТ'
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='staff_assignments',
+        verbose_name='Сотрудник'
+    )
+    role = models.CharField(
+        'Должность',
+        max_length=20,
+        choices=ROLE_CHOICES,
+        default='other'
+    )
+    position_title = models.CharField(
+        'Название должности',
+        max_length=200,
+        blank=True,
+        help_text='Произвольное название должности'
+    )
+    assigned_at = models.DateTimeField(
+        'Назначен с',
+        auto_now_add=True
+    )
+    assigned_until = models.DateTimeField(
+        'Назначен до',
+        null=True,
+        blank=True,
+        help_text='Если пусто - бессрочно'
+    )
+    is_active = models.BooleanField(
+        'Действующее назначение',
+        default=True,
+        db_index=True
+    )
+    assignment_order = models.CharField(
+        'Основание (приказ/протокол)',
+        max_length=200,
+        blank=True,
+        help_text='Номер и дата протокола собрания или приказа'
+    )
+    notes = models.TextField(
+        'Примечания',
+        blank=True
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        verbose_name = 'Назначение сотрудника'
+        verbose_name_plural = 'Назначения сотрудников'
+        ordering = ['-assigned_at']
+        indexes = [
+            models.Index(fields=['organization', 'role', 'is_active']),
+            models.Index(fields=['user', 'is_active']),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['organization', 'user', 'role'],
+                condition=models.Q(is_active=True),
+                name='unique_active_assignment'
+            )
+        ]
+    
+    def __str__(self):
+        return f"{self.user} - {self.get_role_display()} ({self.organization.short_name})"
+    
+    def deactivate(self):
+        """Деактивировать назначение"""
+        self.is_active = False
+        self.assigned_until = timezone.now()
+        self.save()
+    
+    @classmethod
+    def assign_staff(cls, organization, user, role, **kwargs):
+        """
+        Назначить сотрудника. Автоматически деактивирует предыдущее назначение на эту роль.
+        """
+        # Деактивируем предыдущее назначение на эту роль
+        cls.objects.filter(
+            organization=organization,
+            role=role,
+            is_active=True
+        ).exclude(user=user).update(is_active=False, assigned_until=timezone.now())
+        
+        # Создаем новое назначение
+        assignment = cls.objects.create(
+            organization=organization,
+            user=user,
+            role=role,
+            **kwargs
+        )
+        
+        # Обновляем текущего председателя/бухгалтера в организации
+        if role == 'chairman':
+            organization.chairman = user
+            organization.save(update_fields=['chairman'])
+        elif role == 'accountant':
+            organization.accountant = user
+            organization.save(update_fields=['accountant'])
+        
+        return assignment
+    
 class OrganizationMembership(models.Model):
     """
     Модель членства владельца в СНТ.

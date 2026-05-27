@@ -1,4 +1,4 @@
-# SNT/payments/email_service.py
+# payments/email_service.py - исправленная версия
 
 import logging
 from decimal import Decimal
@@ -18,10 +18,52 @@ class EmailReceiptService:
     """Сервис для отправки квитанций по email"""
     
     def __init__(self):
-        from .qr_generator import QRCodeGenerator, SNTDetailsGenerator
-        self.qr_gen = QRCodeGenerator()
-        self.snt_gen = SNTDetailsGenerator()
-        self.snt_details = self.snt_gen.get_details()
+        # Отложенная инициализация
+        self._qr_gen = None
+        self._snt_gen = None
+        self._snt_details = None
+        self._initialized = False
+    
+    def _ensure_initialized(self):
+        """Ленивая инициализация - выполняется при первом обращении"""
+        if self._initialized:
+            return
+        
+        try:
+            from .qr_generator import QRCodeGenerator, SNTDetailsGenerator
+            self._qr_gen = QRCodeGenerator()
+            self._snt_gen = SNTDetailsGenerator()
+            self._snt_details = self._snt_gen.get_details()
+            self._initialized = True
+        except Exception as e:
+            logger.error(f"Error initializing EmailReceiptService: {e}")
+            # Создаем заглушки
+            self._snt_details = {
+                'name': 'СНТ',
+                'inn': '',
+                'kpp': '',
+                'account': '',
+                'bank_name': '',
+                'bank_bik': '',
+                'bank_corr': '',
+                'chairman': 'Председатель',
+            }
+            self._initialized = True
+    
+    @property
+    def qr_gen(self):
+        self._ensure_initialized()
+        return self._qr_gen
+    
+    @property
+    def snt_gen(self):
+        self._ensure_initialized()
+        return self._snt_gen
+    
+    @property
+    def snt_details(self):
+        self._ensure_initialized()
+        return self._snt_details
     
     def get_owner_email(self, assessment: Assessment) -> Optional[str]:
         """Получить email владельца из ContactInfo"""
@@ -41,16 +83,24 @@ class EmailReceiptService:
     
     def generate_receipt_html(self, assessment: Assessment) -> str:
         """Генерирует HTML квитанции для email"""
-        qr_data = self.qr_gen.generate_qr_data(
-            owner_name=assessment.owner.full_name,
-            plot_number=assessment.land_plot.plot_number,
-            amount=assessment.debt,
-            assessment_id=assessment.id,
-            period=str(assessment.period),
-            category_name=assessment.category.name,
-        )
+        self._ensure_initialized()
         
-        qr_image = self.qr_gen.get_qr_data_uri(qr_data)
+        qr_data = None
+        qr_image = ""
+        
+        if self._qr_gen:
+            try:
+                qr_data = self._qr_gen.generate_qr_data(
+                    owner_name=assessment.owner.full_name,
+                    plot_number=assessment.land_plot.plot_number,
+                    amount=assessment.debt,
+                    assessment_id=assessment.id,
+                    period=str(assessment.period),
+                    category_name=assessment.category.name,
+                )
+                qr_image = self._qr_gen.get_qr_data_uri(qr_data)
+            except Exception as e:
+                logger.error(f"Error generating QR: {e}")
         
         purpose = (
             f"Оплата {assessment.category.name} за {assessment.period}. "
@@ -84,7 +134,6 @@ class EmailReceiptService:
             html_content = self.generate_receipt_html(assessment)
             pdf_buffer = BytesIO()
             
-            # Конвертируем HTML в PDF
             pisa_status = pisa.CreatePDF(html_content, dest=pdf_buffer)
             
             if pisa_status.err:
@@ -106,11 +155,9 @@ class EmailReceiptService:
         self, 
         assessment: Assessment, 
         recipient_email: str = None,
-        send_pdf_attachment: bool = False  # ← по умолчанию False
+        send_pdf_attachment: bool = False
     ) -> Dict[str, Any]:
-        """
-        Отправляет квитанцию одному владельцу
-        """
+        """Отправляет квитанцию одному владельцу"""
         result = {
             'success': False,
             'assessment_id': assessment.id,
@@ -127,14 +174,11 @@ class EmailReceiptService:
             return result
         
         try:
-            # Генерируем HTML (PDF только если нужно)
             html_content = self.generate_receipt_html(assessment)
             pdf_content = self.generate_receipt_pdf(assessment) if send_pdf_attachment else None
             
-            # Тема письма
             subject = f"Квитанция №{assessment.payment_uid} - {self.snt_details['name']}"
             
-            # Текст письма (plain text)
             text_body = f"""Уважаемый(ая) {assessment.owner.full_name}!
 
 Вам направлена квитанция на оплату {assessment.category.name} за {assessment.period} на сумму {assessment.debt} ₽.
@@ -153,7 +197,6 @@ class EmailReceiptService:
 Это письмо сформировано автоматически. Пожалуйста, не отвечайте на него.
 """
             
-            # Отправляем письмо
             msg = EmailMultiAlternatives(
                 subject=subject,
                 body=text_body,
@@ -161,10 +204,8 @@ class EmailReceiptService:
                 to=[email],
             )
             
-            # Добавляем HTML версию
             msg.attach_alternative(html_content, "text/html")
             
-            # Добавляем PDF вложение (если есть)
             if pdf_content:
                 filename = f"квитанция_{assessment.payment_uid}.pdf"
                 msg.attach(filename, pdf_content, 'application/pdf')
@@ -205,13 +246,11 @@ class EmailReceiptService:
     def send_bulk_receipts(
         self,
         assessments: List[Assessment],
-        send_pdf_attachment: bool = False,  # ← по умолчанию False
+        send_pdf_attachment: bool = False,
         max_workers: int = 5,
         on_progress: callable = None
     ) -> Dict[str, Any]:
-        """
-        Массовая рассылка квитанций
-        """
+        """Массовая рассылка квитанций"""
         results = {
             'total': len(assessments),
             'sent': 0,
@@ -220,7 +259,6 @@ class EmailReceiptService:
             'details': [],
         }
         
-        # Фильтруем начисления с email
         valid_assessments = []
         for assessment in assessments:
             if self.get_owner_email(assessment):
@@ -234,7 +272,6 @@ class EmailReceiptService:
                     'message': 'Нет активного email',
                 })
         
-        # Отправляем параллельно
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {
                 executor.submit(
@@ -273,13 +310,17 @@ class BulkEmailSender:
     """Класс для массовой рассылки с прогрессом"""
     
     def __init__(self):
-        self.email_service = EmailReceiptService()
+        self._email_service = None
         self.is_running = False
-        
+    
+    @property
+    def email_service(self):
+        if self._email_service is None:
+            self._email_service = EmailReceiptService()
+        return self._email_service
+    
     def send_to_owners_without_email(self, period_id=None, category_id=None):
-        """
-        Получение списка владельцев без email
-        """
+        """Получение списка владельцев без email"""
         from .models import Assessment
         from users.models import Owner, ContactInfo
         
@@ -292,7 +333,6 @@ class BulkEmailSender:
         if category_id:
             assessments = assessments.filter(category_id=category_id)
         
-        # Получаем уникальных владельцев без email
         owners_without_email = []
         owner_ids_seen = set()
         
@@ -319,16 +359,13 @@ class BulkEmailSender:
         category_id: int = None,
         period_id: int = None,
         min_debt: Decimal = Decimal('0'),
-        send_pdf_attachment: bool = False,  # ← по умолчанию False
+        send_pdf_attachment: bool = False,
         on_progress: callable = None,
         on_complete: callable = None
     ) -> Dict[str, Any]:
-        """
-        Отправка квитанций должникам
-        """
+        """Отправка квитанций должникам"""
         from .models import Assessment
         
-        # Формируем queryset начислений
         assessments = Assessment.objects.filter(
             status__in=['pending', 'partial', 'overdue']
         ).select_related('owner', 'category', 'period')
@@ -340,7 +377,6 @@ class BulkEmailSender:
         if min_debt > 0:
             assessments = assessments.filter(amount__gte=min_debt)
         
-        # Сортируем по долгу
         assessments = assessments.order_by('-amount')
         
         self.is_running = True
@@ -386,5 +422,10 @@ class BulkEmailSender:
         )
 
 
-# Создаём глобальный экземпляр
-email_sender = BulkEmailSender()
+# ВАЖНО: НЕ создаем глобальный экземпляр при импорте!
+# email_sender = BulkEmailSender()  # ← ЗАКОММЕНТИРУЙТЕ ЭТУ СТРОКУ!
+
+# Вместо этого используйте функцию-фабрику
+def get_email_sender() -> BulkEmailSender:
+    """Фабрика для создания отправителя email"""
+    return BulkEmailSender()

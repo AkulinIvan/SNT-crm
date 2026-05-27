@@ -1,6 +1,12 @@
 from django.contrib import admin
-from .models import Organization, OrganizationMembership
+from .models import Organization, OrganizationMembership, OrganizationStaffAssignment
 
+
+@admin.register(OrganizationStaffAssignment)
+class OrganizationStaffAssignmentAdmin(admin.ModelAdmin):
+    list_display = ['user', 'organization', 'role', 'position_title', 'is_active', 'assigned_at']
+    list_filter = ['role', 'is_active', 'organization']
+    search_fields = ['user__username', 'user__last_name', 'organization__short_name']
 
 @admin.register(Organization)
 class OrganizationAdmin(admin.ModelAdmin):
