@@ -1,7 +1,9 @@
-# accounts/middleware.py
+import logging
+
 from django.utils import timezone
 from django.utils.deprecation import MiddlewareMixin
 
+logger = logging.getLogger(__name__)
 
 class UserActivityMiddleware(MiddlewareMixin):
     """
@@ -25,94 +27,121 @@ class OrganizationMiddleware(MiddlewareMixin):
     
     def process_request(self, request):
         """Определяем текущую организацию пользователя"""
-        if request.user.is_authenticated:
-            organization = None
-            
-            # Способ 1: через поле organization (если есть)
-            if hasattr(request.user, 'organization') and request.user.organization_id:
-                organization = request.user.organization
-            
-            # Способ 2: через свойство current_organization
-            if not organization and hasattr(request.user, 'current_organization'):
-                org = request.user.current_organization
-                if org:
-                    organization = org
-            
-            # Способ 3: через OrganizationStaffAssignment (новый способ)
-            if not organization:
-                try:
-                    from organizations.models import OrganizationStaffAssignment
-                    assignment = OrganizationStaffAssignment.objects.filter(
-                        user=request.user,
+        if not request.user.is_authenticated:
+            request.current_organization = None
+            return None
+        
+        # Для суперпользователей и админов - не фильтруем по организации
+        if request.user.is_superuser or getattr(request.user, 'is_admin', False):
+            request.current_organization = None
+            logger.debug(f"[OrganizationMiddleware] Admin user '{request.user}' - showing all organizations")
+            return None
+        
+        organization = None
+        
+        # Способ 1: через поле organization
+        if hasattr(request.user, 'organization') and request.user.organization_id:
+            organization = request.user.organization
+            logger.debug(f"[OrganizationMiddleware] Found via user.organization: {organization.short_name}")
+        
+        # Способ 2: через OrganizationStaffAssignment
+        if not organization:
+            try:
+                from organizations.models import OrganizationStaffAssignment
+                assignment = OrganizationStaffAssignment.objects.filter(
+                    user=request.user,
+                    is_active=True
+                ).select_related('organization').first()
+                
+                if assignment:
+                    organization = assignment.organization
+                    logger.debug(f"[OrganizationMiddleware] Found via staff assignment: {organization.short_name}")
+            except Exception as e:
+                logger.error(f"[OrganizationMiddleware] Error checking staff assignments: {e}")
+        
+        # Способ 3: через OrganizationMembership (если пользователь связан с Owner)
+        if not organization:
+            try:
+                # Проверяем, есть ли у User связанная модель Owner
+                owner = None
+                
+                # Вариант 1: через owner_profile (если есть OneToOneField)
+                if hasattr(request.user, 'owner_profile'):
+                    owner = request.user.owner_profile
+                
+                # Вариант 2: поиск Owner с таким же email или телефоном
+                if not owner and request.user.email:
+                    from users.models import Owner, ContactInfo
+                    contact = ContactInfo.objects.filter(
+                        type='em',
+                        value=request.user.email,
                         is_active=True
+                    ).first()
+                    if contact:
+                        owner = contact.owner
+                
+                if not owner and request.user.phone:
+                    from users.models import Owner, ContactInfo
+                    contact = ContactInfo.objects.filter(
+                        type='ph',
+                        value=request.user.phone,
+                        is_active=True
+                    ).first()
+                    if contact:
+                        owner = contact.owner
+                
+                if owner:
+                    from organizations.models import OrganizationMembership
+                    membership = OrganizationMembership.objects.filter(
+                        owner=owner,
+                        status='active'
                     ).select_related('organization').first()
                     
-                    if assignment:
-                        organization = assignment.organization
-                except Exception as e:
-                    print(f"[OrganizationMiddleware] Error checking staff assignments: {e}")
-            
-            # Способ 4: через OrganizationMembership (если пользователь связан с Owner)
-            # ВАЖНО: OrganizationMembership.owner - это Owner, а не User!
-            # Нужно сначала найти Owner, связанного с User
-            if not organization:
-                try:
-                    # Проверяем, есть ли у User связанная модель Owner
-                    if hasattr(request.user, 'owner_profile'):
-                        # Если User имеет OneToOneField к Owner
-                        owner = request.user.owner_profile
-                        from organizations.models import OrganizationMembership
-                        membership = OrganizationMembership.objects.filter(
-                            owner=owner,
-                            status='active'
-                        ).select_related('organization').first()
-                        
-                        if membership:
-                            organization = membership.organization
-                except Exception as e:
-                    print(f"[OrganizationMiddleware] Error checking memberships: {e}")
-            
-            # Способ 5: пользователь - председатель (через поле chairman)
-            if not organization:
-                try:
-                    from organizations.models import Organization
-                    org = Organization.objects.filter(
-                        chairman=request.user,
-                        is_active=True
-                    ).first()
-                    if org:
-                        organization = org
-                except Exception as e:
-                    print(f"[OrganizationMiddleware] Error checking chairman: {e}")
-            
-            # Способ 6: пользователь - бухгалтер
-            if not organization:
-                try:
-                    from organizations.models import Organization
-                    org = Organization.objects.filter(
-                        accountant=request.user,
-                        is_active=True
-                    ).first()
-                    if org:
-                        organization = org
-                except Exception as e:
-                    print(f"[OrganizationMiddleware] Error checking accountant: {e}")
-            
-            request.current_organization = organization
-            
-            # Отладка
-            if organization:
-                print(f"[OrganizationMiddleware] User '{request.user}' -> Organization: {organization.short_name}")
-            else:
-                print(f"[OrganizationMiddleware] User '{request.user}' -> No organization found")
+                    if membership:
+                        organization = membership.organization
+                        logger.debug(f"[OrganizationMiddleware] Found via membership: {organization.short_name}")
+            except Exception as e:
+                logger.error(f"[OrganizationMiddleware] Error checking memberships: {e}")
+        
+        # Способ 4: пользователь - председатель
+        if not organization:
+            try:
+                from organizations.models import Organization
+                org = Organization.objects.filter(
+                    chairman=request.user,
+                    is_active=True
+                ).first()
+                if org:
+                    organization = org
+                    logger.debug(f"[OrganizationMiddleware] Found via chairman: {organization.short_name}")
+            except Exception as e:
+                logger.error(f"[OrganizationMiddleware] Error checking chairman: {e}")
+        
+        # Способ 5: пользователь - бухгалтер
+        if not organization:
+            try:
+                from organizations.models import Organization
+                org = Organization.objects.filter(
+                    accountant=request.user,
+                    is_active=True
+                ).first()
+                if org:
+                    organization = org
+                    logger.debug(f"[OrganizationMiddleware] Found via accountant: {organization.short_name}")
+            except Exception as e:
+                logger.error(f"[OrganizationMiddleware] Error checking accountant: {e}")
+        
+        request.current_organization = organization
+        
+        if organization:
+            logger.debug(f"[OrganizationMiddleware] User '{request.user}' -> Organization: {organization.short_name}")
         else:
-            request.current_organization = None
+            logger.debug(f"[OrganizationMiddleware] User '{request.user}' -> No organization found")
         
         return None
     
     def process_view(self, request, view_func, view_args, view_kwargs):
         """Фильтрация queryset по организации (опционально)"""
-        # Пропускаем, если пользователь не аутентифицирован
         if not request.user.is_authenticated:
             return None
         
@@ -120,7 +149,7 @@ class OrganizationMiddleware(MiddlewareMixin):
         if request.user.is_superuser or getattr(request.user, 'is_admin', False):
             return None
         
-        # Если у пользователя нет организации - не фильтруем (пусть видят что могут)
+        # Если у пользователя нет организации - не фильтруем
         if not request.current_organization:
             return None
         

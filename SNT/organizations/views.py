@@ -6,7 +6,10 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django.views.generic import TemplateView
 from django.contrib.auth import get_user_model
+import re
+from django.utils import timezone
 
+from accounts.models import UserActionLog
 from .models import Organization, OrganizationMembership, OrganizationStaffAssignment
 from .serializers import (
     OrganizationSerializer, 
@@ -15,6 +18,8 @@ from .serializers import (
     OrganizationMembershipCreateSerializer
 )
 from accounts.permissions import IsAdminOrSuperuser, IsManagerOrAbove
+from accounts.models import UserActionLog
+from users.models import Owner
 
 # Получаем модель User
 User = get_user_model()
@@ -257,7 +262,7 @@ class OrganizationViewSet(viewsets.ModelViewSet):
         )
 
         # Логируем
-        from accounts.models import UserActionLog
+        
         UserActionLog.objects.create(
             user=request.user,
             action='update',
@@ -380,6 +385,395 @@ class OrganizationViewSet(viewsets.ModelViewSet):
         if x_forwarded_for:
             return x_forwarded_for.split(',')[0].strip()
         return request.META.get('REMOTE_ADDR')
+    
+    @action(detail=True, methods=['post'], url_path='assign-chairman-from-owner')
+    def assign_chairman_from_owner(self, request, pk=None):
+        """
+        Назначить председателя из владельцев с опциональным созданием аккаунта.
+        """
+        organization = self.get_object()
+
+        owner_id = request.data.get('owner_id')
+        if not owner_id:
+            return Response(
+                {'detail': 'Укажите owner_id'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            owner = Owner.objects.get(id=owner_id)
+        except Owner.DoesNotExist:
+            return Response(
+                {'detail': 'Владелец не найден'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        create_account = request.data.get('create_account', False)
+        username = request.data.get('username')
+        password = request.data.get('password')
+
+        user = None
+        account_created = False
+
+        if create_account:
+            # Проверяем, есть ли уже пользователь, связанный с этим владельцем
+            # Ищем по email или телефону
+            owner_email = owner.primary_email
+            owner_phone = owner.primary_phone
+
+            existing_user = None
+            if owner_email:
+                existing_user = User.objects.filter(email=owner_email).first()
+
+            if not existing_user and owner_phone:
+                # Ищем по телефону (если есть такое поле)
+                existing_user = User.objects.filter(phone=owner_phone).first()
+
+            if existing_user:
+                user = existing_user
+            else:
+                # Создаем нового пользователя
+                if not username:
+                    # Генерируем логин из ФИО или телефона
+                    username = owner_phone or owner.full_name.lower().replace(' ', '.')
+                    # Убираем спецсимволы
+                    username = re.sub(r'[^\w.]', '', username)
+                    # Если такой уже есть, добавляем цифру
+                    base_username = username
+                    counter = 1
+                    while User.objects.filter(username=username).exists():
+                        username = f"{base_username}{counter}"
+                        counter += 1
+
+                if not password:
+                    password = User.objects.make_random_password()
+
+                user = User.objects.create_user(
+                    username=username,
+                    email=owner_email,
+                    password=password,
+                    first_name=owner.full_name.split()[1] if len(owner.full_name.split()) > 1 else '',
+                    last_name=owner.full_name.split()[0] if owner.full_name.split() else owner.full_name,
+                    phone=owner_phone,
+                    role='manager',  # Председатель - manager
+                    is_active=True,
+                    organization=organization,
+                )
+                account_created = True
+
+        # Назначаем председателем через OrganizationStaffAssignment
+        if user:
+            OrganizationStaffAssignment.assign_staff(
+                organization=organization,
+                user=user,
+                role='chairman',
+                position_title='Председатель правления'
+            )
+        else:
+            # Если аккаунт не создаем, просто обновляем поле chairman
+            # Но для этого нужен User. Можно создать временного или использовать существующего
+            pass
+        
+        # Логируем
+        UserActionLog.objects.create(
+            user=request.user,
+            action='update',
+            model_name='Organization',
+            object_id=organization.id,
+            details=f'Назначен председатель из владельца: {owner.full_name}' + 
+                    (f', создан аккаунт: {user.username}' if account_created else ''),
+            ip_address=self._get_client_ip(request),
+        )
+
+        response_data = {
+            'detail': 'Председатель назначен',
+            'owner_id': owner.id,
+            'owner_name': owner.full_name,
+        }
+
+        if account_created and user:
+            response_data.update({
+                'account_created': True,
+                'user_id': user.id,
+                'username': user.username,
+                'password': password,
+            })
+
+        return Response(response_data)  
+
+    @action(detail=True, methods=['post'], url_path='assign-accountant-from-owner')
+    def assign_accountant_from_owner(self, request, pk=None):
+        """
+        Назначить бухгалтера из владельцев с опциональным созданием аккаунта.
+        """
+        organization = self.get_object()
+
+        owner_id = request.data.get('owner_id')
+        if not owner_id:
+            return Response(
+                {'detail': 'Укажите owner_id'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            owner = Owner.objects.get(id=owner_id)
+        except Owner.DoesNotExist:
+            return Response(
+                {'detail': 'Владелец не найден'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        create_account = request.data.get('create_account', False)
+        username = request.data.get('username')
+        password = request.data.get('password')
+
+        user = None
+        account_created = False
+
+        if create_account:
+            owner_email = owner.primary_email
+            owner_phone = owner.primary_phone
+
+            existing_user = None
+            if owner_email:
+                existing_user = User.objects.filter(email=owner_email).first()
+
+            if not existing_user and owner_phone:
+                existing_user = User.objects.filter(phone=owner_phone).first()
+
+            if existing_user:
+                user = existing_user
+                # Обновляем роль, если нужно
+                if user.role not in ['admin', 'manager', 'accountant']:
+                    user.role = 'accountant'
+                    user.save(update_fields=['role'])
+            else:
+                if not username:
+                    username = owner_phone or owner.full_name.lower().replace(' ', '.')
+                    username = re.sub(r'[^\w.]', '', username)
+                    base_username = username
+                    counter = 1
+                    while User.objects.filter(username=username).exists():
+                        username = f"{base_username}{counter}"
+                        counter += 1
+
+                if not password:
+                    password = User.objects.make_random_password()
+
+                user = User.objects.create_user(
+                    username=username,
+                    email=owner_email,
+                    password=password,
+                    first_name=owner.full_name.split()[1] if len(owner.full_name.split()) > 1 else '',
+                    last_name=owner.full_name.split()[0] if owner.full_name.split() else owner.full_name,
+                    phone=owner_phone,
+                    role='accountant',
+                    is_active=True,
+                    organization=organization,
+                )
+                account_created = True
+
+        if user:
+            OrganizationStaffAssignment.assign_staff(
+                organization=organization,
+                user=user,
+                role='accountant',
+                position_title='Бухгалтер'
+            )
+
+        UserActionLog.objects.create(
+            user=request.user,
+            action='update',
+            model_name='Organization',
+            object_id=organization.id,
+            details=f'Назначен бухгалтер из владельца: {owner.full_name}',
+            ip_address=self._get_client_ip(request),
+        )
+
+        response_data = {
+            'detail': 'Бухгалтер назначен',
+            'owner_id': owner.id,
+            'owner_name': owner.full_name,
+        }
+
+        if account_created and user:
+            response_data.update({
+                'account_created': True,
+                'user_id': user.id,
+                'username': user.username,
+                'password': password,
+            })
+
+        return Response(response_data)  
+
+    @action(detail=True, methods=['get'], url_path='board-members')
+    def board_members(self, request, pk=None):
+        """Получить список членов правления"""
+        organization = self.get_object()
+
+        # Члены правления - это сотрудники с ролью 'other' или специальные назначения
+        assignments = organization.staff_assignments.filter(
+            is_active=True,
+            role__in=['manager', 'secretary', 'other']
+        ).select_related('user')
+
+        data = []
+        for assignment in assignments:
+            # Ищем связанного владельца
+            owner = None
+            if hasattr(assignment.user, 'owner_profile'):
+                owner = assignment.user.owner_profile
+
+            data.append({
+                'id': assignment.id,
+                'user_id': assignment.user_id,
+                'owner_id': owner.id if owner else None,
+                'owner_name': assignment.user.full_name,
+                'position': assignment.position_title or assignment.get_role_display(),
+                'has_account': True,
+                'username': assignment.user.username,
+                'role': assignment.role,
+            })
+
+        return Response({
+            'count': len(data),
+            'results': data,
+        })  
+
+    @action(detail=True, methods=['post'], url_path='add-board-member')
+    def add_board_member(self, request, pk=None):
+        """Добавить члена правления"""
+        organization = self.get_object()
+
+        owner_id = request.data.get('owner_id')
+        position = request.data.get('position', 'Член правления')
+        create_account = request.data.get('create_account', False)
+        username = request.data.get('username')
+        password = request.data.get('password')
+
+        try:
+            owner = Owner.objects.get(id=owner_id)
+        except Owner.DoesNotExist:
+            return Response(
+                {'detail': 'Владелец не найден'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        user = None
+        account_created = False
+
+        if create_account:
+            owner_email = owner.primary_email
+            owner_phone = owner.primary_phone
+
+            existing_user = None
+            if owner_email:
+                existing_user = User.objects.filter(email=owner_email).first()
+
+            if not existing_user:
+                if not username:
+                    username = owner_phone or owner.full_name.lower().replace(' ', '.')
+                    username = re.sub(r'[^\w.]', '', username)
+                    base_username = username
+                    counter = 1
+                    while User.objects.filter(username=username).exists():
+                        username = f"{base_username}{counter}"
+                        counter += 1
+
+                if not password:
+                    password = User.objects.make_random_password()
+
+                user = User.objects.create_user(
+                    username=username,
+                    email=owner_email,
+                    password=password,
+                    first_name=owner.full_name.split()[1] if len(owner.full_name.split()) > 1 else '',
+                    last_name=owner.full_name.split()[0] if owner.full_name.split() else owner.full_name,
+                    phone=owner_phone,
+                    role='viewer',  # Член правления - наблюдатель с расширенными правами
+                    is_active=True,
+                    organization=organization,
+                )
+                account_created = True
+            else:
+                user = existing_user
+
+        # Создаем назначение
+        if user:
+            assignment = OrganizationStaffAssignment.assign_staff(
+                organization=organization,
+                user=user,
+                role='other',
+                position_title=position
+            )
+
+        response_data = {
+            'detail': 'Член правления добавлен',
+            'owner_id': owner.id,
+            'owner_name': owner.full_name,
+        }
+
+        if account_created and user:
+            response_data.update({
+                'account_created': True,
+                'user_id': user.id,
+                'username': user.username,
+                'password': password,
+            })
+
+        return Response(response_data, status=status.HTTP_201_CREATED)  
+
+    @action(detail=True, methods=['post'], url_path='remove-board-member/(?P<member_id>[^/.]+)')
+    def remove_board_member(self, request, pk=None, member_id=None):
+        """Удалить члена правления"""
+        try:
+            assignment = OrganizationStaffAssignment.objects.get(
+                id=member_id,
+                organization_id=pk
+            )
+        except OrganizationStaffAssignment.DoesNotExist:
+            return Response(
+                {'detail': 'Член правления не найден'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        assignment.deactivate()
+
+        return Response({'detail': 'Член правления удален'})    
+
+    @action(detail=True, methods=['post'], url_path='create-board-member-account/(?P<member_id>[^/.]+)')
+    def create_board_member_account(self, request, pk=None, member_id=None):
+        """Создать аккаунт для существующего члена правления"""
+        try:
+            assignment = OrganizationStaffAssignment.objects.get(
+                id=member_id,
+                organization_id=pk
+            )
+        except OrganizationStaffAssignment.DoesNotExist:
+            return Response(
+                {'detail': 'Член правления не найден'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        username = request.data.get('username')
+        password = request.data.get('password')
+
+        if not password:
+            password = User.objects.make_random_password()
+
+        # Обновляем пользователя
+        user = assignment.user
+        if username:
+            user.username = username
+        user.set_password(password)
+        user.is_active = True
+        user.save()
+
+        return Response({
+            'detail': 'Аккаунт создан',
+            'username': user.username,
+            'password': password,
+        })
 
 class OrganizationListView(TemplateView):
     template_name = 'organizations/list.html'

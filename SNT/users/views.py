@@ -129,6 +129,22 @@ class OwnerViewSet(OrganizationMixin, viewsets.ModelViewSet):
         """Оптимизация запросов с фильтрацией"""
         queryset = super().get_queryset()
         
+        # Админы видят всех
+        if self.request.user.is_superuser or self.request.user.is_admin:
+            pass  # Не фильтруем
+        else:
+            # Фильтруем по организации пользователя
+            org = getattr(self.request, 'current_organization', None)
+            if org:
+                queryset = queryset.filter(
+                    memberships__organization=org, 
+                    memberships__status='active'
+                )
+            else:
+                # Если организации нет - показываем пустой список
+                # или всех владельцев без организации
+                queryset = queryset.filter(memberships__isnull=True)
+                
         # Фильтрация по наличию участков
         has_plots = self.request.query_params.get('has_plots')
         if has_plots is not None:

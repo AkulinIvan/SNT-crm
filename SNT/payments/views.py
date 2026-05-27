@@ -8,12 +8,12 @@ from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django.db import transaction as db_transaction
-from django.db.models import Sum
+from django.db import models
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from django.http import HttpResponse, JsonResponse
 from django.template.loader import render_to_string
-from django.core.exceptions import PermissionDenied
+
 import json
 import logging
 from django.utils.decorators import method_decorator
@@ -269,61 +269,66 @@ class AssessmentViewSet(OrganizationMixin, viewsets.ModelViewSet):
     @action(detail=False, methods=['post'], url_path='mass-generate')
     def mass_generate_assessments(self, request):
         """Массовое создание начислений для выбранных владельцев"""
-        
+
         logger.info("=" * 50)
         logger.info("MASS GENERATE ASSESSMENTS CALLED")
         logger.info(f"Request data: {request.data}")
-        
+
         owner_ids = request.data.get('owner_ids', [])
         period_id = request.data.get('period_id')
         category_id = request.data.get('category_id')
         generate_receipts = request.data.get('generate_receipts', False)
         output_format = request.data.get('format', 'json')
-        skip_existing = request.data.get('skip_existing', True) 
+        skip_existing = request.data.get('skip_existing', True)     
 
         logger.info(f"Params: owner_ids={owner_ids}, period_id={period_id}, category_id={category_id}")
-        logger.info(f"generate_receipts={generate_receipts}, output_format={output_format}")    
+        logger.info(f"generate_receipts={generate_receipts}, output_format={output_format}")        
 
         if not owner_ids or not period_id or not category_id:
             logger.error("Missing required parameters")
             return Response(
                 {'detail': 'Укажите owner_ids, period_id и category_id'},
                 status=status.HTTP_400_BAD_REQUEST
-            )   
+            )       
 
         try:
             period = PaymentPeriod.objects.get(id=period_id)
             category = PaymentCategory.objects.get(id=category_id)
             owners = Owner.objects.filter(id__in=owner_ids)
-            
+
             logger.info(f"Period found: {period}")
             logger.info(f"Category found: id={category.id}, name={category.name}")
             logger.info(f"Category unit={category.unit}, rate_per_unit={category.rate_per_unit}, default_amount={category.default_amount}")
             logger.info(f"Owners count: {owners.count()}")
-            
+
         except PaymentPeriod.DoesNotExist:
             logger.error(f"Period {period_id} not found")
             return Response({'detail': 'Период не найден'}, status=status.HTTP_404_NOT_FOUND)
         except PaymentCategory.DoesNotExist:
             logger.error(f"Category {category_id} not found")
-            return Response({'detail': 'Категория не найдена'}, status=status.HTTP_404_NOT_FOUND)   
+            return Response({'detail': 'Категория не найдена'}, status=status.HTTP_404_NOT_FOUND)       
 
         if not owners.exists():
             logger.error("No owners found")
-            return Response({'detail': 'Владельцы не найдены'}, status=status.HTTP_404_NOT_FOUND)   
+            return Response({'detail': 'Владельцы не найдены'}, status=status.HTTP_404_NOT_FOUND)       
 
         results = []
         total_created = 0
-        all_receipts_html = []  
+        all_receipts_html = []      
 
         qr_gen = QRCodeGenerator(request=self.request)
         snt_gen = SNTDetailsGenerator(request=self.request)
-        snt_details = snt_gen.get_details() 
+        snt_details = snt_gen.get_details()     
+
+        # Получаем максимальный ID для генерации UID
+        max_id = Assessment.objects.aggregate(models.Max('id'))['id__max'] or 0
+        next_uid_num = max_id + 1
+        existing_uids = set(Assessment.objects.values_list('payment_uid', flat=True))   
 
         with db_transaction.atomic():
             for owner in owners:
                 logger.info(f"Processing owner: {owner.id} - {owner.full_name}")
-                
+
                 owner_result = {
                     'owner_id': owner.id,
                     'owner_name': owner.full_name,
@@ -331,30 +336,30 @@ class AssessmentViewSet(OrganizationMixin, viewsets.ModelViewSet):
                     'skipped': 0,
                     'assessments': [],
                     'receipts': []
-                }   
+                }       
 
                 plots = owner.land_plots.all()
                 logger.info(f"Plots count: {plots.count()}")
-                
+
                 for plot in plots:
                     logger.info(f"Processing plot: {plot.id} - {plot.plot_number}, area: {plot.area_sqm} sqm")
-                    
+
                     # РАСЧЁТ СУММЫ
                     amount = Decimal('0')
                     notes = ''
-                    
+
                     # Проверяем, как считаем
                     if category.rate_per_unit and category.rate_per_unit > 0 and category.unit == 'сотка':
                         area_sotka = Decimal(str(plot.area_sqm)) / Decimal('100')
                         amount = (area_sotka * category.rate_per_unit).quantize(Decimal('0.01'))
                         notes = f"{category.name}: {area_sotka:.2f} соток × {category.rate_per_unit} ₽/сотка = {amount} ₽"
                         logger.info(f"Calculated by area: {area_sotka} * {category.rate_per_unit} = {amount}")
-                        
+
                     elif category.default_amount and category.default_amount > 0:
                         amount = category.default_amount
                         notes = f"{category.name}: {amount} ₽ (фиксированная сумма)"
                         logger.info(f"Fixed amount: {amount}")
-                        
+
                     else:
                         logger.warning(f"Cannot calculate: rate_per_unit={category.rate_per_unit}, unit={category.unit}, default={category.default_amount}")
                         owner_result['skipped'] += 1
@@ -372,27 +377,34 @@ class AssessmentViewSet(OrganizationMixin, viewsets.ModelViewSet):
                         category=category,
                         period=period,
                     ).exists()
-                    
+
                     if skip_existing and exists:
                         logger.info(f"Assessment already exists, skipping")
                         owner_result['skipped'] += 1
-                        continue    
+                        continue        
+
+                    # Генерируем уникальный UID
+                    uid = f"SNT-{next_uid_num:06d}"
+                    while uid in existing_uids:
+                        next_uid_num += 1
+                        uid = f"SNT-{next_uid_num:06d}"
+
+                    existing_uids.add(uid)
 
                     # Создаём начисление
-                    logger.info(f"Creating assessment with amount {amount}")
+                    logger.info(f"Creating assessment with amount {amount} and UID {uid}")
                     assessment = Assessment.objects.create(
                         owner=owner,
                         land_plot=plot,
                         category=category,
                         period=period,
                         amount=amount,
+                        payment_uid=uid,
                         notes=notes
                     )
-                    # Генерируем UID после создания (чтобы был ID)
-                    assessment.payment_uid = f"SNT-{assessment.id:06d}"
-                    assessment.save(update_fields=['payment_uid'])
-                    
+
                     logger.info(f"Created assessment #{assessment.id} with UID {assessment.payment_uid}")   
+                    next_uid_num += 1   
 
                     assessment_data = {
                         'id': assessment.id,
@@ -405,7 +417,7 @@ class AssessmentViewSet(OrganizationMixin, viewsets.ModelViewSet):
                     }
                     owner_result['assessments'].append(assessment_data)
                     owner_result['created'] += 1
-                    total_created += 1  
+                    total_created += 1      
 
                     # Генерируем квитанцию если нужно
                     if generate_receipts:
@@ -417,7 +429,7 @@ class AssessmentViewSet(OrganizationMixin, viewsets.ModelViewSet):
                             period=str(period),
                             category_name=category.name,
                         )
-                        qr_image = qr_gen.get_qr_data_uri(qr_data)  
+                        qr_image = qr_gen.get_qr_data_uri(qr_data)      
 
                         receipt_html = render_to_string('payments/receipt.html', {
                             'assessment': assessment,
@@ -431,7 +443,7 @@ class AssessmentViewSet(OrganizationMixin, viewsets.ModelViewSet):
                             'due_date': str(period.due_date) if period.due_date else '',
                             'purpose': qr_data.split('Purpose=')[-1].split('|')[0] if 'Purpose=' in qr_data else '',
                             'calculation_details': notes,
-                        })  
+                        })      
 
                         owner_result['receipts'].append({
                             'assessment_id': assessment.id,
@@ -439,10 +451,10 @@ class AssessmentViewSet(OrganizationMixin, viewsets.ModelViewSet):
                             'plot_number': plot.plot_number,
                             'html': receipt_html
                         })
-                        all_receipts_html.append(receipt_html)  
+                        all_receipts_html.append(receipt_html)      
 
                 results.append(owner_result)
-                logger.info(f"Owner result: created={owner_result['created']}, skipped={owner_result['skipped']}")  
+                logger.info(f"Owner result: created={owner_result['created']}, skipped={owner_result['skipped']}")      
 
         response_data = {
             'detail': f'Создано {total_created} начислений',
@@ -450,15 +462,15 @@ class AssessmentViewSet(OrganizationMixin, viewsets.ModelViewSet):
             'owners_processed': len(owners),
             'results': results
         }
-        
-        logger.info(f"Final response: {response_data}") 
+
+        logger.info(f"Final response: {response_data}")     
 
         if generate_receipts and output_format == 'pdf' and all_receipts_html:
-            return generate_mass_receipts_pdf(all_receipts_html, period, category)  
+            return generate_mass_receipts_pdf(all_receipts_html, period, category)      
 
         if generate_receipts:
             response_data['receipts_count'] = len(all_receipts_html)
-            response_data['receipts_html'] = all_receipts_html if output_format == 'html' else None 
+            response_data['receipts_html'] = all_receipts_html if output_format == 'html' else None     
 
         return Response(response_data)
 
@@ -482,23 +494,32 @@ class AssessmentViewSet(OrganizationMixin, viewsets.ModelViewSet):
             return Response({'detail': 'Период или категория не найдены'}, status=status.HTTP_404_NOT_FOUND)
 
         created_count = 0
+        skipped_count = 0
         assessments_to_create = []
 
         # Получаем все активные участки с владельцами
         plots = LandPlot.objects.filter(status='active').prefetch_related('owners')
 
+        # Получаем максимальный существующий ID для генерации UID
+        max_id = Assessment.objects.aggregate(models.Max('id'))['id__max'] or 0
+        next_uid_num = max_id + 1
+
+        # Собираем существующие UID для проверки
+        existing_uids = set(Assessment.objects.values_list('payment_uid', flat=True))
+
         with db_transaction.atomic():
             for plot in plots:
                 owners_list = plot.owners.all()
                 for owner in owners_list:
-                    # ИСПРАВЛЕНО: используем calculate_amount
+                    # Рассчитываем сумму
                     if custom_amount:
                         amount = Decimal(str(custom_amount))
                         notes = f"Ручная установка: {custom_amount} ₽"
                     else:
                         amount, notes = category.calculate_amount(land_plot=plot)
-                    
+
                     if amount == 0:
+                        skipped_count += 1
                         continue
 
                     # Проверяем, нет ли уже начисления
@@ -510,6 +531,14 @@ class AssessmentViewSet(OrganizationMixin, viewsets.ModelViewSet):
                     ).exists()
 
                     if not exists:
+                        # Генерируем уникальный UID
+                        uid = f"SNT-{next_uid_num:06d}"
+                        while uid in existing_uids:
+                            next_uid_num += 1
+                            uid = f"SNT-{next_uid_num:06d}"
+
+                        existing_uids.add(uid)
+
                         assessments_to_create.append(
                             Assessment(
                                 owner=owner,
@@ -517,18 +546,22 @@ class AssessmentViewSet(OrganizationMixin, viewsets.ModelViewSet):
                                 category=category,
                                 period=period,
                                 amount=amount,
-                                payment_uid=Assessment.generate_uid(),
+                                payment_uid=uid,
                                 notes=notes,
                             )
                         )
+                        next_uid_num += 1
                         created_count += 1
+                    else:
+                        skipped_count += 1
 
             if assessments_to_create:
                 Assessment.objects.bulk_create(assessments_to_create)
 
         return Response({
-            'detail': f'Создано {created_count} начислений',
+            'detail': f'Создано {created_count} начислений, пропущено {skipped_count}',
             'count': created_count,
+            'skipped': skipped_count,
         })
 
     @action(detail=True, methods=['post'], url_path='send-email')
@@ -1175,11 +1208,15 @@ class AssessmentViewSet(OrganizationMixin, viewsets.ModelViewSet):
         snt_details = snt_gen.get_details()
         receipts_data = []
 
+        # Получаем максимальный ID для генерации UID
+        max_id = Assessment.objects.aggregate(models.Max('id'))['id__max'] or 0
+        next_uid_num = max_id + 1
+        existing_uids = set(Assessment.objects.values_list('payment_uid', flat=True))
+
         with db_transaction.atomic():
             for plot in plots:
-                # ИСПРАВЛЕНО: используем calculate_amount
                 amount, notes = category.calculate_amount(land_plot=plot)
-                
+
                 if amount == 0:
                     continue
                 
@@ -1192,13 +1229,21 @@ class AssessmentViewSet(OrganizationMixin, viewsets.ModelViewSet):
                 ).exists()
 
                 if not exists:
+                    # Генерируем уникальный UID
+                    uid = f"SNT-{next_uid_num:06d}"
+                    while uid in existing_uids:
+                        next_uid_num += 1
+                        uid = f"SNT-{next_uid_num:06d}"
+
+                    existing_uids.add(uid)
+
                     assessment = Assessment.objects.create(
                         owner=owner,
                         land_plot=plot,
                         category=category,
                         period=period,
                         amount=amount,
-                        payment_uid=Assessment.generate_uid(),
+                        payment_uid=uid,
                         notes=notes
                     )
 
@@ -1245,6 +1290,8 @@ class AssessmentViewSet(OrganizationMixin, viewsets.ModelViewSet):
                             'html': receipt_html,
                             'qr_code': qr_image
                         })
+
+                    next_uid_num += 1
 
         response_data = {
             'detail': f'Создано {len(assessments_created)} начислений для владельца {owner.full_name}',
@@ -1300,10 +1347,16 @@ class PaymentViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         queryset = super().get_queryset()
         
-        # Фильтрация по организации через параметр запроса
-        organization = self.request.query_params.get('organization')
-        if organization:
-            queryset = queryset.filter(assessment__owner__memberships__organization_id=organization, assessment__owner__memberships__status='active')
+        if self.request.user.is_superuser or self.request.user.is_admin:
+            return queryset
+
+        # Фильтрация по организации пользователя
+        org = getattr(self.request, 'current_organization', None)
+        if org:
+            queryset = queryset.filter(
+                owner__memberships__organization=org,
+                owner__memberships__status='active'
+            )
         
         return queryset
 

@@ -15,7 +15,6 @@
         </div>
         <div style="display: flex; gap: 8px;">
             <button class="btn btn-primary" onclick="openAddOwnerModal()">+ Добавить владельца</button>
-            <button class="btn btn-secondary" onclick="openMassReceiptModal()">🧾 Массовая квитанция</button>
             <button class="btn btn-secondary" onclick="openMassAssessmentModal()">💰 Массовые начисления</button>
         </div>
     </div>
@@ -38,7 +37,6 @@
         <label>🏢 СНТ:</label>
         <select id="organization-filter" onchange="changeFilter()">
             <option value="">Все СНТ</option>
-            <!-- Опции будут загружены динамически -->
         </select>
     </div>
     <button class="btn btn-secondary" onclick="resetFilters()">Сбросить</button>
@@ -64,7 +62,7 @@
         </thead>
         <tbody id="owners-table-body">
             <tr>
-                <td colspan="7">
+                <td colspan="8">
                     <div class="empty-state">
                         <div class="empty-icon">⏳</div>
                         <h3>Загрузка данных...</h3>
@@ -76,7 +74,6 @@
     <div class="pagination" id="pagination"></div>
 </div>
 
-<!-- Стили для чекбоксов -->
 <style>
     .checkbox-cell {
         text-align: center;
@@ -136,7 +133,6 @@
         loadOwners();
     }
 
-    // Функция загрузки списка СНТ для фильтра
     async function loadOrganizationsFilter() {
         const orgsData = await apiFetch('/api/organizations/?limit=100');
         if (orgsData && orgsData.results) {
@@ -172,25 +168,34 @@
         }
     }
 
+    function clearSelection() {
+        selectedOwners.clear();
+        document.getElementById('select-all').checked = false;
+        const checkboxes = document.querySelectorAll('.owner-checkbox');
+        checkboxes.forEach(checkbox => checkbox.checked = false);
+        showAlert('Выбор очищен', 'info');
+    }
+
+    // ==================== Массовые начисления ====================
+
     async function openMassAssessmentModal() {
         if (selectedOwners.size === 0) {
             showAlert('Выберите хотя бы одного владельца', 'error');
             return;
-        }   
+        }
 
-        // Загружаем категории и периоды
         const [categories, periods] = await Promise.all([
             apiFetch('/api/payment-categories/'),
             apiFetch('/api/payment-periods/')
-        ]); 
+        ]);
 
         if (!categories || !periods) {
             showAlert('Не удалось загрузить данные', 'error');
             return;
-        }   
+        }
 
         const categoriesList = Array.isArray(categories) ? categories : (categories.results || []);
-        const periodsList = Array.isArray(periods) ? periods : (periods.results || []); 
+        const periodsList = Array.isArray(periods) ? periods : (periods.results || []);
 
         const categoryOptions = categoriesList
             .filter(c => c.is_active)
@@ -198,47 +203,43 @@
                 const label = c.unit === 'сотка' 
                     ? `${c.name} (${c.rate_per_unit} ₽/сотка)` 
                     : `${c.name} (${c.default_amount} ₽)`;
-                return `<option value="${c.id}" data-unit="${c.unit}" data-rate="${c.default_amount || c.rate_per_unit}">${escapeHtml(label)}</option>`;
+                return `<option value="${c.id}">${escapeHtml(label)}</option>`;
             })
-            .join('');  
+            .join('');
 
         const periodOptions = periodsList
             .filter(p => p.is_active)
             .map(p => `<option value="${p.id}">${escapeHtml(p.description || p.year + ' год')}</option>`)
-            .join('');  
+            .join('');
 
-        openModal('Массовое создание начислений', `
+        openModal('💰 Массовое создание начислений', `
             <div style="background: var(--primary-light); padding: 12px; border-radius: var(--radius-sm); margin-bottom: 20px;">
                 <strong>Выбрано владельцев: ${selectedOwners.size}</strong>
                 <button type="button" class="btn btn-sm btn-secondary" onclick="clearSelection()" style="margin-left: 10px;">Очистить</button>
             </div>
             <div class="form-group">
                 <label>Категория взноса *</label>
-                <select id="mass-category">${categoryOptions}</select>
+                <select id="mass-category" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
+                    <option value="">— Выберите категорию —</option>
+                    ${categoryOptions}
+                </select>
             </div>
             <div class="form-group">
                 <label>Период *</label>
-                <select id="mass-period">${periodOptions}</select>
-            </div>
-            <div class="form-group">
-                <label>Действие</label>
-                <select id="mass-action">
-                    <option value="assessments_only">Только начисления</option>
-                    <option value="assessments_and_receipts">Начисления + квитанции</option>
+                <select id="mass-period" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
+                    <option value="">— Выберите период —</option>
+                    ${periodOptions}
                 </select>
             </div>
             <div class="form-group">
-                <label>Формат вывода (если с квитанциями)</label>
-                <select id="mass-format">
-                    <option value="json">JSON (данные)</option>
-                    <option value="pdf">PDF (один файл)</option>
-                    <option value="html">HTML (открыть в браузере)</option>
-                </select>
+                <label>Фиксированная сумма (необязательно)</label>
+                <input type="number" id="mass-custom-amount" placeholder="Оставьте 0 для авторасчёта" step="0.01" min="0" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
+                <small style="color: var(--gray-500);">Если указать > 0, будет использована эта сумма для всех</small>
             </div>
             <div class="form-group">
-                <label>Пропустить существующие начисления</label>
-                <label style="display: flex; align-items: center; gap: 8px; margin-top: 8px;">
-                    <input type="checkbox" id="skip-existing" checked> Не создавать дубликаты
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                    <input type="checkbox" id="skip-existing" checked>
+                    Пропускать существующие начисления
                 </label>
             </div>
             <p style="font-size: 0.85rem; color: var(--gray-500); margin-top: 12px;">
@@ -247,133 +248,73 @@
         `, 'Создать', async () => {
             const categoryId = parseInt(document.getElementById('mass-category').value);
             const periodId = parseInt(document.getElementById('mass-period').value);
-            const action = document.getElementById('mass-action').value;
-            const format = document.getElementById('mass-format').value;
-            const skipExisting = document.getElementById('skip-existing').checked;  
+            const customAmount = document.getElementById('mass-custom-amount').value;
+            const skipExisting = document.getElementById('skip-existing').checked;
 
-            const generateReceipts = action === 'assessments_and_receipts';
+            if (!categoryId) {
+                showAlert('Выберите категорию', 'error');
+                return;
+            }
+            if (!periodId) {
+                showAlert('Выберите период', 'error');
+                return;
+            }
 
-            showAlert('Создание начислений... Пожалуйста, подождите', 'info');  
+            showAlert('Создание начислений... Пожалуйста, подождите', 'info');
 
             const ownerIdsArray = Array.from(selectedOwners);
-
-            // Разбиваем на chunks по 10 владельцев для избежания таймаута
             const chunkSize = 10;
-            let allResults = [];
             let totalCreated = 0;
-            let allReceiptsHtml = [];   
+            let totalSkipped = 0;
+            let allResults = [];
 
             for (let i = 0; i < ownerIdsArray.length; i += chunkSize) {
                 const chunk = ownerIdsArray.slice(i, i + chunkSize);
 
+                const body = {
+                    owner_ids: chunk,
+                    period_id: periodId,
+                    category_id: categoryId,
+                    skip_existing: skipExisting,
+                    generate_receipts: false,
+                    format: 'json'
+                };
+
+                if (customAmount && parseFloat(customAmount) > 0) {
+                    body.custom_amount = customAmount;
+                }
+
                 const result = await apiFetch('/api/assessments/mass-generate/', {
                     method: 'POST',
-                    body: JSON.stringify({
-                        owner_ids: chunk,
-                        period_id: periodId,
-                        category_id: categoryId,
-                        generate_receipts: generateReceipts,
-                        format: format,
-                        skip_existing: skipExisting
-                    }),
-                }); 
+                    body: JSON.stringify(body),
+                });
 
                 if (result) {
                     allResults.push(result);
                     totalCreated += result.total_created || 0;
-                    if (result.receipts_html) {
-                        allReceiptsHtml.push(...result.receipts_html);
+                    
+                    // Считаем пропущенные
+                    if (result.results) {
+                        for (const ownerResult of result.results) {
+                            totalSkipped += ownerResult.skipped || 0;
+                        }
                     }
                 }
-            }   
-
-            if (totalCreated === 0) {
-                showAlert('Не создано ни одного начисления (возможно, все уже существуют)', 'warning');
-                return;
-            }   
-
-            showAlert(`Создано ${totalCreated} начислений`, 'success'); 
+            }
 
             closeModal();
-            
-            // Обработка в зависимости от формата
-            if (generateReceipts && format === 'pdf' && allReceiptsHtml.length > 0) {
-                // Генерируем PDF через сервер
-                const response = await fetch('/api/generate-combined-pdf/', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ html: allReceiptsHtml.join('') }),
-                });
 
-                if (response.ok) {
-                    const blob = await response.blob();
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = `массовые_начисления_${new Date().toISOString().slice(0, 19)}.pdf`;
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
-                    URL.revokeObjectURL(url);
-                    showAlert('PDF сформирован', 'success');
-                } else {
-                    showAlert('Ошибка генерации PDF', 'error');
-                }
-            } else if (generateReceipts && format === 'html' && allReceiptsHtml.length > 0) {
-                // Открываем в новой вкладке
-                const printWindow = window.open('', '_blank');
-                printWindow.document.write(`
-                    <!DOCTYPE html>
-                    <html>
-                    <head>
-                        <title>Массовые квитанции</title>
-                        <style>
-                            @page { size: A4; margin: 1cm; }
-                            body { font-family: Arial, sans-serif; }
-                            .receipt-page { page-break-after: always; }
-                        </style>
-                    </head>
-                    <body>
-                        ${allReceiptsHtml.map(html => `<div class="receipt-page">${html}</div>`).join('')}
-                    </body>
-                    </html>
-                `);
-                printWindow.document.close();
-            } else {
-                // Показываем детали
-                showMassAssessmentResults(allResults, totalCreated);
+            if (totalCreated === 0) {
+                showAlert(`Не создано ни одного начисления (пропущено: ${totalSkipped})`, 'warning');
+                return;
             }
+
+            showAlert(`✅ Создано ${totalCreated} начислений, пропущено ${totalSkipped}`, 'success');
+            clearSelection();
         });
-    }   
-
-    function showMassAssessmentResults(results, totalCreated) {
-        let detailsHtml = `<div style="max-height: 400px; overflow-y: auto;">`;
-        detailsHtml += `<h4>Результаты массового создания:</h4>`;
-        detailsHtml += `<p>Всего создано: <strong>${totalCreated}</strong> начислений</p>`;
-        detailsHtml += `<hr>`;
-
-        for (const result of results) {
-            if (result.results) {
-                for (const ownerResult of result.results) {
-                    const statusIcon = ownerResult.created > 0 ? '✅' : '⚠️';
-                    detailsHtml += `
-                        <div style="margin-bottom: 12px; padding: 8px; background: var(--gray-100); border-radius: var(--radius-sm);">
-                            <strong>${statusIcon} ${escapeHtml(ownerResult.owner_name)}</strong><br>
-                            Создано: ${ownerResult.created} | Пропущено: ${ownerResult.skipped}
-                            ${ownerResult.error ? `<br><span style="color: var(--danger);">Ошибка: ${ownerResult.error}</span>` : ''}
-                        </div>
-                    `;
-                }
-            }
-        }
-
-        detailsHtml += `</div>`;
-
-        openModal('Результаты массового создания', detailsHtml, 'Закрыть', () => {});
     }
 
+    // ==================== Загрузка списка владельцев ====================
 
     async function loadOwners() {
         const params = new URLSearchParams({
@@ -394,7 +335,7 @@
         if (!data.results || data.results.length === 0) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="7">
+                    <td colspan="8">
                         <div class="empty-state">
                             <div class="empty-icon">🔍</div>
                             <h3>Владельцы не найдены</h3>
@@ -412,6 +353,7 @@
             <tr>
                 <td class="checkbox-cell">
                     <input type="checkbox" class="owner-checkbox" value="${owner.id}" 
+                           ${selectedOwners.has(owner.id) ? 'checked' : ''}
                            onchange="toggleOwnerSelection(this, ${owner.id})">
                 </td>
                 <td>
@@ -445,7 +387,7 @@
                         <button class="btn-icon danger" onclick="confirmDeleteOwner(${owner.id}, '${escapeHtml(owner.full_name)}')" title="Удалить">🗑️</button>
                     </div>
                 </td>
-            </td>
+            </tr>
         `).join('');
 
         renderPagination(data);
@@ -478,439 +420,93 @@
         paginationDiv.innerHTML = html;
     }
 
-    // ==================== Массовое создание квитанций ====================
-    
-    async function openMassReceiptModal() {
-    if (selectedOwners.size === 0) {
-        showAlert('Выберите хотя бы одного владельца', 'error');
-        return;
-    }
-
-    // Загружаем категории и периоды
-    const [categories, periods] = await Promise.all([
-        apiFetch('/api/payment-categories/'),
-        apiFetch('/api/payment-periods/')
-    ]);
-
-    if (!categories || !periods) {
-        showAlert('Не удалось загрузить данные', 'error');
-        return;
-    }
-
-    const categoriesList = Array.isArray(categories) ? categories : (categories.results || []);
-    const periodsList = Array.isArray(periods) ? periods : (periods.results || []);
-
-    const categoryOptions = categoriesList
-        .filter(c => c.is_active)
-        .map(c => {
-            const label = c.unit === 'сотка' 
-                ? `${c.name} (${c.default_amount || c.rate_per_unit} ₽/сотка)` 
-                : `${c.name} (${c.default_amount} ₽)`;
-            return `<option value="${c.id}" data-unit="${c.unit}" data-rate="${c.default_amount || c.rate_per_unit}">${escapeHtml(label)}</option>`;
-        })
-        .join('');
-
-    const periodOptions = periodsList
-        .filter(p => p.is_active)
-        .map(p => `<option value="${p.id}">${escapeHtml(p.description || p.year + ' год')}</option>`)
-        .join('');
-
-    openModal('Массовое создание квитанций', `
-        <div style="background: var(--primary-light); padding: 12px; border-radius: var(--radius-sm); margin-bottom: 20px;">
-            <strong>Выбрано владельцев: ${selectedOwners.size}</strong>
-            <button type="button" class="btn btn-sm btn-secondary" onclick="clearSelection()" style="margin-left: 10px;">Очистить</button>
-        </div>
-        <div class="form-group">
-            <label>Категория взноса *</label>
-            <select id="mass-category">${categoryOptions}</select>
-        </div>
-        <div class="form-group">
-            <label>Период *</label>
-            <select id="mass-period">${periodOptions}</select>
-        </div>
-        <div class="form-group">
-            <label>Действие</label>
-            <select id="mass-action">
-                <option value="receipts_only">Только квитанции (из существующих начислений)</option>
-                <option value="create_and_receipts">Создать начисления + квитанции</option>
-            </select>
-        </div>
-        <div class="form-group">
-            <label>Формат вывода</label>
-            <select id="mass-format">
-                <option value="html">HTML (открыть в браузере)</option>
-                <option value="pdf">PDF (скачать архивом)</option>
-                <option value="print">Печать (открыть диалог печати)</option>
-            </select>
-        </div>
-        <div id="additional-options" style="display: none;">
-            <div class="form-group">
-                <label>Дополнительно</label>
-                <label style="display: block; margin-top: 8px;">
-                    <input type="checkbox" id="combine-pdf"> Объединить все квитанции в один PDF
-                </label>
-            </div>
-        </div>
-        <p style="font-size: 0.85rem; color: var(--gray-500); margin-top: 12px;">
-            ⚠️ Для каждого владельца будет создана отдельная квитанция по его участкам
-        </p>
-    `, 'Создать', async () => {
-        const categoryId = parseInt(document.getElementById('mass-category').value);
-        const periodId = parseInt(document.getElementById('mass-period').value);
-        const action = document.getElementById('mass-action').value;
-        const format = document.getElementById('mass-format').value;
-        const combinePdf = document.getElementById('combine-pdf')?.checked || false;
-
-        showAlert('Создание квитанций... Пожалуйста, подождите', 'info');
-
-        const results = [];
-        let successCount = 0;
-        let errorCount = 0;
-        let allReceiptsHtml = [];
-
-        for (const ownerId of selectedOwners) {
-            try {
-                let assessments = [];
-                
-                if (action === 'create_and_receipts') {
-                    // Создаём начисления и получаем квитанции
-                    const createResult = await apiFetch('/api/assessments/generate-for-owner/', {
-                        method: 'POST',
-                        body: JSON.stringify({
-                            owner_id: ownerId,
-                            period_id: periodId,
-                            category_id: categoryId,
-                            generate_receipts: true,
-                            format: format === 'pdf' ? 'pdf' : 'html'
-                        }),
-                    });
-                    
-                    if (createResult && createResult.assessments) {
-                        assessments = createResult.assessments;
-                        successCount += createResult.assessments.length;
-                        
-                        if (createResult.receipts) {
-                            for (const receipt of createResult.receipts) {
-                                allReceiptsHtml.push(receipt.html);
-                            }
-                        }
-                    } else {
-                        errorCount++;
-                    }
-                } else {
-                    // Только получить существующие начисления
-                    const assessmentsData = await apiFetch(`/api/assessments/?owner=${ownerId}&period=${periodId}&category=${categoryId}`);
-                    if (assessmentsData && assessmentsData.results && assessmentsData.results.length > 0) {
-                        assessments = assessmentsData.results;
-                        successCount += assessmentsData.results.length;
-                        
-                        // Получаем HTML каждой квитанции
-                        for (const assessment of assessmentsData.results) {
-                            const receiptResponse = await fetch(`/api/assessments/${assessment.id}/receipt-html/`);
-                            const receiptHtml = await receiptResponse.text();
-                            allReceiptsHtml.push(receiptHtml);
-                        }
-                    } else {
-                        errorCount++;
-                    }
-                }
-                
-                results.push({
-                    ownerId: ownerId,
-                    success: assessments.length > 0,
-                    count: assessments.length
-                });
-                
-            } catch (e) {
-                console.error(`Ошибка для владельца ${ownerId}:`, e);
-                errorCount++;
-            }
-        }
-
-        if (successCount === 0) {
-            showAlert('Не удалось создать ни одной квитанции', 'error');
-            return;
-        }
-
-        showAlert(`Создано ${successCount} квитанций, ошибок: ${errorCount}`, 'success');
-
-        // Обработка результатов в зависимости от формата
-        if (format === 'pdf') {
-            if (combinePdf && allReceiptsHtml.length > 0) {
-                // Генерируем объединённый PDF
-                await generateCombinedPDF(allReceiptsHtml);
-            } else {
-                // Открываем первую квитанцию для печати
-                if (allReceiptsHtml.length > 0) {
-                    openPrintWindow(allReceiptsHtml);
-                }
-            }
-        } else if (format === 'print') {
-            if (allReceiptsHtml.length > 0) {
-                openPrintWindow(allReceiptsHtml);
-            }
-        } else {
-            // HTML формат - открываем в новой вкладке
-            if (results.length > 0 && results[0].success) {
-                // Показываем список созданных квитанций
-                showReceiptsList(results, allReceiptsHtml);
-            }
-        }
-    });
-}
-
-function openPrintWindow(receiptsHtml) {
-    const printWindow = window.open('', '_blank');
-    printWindow.document.write(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>Квитанции для печати</title>
-            <style>
-                @page { size: A4; margin: 1cm; }
-                body { font-family: Arial, sans-serif; }
-                .receipt-container {
-                    page-break-after: always;
-                    margin-bottom: 20px;
-                }
-                .receipt-container:last-child {
-                    page-break-after: auto;
-                }
-            </style>
-        </head>
-        <body>
-            ${receiptsHtml.map(html => `<div class="receipt-container">${html}</div>`).join('')}
-            <script>
-                window.onload = () => {
-                    setTimeout(() => {
-                        window.print();
-                        setTimeout(() => window.close(), 1000);
-                    }, 500);
-                };
-            <\/script>
-        </body>
-        </html>
-    `);
-    printWindow.document.close();
-}
-
-async function generateCombinedPDF(receiptsHtml) {
-    showAlert('Генерация PDF...', 'info');
-    
-    const combinedHtml = `
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="UTF-8">
-            <title>Сводные квитанции</title>
-            <style>
-                @page { size: A4; margin: 1cm; }
-                body { font-family: Arial, sans-serif; }
-                .receipt-page {
-                    page-break-after: always;
-                    margin-bottom: 20px;
-                }
-                .receipt-page:last-child {
-                    page-break-after: auto;
-                }
-            </style>
-        </head>
-        <body>
-            ${receiptsHtml.map(html => `<div class="receipt-page">${html}</div>`).join('')}
-        </body>
-        </html>
-    `;
-    
-    // Отправляем на сервер для генерации PDF
-    const response = await fetch('/api/generate-combined-pdf/', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ html: combinedHtml }),
-    });
-    
-    if (response.ok) {
-        const blob = await response.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `квитанции_${new Date().toISOString().slice(0, 19)}.pdf`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        showAlert('PDF сформирован', 'success');
-    } else {
-        showAlert('Ошибка генерации PDF', 'error');
-    }
-}
-
-function showReceiptsList(results, receiptsHtml) {
-    const summary = results.filter(r => r.success).map(r => 
-        `<li>Владелец ID ${r.ownerId}: ${r.count} квитанций</li>`
-    ).join('');
-    
-    openModal('Результаты создания', `
-        <div style="max-height: 400px; overflow-y: auto;">
-            <h4>Создано квитанций:</h4>
-            <ul>${summary}</ul>
-            <hr>
-            <button class="btn btn-primary" onclick="openPrintWindow(receiptsHtml)">🖨️ Печать всех</button>
-            <button class="btn btn-secondary" onclick="downloadAllReceipts()">📥 Скачать ZIP</button>
-        </div>
-    `, 'Закрыть', () => {});
-    
-    window.receiptsHtml = receiptsHtml;
-    
-    window.downloadAllReceipts = function() {
-        // Создаём ZIP архив с квитанциями
-        const zip = new JSZip();
-        receiptsHtml.forEach((html, index) => {
-            zip.file(`квитанция_${index + 1}.html`, html);
-        });
-        zip.generateAsync({ type: 'blob' }).then(content => {
-            const url = URL.createObjectURL(content);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'квитанции.zip';
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-        });
-    };
-}
-
-    async function generateMassPDF(results) {
-        showAlert('Генерация PDF...', 'info');
-        
-        const htmlContent = [];
-        
-        for (const result of results) {
-            if (!result.success) continue;
-            
-            // Получаем HTML каждой квитанции
-            const response = await fetch(`/api/assessments/${result.assessmentId}/receipt-html/`);
-            const html = await response.text();
-            
-            // Извлекаем только содержимое квитанции
-            const parser = new DOMParser();
-            const doc = parser.parseFromString(html, 'text/html');
-            const receipt = doc.querySelector('.receipt');
-            if (receipt) {
-                htmlContent.push(`<div style="page-break-after: always;">${receipt.outerHTML}</div>`);
-            }
-        }
-        
-        // Создаём blob для печати
-        const printWindow = window.open('', '_blank');
-        printWindow.document.write(`
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <title>Массовые квитанции</title>
-                <style>
-                    @page { size: A4; margin: 1cm; }
-                    body { font-family: Arial, sans-serif; }
-                    .receipt { max-width: 800px; margin: 0 auto; }
-                </style>
-            </head>
-            <body>
-                ${htmlContent.join('')}
-                <script>
-                    window.onload = () => { window.print(); setTimeout(() => window.close(), 1000); };
-                <\/script>
-            </body>
-            </html>
-        `);
-        printWindow.document.close();
-    }
-
-    function clearSelection() {
-        selectedOwners.clear();
-        document.getElementById('select-all').checked = false;
-        const checkboxes = document.querySelectorAll('.owner-checkbox');
-        checkboxes.forEach(checkbox => checkbox.checked = false);
-        showAlert('Выбор очищен', 'info');
-    }
-
     // ==================== Добавление владельца ====================
-    
+
     function openAddOwnerModal() {
         openModal('Добавить владельца', `
             <div class="form-group">
                 <label>ФИО *</label>
-                <input type="text" id="owner-fullname" placeholder="Иванов Иван Иванович" required>
+                <input type="text" id="owner-fullname" placeholder="Иванов Иван Иванович" required style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
             </div>
-        `, 'Добавить', async (closeModal) => {  // ← ДОБАВИТЬ closeModal как параметр
+        `, 'Добавить', async () => {
             const fullName = document.getElementById('owner-fullname').value.trim();
             if (!fullName) {
                 showAlert('Введите ФИО владельца', 'error');
                 return;
-            }   
+            }
 
             const result = await apiFetch('/api/owners/', {
                 method: 'POST',
                 body: JSON.stringify({ full_name: fullName }),
-            }); 
+            });
 
             if (result) {
                 showAlert('Владелец добавлен', 'success');
-                if (typeof closeModal === 'function') closeModal();  // ← Проверяем и вызываем closeModal
+                closeModal();
                 loadOwners();
             }
         });
     }
 
     // ==================== Редактирование владельца ====================
-    
+
     async function openEditOwnerModal(id) {
         const owner = await apiFetch(`/api/owners/${id}/`);
-        if (!owner) return; 
+        if (!owner) return;
 
-        openModal(`Редактировать владельца`, `
+        openModal('Редактировать владельца', `
             <div class="form-group">
                 <label>ФИО *</label>
-                <input type="text" id="edit-owner-fullname" value="${escapeHtml(owner.full_name)}" required>
+                <input type="text" id="edit-owner-fullname" value="${escapeHtml(owner.full_name)}" required style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
             </div>
-        `, 'Сохранить', async (closeModal) => {  // ← ДОБАВИТЬ closeModal как параметр
+        `, 'Сохранить', async () => {
             const fullName = document.getElementById('edit-owner-fullname').value.trim();
             if (!fullName) {
                 showAlert('Введите ФИО владельца', 'error');
                 return;
-            }       
+            }
 
             const result = await apiFetch(`/api/owners/${id}/`, {
                 method: 'PATCH',
                 body: JSON.stringify({ full_name: fullName }),
-            }); 
+            });
 
             if (result) {
                 showAlert('Владелец обновлён', 'success');
-                if (typeof closeModal === 'function') closeModal();  // ← Проверяем и вызываем closeModal
+                closeModal();
                 loadOwners();
             }
         });
     }
+
     // ==================== Удаление владельца ====================
-    
+
     function confirmDeleteOwner(id, fullName) {
         openModal('Удаление владельца', `
             <p>Вы действительно хотите удалить владельца <strong>${escapeHtml(fullName)}</strong>?</p>
             <p style="color: var(--danger); font-size: 0.85rem; margin-top: 8px;">
                 Это действие нельзя отменить. Все контакты и связи с участками будут удалены.
             </p>
-        `, 'Удалить', async (closeModal) => {
+        `, 'Удалить', async () => {
             const result = await apiFetch(`/api/owners/${id}/`, {
                 method: 'DELETE',
             });
             if (result !== null) {
                 showAlert('Владелец удалён', 'success');
-                if (typeof closeModal === 'function') closeModal();  // ← Проверяем и вызываем closeModal
+                closeModal();
                 loadOwners();
             }
         });
+    }
+
+    // ==================== Вспомогательные функции ====================
+
+    function formatDate(dateString) {
+        if (!dateString) return '—';
+        try {
+            const date = new Date(dateString);
+            return date.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        } catch (e) { return dateString; }
     }
 
     function pluralize(n, one, few, many) {
@@ -928,6 +524,7 @@ function showReceiptsList(results, receiptsHtml) {
         return div.innerHTML;
     }
 
+    // Инициализация
     document.addEventListener('DOMContentLoaded', () => {
         loadOrganizationsFilter();
         loadOwners();

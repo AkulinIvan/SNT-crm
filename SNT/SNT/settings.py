@@ -219,20 +219,23 @@ MEDIA_ROOT = BASE_DIR / 'media'
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '{levelname} {asctime} {module} {message}',
+            'style': '{',
+        },
+    },
     'handlers': {
         'console': {
             'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
         },
     },
     'loggers': {
-        'payments': {
+        'accounts.middleware': {
             'handlers': ['console'],
             'level': 'DEBUG',
             'propagate': True,
-        },
-        'django': {
-            'handlers': ['console'],
-            'level': 'INFO',
         },
     },
 }

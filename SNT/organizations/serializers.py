@@ -21,6 +21,8 @@ class OrganizationDetailSerializer(serializers.ModelSerializer):
     """Полный сериализатор СНТ"""
     chairman_name = serializers.CharField(source='chairman.full_name', read_only=True)
     accountant_name = serializers.CharField(source='accountant.full_name', read_only=True)
+    chairman_has_account = serializers.SerializerMethodField()
+    accountant_has_account = serializers.SerializerMethodField()
     chairman_id = serializers.PrimaryKeyRelatedField(
         source='chairman',
         queryset=User.objects.all(),
@@ -40,6 +42,18 @@ class OrganizationDetailSerializer(serializers.ModelSerializer):
         model = Organization
         fields = '__all__'
         read_only_fields = ['created_at', 'updated_at']
+    
+    def get_chairman_has_account(self, obj):
+        """Проверяет, есть ли у председателя аккаунт в системе"""
+        if obj.chairman:
+            return obj.chairman.is_active
+        return False
+    
+    def get_accountant_has_account(self, obj):
+        """Проверяет, есть ли у бухгалтера аккаунт в системе"""
+        if obj.accountant:
+            return obj.accountant.is_active
+        return False
 
 
 class OrganizationMembershipSerializer(serializers.ModelSerializer):

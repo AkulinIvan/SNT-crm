@@ -206,23 +206,27 @@ class Assessment(models.Model):
     def generate_uid(cls):
         """
         Генерация уникального UID для квитанции.
-        Использует максимальный существующий ID + 1 вместо последовательности.
+        Использует максимальный существующий ID + 1.
         """
-        # Получаем максимальный существующий ID
-        max_id = cls.objects.aggregate(models.Max('id'))['id__max']
+        from django.db import transaction
         
-        if max_id is not None:
-            next_id = max_id + 1
-        else:
-            next_id = 1
-        
-        # Проверяем, что UID не занят (на случай параллельных запросов)
-        uid = f"SNT-{next_id:06d}"
-        while cls.objects.filter(payment_uid=uid).exists():
-            next_id += 1
+        # Используем блокировку для предотвращения дубликатов при параллельных запросах
+        with transaction.atomic():
+            # Получаем максимальный ID
+            max_id = cls.objects.aggregate(models.Max('id'))['id__max']
+            
+            if max_id is not None:
+                next_id = max_id + 1
+            else:
+                next_id = 1
+            
+            # Проверяем, что UID не занят
             uid = f"SNT-{next_id:06d}"
-        
-        return uid
+            while cls.objects.filter(payment_uid=uid).exists():
+                next_id += 1
+                uid = f"SNT-{next_id:06d}"
+            
+            return uid  
 
 
     def __str__(self):

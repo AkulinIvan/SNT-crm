@@ -62,22 +62,31 @@
             <div class="table-container">
                 <div class="table-toolbar">
                     <span style="font-weight: 600;">👔 Руководство</span>
-                    <button class="btn btn-primary btn-sm" onclick="openAssignChairmanModal()" id="btn-assign-chairman">👑 Назначить председателя</button>
                 </div>
                 <table style="width: 100%; border-collapse: collapse;">
                     <tbody>
                         <tr>
                             <td style="color: var(--gray-500); width: 40%;">Председатель</td>
-                            <td id="info-chairman">—</td>
+                            <td id="info-chairman">
+                                <div style="display: flex; align-items: center; gap: 8px;">
+                                    <span id="chairman-name">—</span>
+                                    <span id="chairman-badge" style="display: none;"></span>
+                                </div>
+                            </td>
                             <td style="width: 50px;">
-                                <button class="btn-icon" onclick="openAssignChairmanModal()" title="Изменить председателя" id="btn-edit-chairman" style="display: none;">✏️</button>
+                                <button class="btn-icon" onclick="openAssignChairmanModal()" title="Изменить председателя" id="btn-edit-chairman">✏️</button>
                             </td>
                         </tr>
                         <tr>
                             <td style="color: var(--gray-500);">Бухгалтер</td>
-                            <td id="info-accountant">—</td>
+                            <td id="info-accountant">
+                                <div style="display: flex; align-items: center; gap: 8px;">
+                                    <span id="accountant-name">—</span>
+                                    <span id="accountant-badge" style="display: none;"></span>
+                                </div>
+                            </td>
                             <td>
-                                <button class="btn-icon" onclick="openAssignAccountantModal()" title="Изменить бухгалтера" id="btn-edit-accountant" style="display: none;">✏️</button>
+                                <button class="btn-icon" onclick="openAssignAccountantModal()" title="Изменить бухгалтера" id="btn-edit-accountant">✏️</button>
                             </td>
                         </tr>
                         <tr>
@@ -87,6 +96,20 @@
                         </tr>
                     </tbody>
                 </table>
+            </div>
+            
+            <!-- Члены правления -->
+            <div class="table-container" style="margin-top: 24px;">
+                <div class="table-toolbar">
+                    <span style="font-weight: 600;">👥 Члены правления</span>
+                    <button class="btn btn-primary btn-sm" onclick="openAddBoardMemberModal()">+ Добавить</button>
+                </div>
+                <div id="board-members-list" style="padding: 12px;">
+                    <div class="empty-state">
+                        <div class="empty-icon">👥</div>
+                        <p>Загрузка...</p>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -152,7 +175,8 @@
     const pathParts = window.location.pathname.split('/');
     const orgId = parseInt(pathParts[pathParts.length - 2]);
     let orgData = null;
-    let availableUsers = [];
+    let availableOwners = [];
+    let boardMembers = [];
 
     async function loadOrganizationDetail() {
         orgData = await apiFetch(`/api/organizations/${orgId}/`);
@@ -191,11 +215,8 @@
         safeSetText('info-bank-corr', formatAccount(orgData.bank_corr_account));
 
         // Руководство
-        const chairmanName = orgData.chairman_name || '—';
-        const accountantName = orgData.accountant_name || '—';
-        
-        safeSetText('info-chairman', chairmanName);
-        safeSetText('info-accountant', accountantName);
+        updateChairmanDisplay(orgData);
+        updateAccountantDisplay(orgData);
         
         const statusHtml = orgData.is_active 
             ? '<span class="badge-status badge-active">Активно</span>' 
@@ -203,33 +224,494 @@
         safeSetHTML('info-is-active', statusHtml);
         safeSetHTML('org-status-badge', statusHtml);
 
-        // Показываем кнопки редактирования только если пользователь имеет права
-        const currentUser = await apiFetch('/api/auth/me/');
-        if (currentUser && (currentUser.is_superuser || currentUser.role === 'admin' || currentUser.role === 'manager')) {
-            document.getElementById('btn-edit-chairman').style.display = 'inline-block';
-            document.getElementById('btn-edit-accountant').style.display = 'inline-block';
-        }
-
-        // Загружаем статистику и членов
+        // Загружаем данные
         loadOrgStats();
         loadMembers();
-        loadAvailableUsers();
+        loadAvailableOwners();
+        loadBoardMembers();
     }
 
-    async function loadAvailableUsers() {
-        // Загружаем пользователей для назначения на роли
-        const usersData = await apiFetch('/api/users/?limit=100');
-        if (usersData && usersData.results) {
-            availableUsers = usersData.results;
+    function updateChairmanDisplay(data) {
+        const chairmanName = document.getElementById('chairman-name');
+        const chairmanBadge = document.getElementById('chairman-badge');
+        
+        if (data.chairman_name) {
+            chairmanName.textContent = data.chairman_name;
+            if (data.chairman_has_account) {
+                chairmanBadge.style.display = 'inline';
+                chairmanBadge.innerHTML = '<span class="badge-status badge-active" title="Есть доступ в систему">✓ Аккаунт</span>';
+            } else {
+                chairmanBadge.style.display = 'inline';
+                chairmanBadge.innerHTML = '<span class="badge-status badge-warning" title="Нет доступа в систему">⚠ Нет аккаунта</span>';
+            }
+        } else {
+            chairmanName.textContent = '—';
+            chairmanBadge.style.display = 'none';
         }
     }
 
-    function formatAccount(account) {
-        if (!account) return '—';
-        const digits = account.replace(/\D/g, '');
-        const groups = digits.match(/.{1,4}/g);
-        return groups ? groups.join(' ') : account;
+    function updateAccountantDisplay(data) {
+        const accountantName = document.getElementById('accountant-name');
+        const accountantBadge = document.getElementById('accountant-badge');
+        
+        if (data.accountant_name) {
+            accountantName.textContent = data.accountant_name;
+            if (data.accountant_has_account) {
+                accountantBadge.style.display = 'inline';
+                accountantBadge.innerHTML = '<span class="badge-status badge-active" title="Есть доступ в систему">✓ Аккаунт</span>';
+            } else {
+                accountantBadge.style.display = 'inline';
+                accountantBadge.innerHTML = '<span class="badge-status badge-warning" title="Нет доступа в систему">⚠ Нет аккаунта</span>';
+            }
+        } else {
+            accountantName.textContent = '—';
+            accountantBadge.style.display = 'none';
+        }
     }
+
+    async function loadAvailableOwners() {
+        let allOwners = [];
+        let nextUrl = '/api/owners/?limit=100';
+
+        while (nextUrl) {
+            const data = await apiFetch(nextUrl);
+            if (data && data.results) {
+                allOwners = allOwners.concat(data.results);
+                nextUrl = data.next;  // URL следующей страницы или null
+            } else {
+                break;
+            }
+        }
+        availableOwners = allOwners;
+    }
+
+    async function loadBoardMembers() {
+        const data = await apiFetch(`/api/organizations/${orgId}/board-members/`);
+        const container = document.getElementById('board-members-list');
+        
+        if (data && data.results && data.results.length > 0) {
+            boardMembers = data.results;
+            container.innerHTML = data.results.map(m => `
+                <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--gray-200);">
+                    <div>
+                        <strong>${escapeHtml(m.owner_name)}</strong>
+                        <span style="color: var(--gray-500); margin-left: 8px;">${escapeHtml(m.position || 'Член правления')}</span>
+                        ${m.has_account 
+                            ? '<span class="badge-status badge-active" style="margin-left: 8px; font-size: 0.75rem;">✓ Аккаунт</span>'
+                            : '<span class="badge-status badge-warning" style="margin-left: 8px; font-size: 0.75rem;">⚠ Нет аккаунта</span>'}
+                    </div>
+                    <div style="display: flex; gap: 8px;">
+                        ${!m.has_account 
+                            ? `<button class="btn btn-primary btn-sm" onclick="createAccountForBoardMember(${m.id}, '${escapeHtml(m.owner_name)}')">🔑 Создать аккаунт</button>`
+                            : `<button class="btn btn-secondary btn-sm" onclick="resetPassword(${m.user_id}, '${escapeHtml(m.owner_name)}')">🔄 Сбросить пароль</button>`}
+                        <button class="btn-icon danger" onclick="removeBoardMember(${m.id}, '${escapeHtml(m.owner_name)}')" title="Удалить">🗑️</button>
+                    </div>
+                </div>
+            `).join('');
+        } else {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-icon">👥</div>
+                    <p>Нет членов правления</p>
+                    <button class="btn btn-primary btn-sm" onclick="openAddBoardMemberModal()">+ Добавить</button>
+                </div>`;
+        }
+    }
+
+    // ==================== НАЗНАЧЕНИЕ ПРЕДСЕДАТЕЛЯ ====================
+
+    async function openAssignChairmanModal() {
+        if (availableOwners.length === 0) {
+            await loadAvailableOwners();
+        }
+        
+        // Получаем членов СНТ для фильтрации
+        const membersData = await apiFetch(`/api/organizations/${orgId}/members/`);
+        const members = membersData ? membersData.results : [];
+        
+        const ownerOptions = availableOwners.map(o => {
+            const isMember = members.some(m => m.owner === o.id);
+            const phone = o.primary_phone ? ` (${o.primary_phone})` : '';
+            return `<option value="${o.id}" ${orgData.chairman === o.id ? 'selected' : ''}>
+                ${escapeHtml(o.full_name)}${phone}${isMember ? ' [Член СНТ]' : ''}
+            </option>`;
+        }).join('');
+        
+        const modalContent = `
+            <div style="margin-bottom: 16px; padding: 12px; background: #f0f7ff; border-radius: 8px;">
+                <strong>📌 Назначение председателя</strong>
+                <p style="margin: 4px 0 0; font-size: 0.85rem; color: var(--gray-600);">
+                    Председатель получит доступ в систему с правами управления СНТ.
+                    Если у владельца нет аккаунта, он будет создан автоматически.
+                </p>
+            </div>
+            <div class="form-group">
+                <label>Выберите владельца</label>
+                <select id="chairman-owner" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
+                    <option value="">— Выберите владельца —</option>
+                    ${ownerOptions}
+                </select>
+            </div>
+            <div class="form-group" id="chairman-account-section" style="display: none;">
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                    <input type="checkbox" id="create-chairman-account" checked>
+                    Создать аккаунт для доступа в систему
+                </label>
+                <div id="chairman-credentials" style="margin-top: 12px; padding: 12px; background: #f9f9f9; border-radius: 6px;">
+                    <div class="form-group">
+                        <label>Логин</label>
+                        <input type="text" id="chairman-username" placeholder="Автоматически" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
+                        <small style="color: var(--gray-500);">Оставьте пустым для автогенерации</small>
+                    </div>
+                    <div class="form-group">
+                        <label>Пароль</label>
+                        <input type="text" id="chairman-password" placeholder="Автоматически" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
+                        <small style="color: var(--gray-500);">Оставьте пустым для автогенерации</small>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        openModal('Назначить председателя', modalContent, 'Назначить', async () => {
+            const ownerId = document.getElementById('chairman-owner').value;
+            if (!ownerId) {
+                showAlert('Выберите владельца', 'error');
+                return;
+            }
+            
+            const createAccount = document.getElementById('create-chairman-account').checked;
+            const username = document.getElementById('chairman-username')?.value.trim() || null;
+            const password = document.getElementById('chairman-password')?.value.trim() || null;
+            
+            const result = await apiFetch(`/api/organizations/${orgId}/assign-chairman-from-owner/`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    owner_id: parseInt(ownerId),
+                    create_account: createAccount,
+                    username: username,
+                    password: password,
+                }),
+            });
+            
+            if (result) {
+                let message = 'Председатель назначен';
+                if (result.account_created) {
+                    message += `. Аккаунт создан! Логин: ${result.username}`;
+                    if (result.password) {
+                        message += `, Пароль: ${result.password}`;
+                        // Копируем в буфер обмена
+                        navigator.clipboard.writeText(`Логин: ${result.username}\nПароль: ${result.password}`);
+                    }
+                }
+                showAlert(message, 'success');
+                closeModal();
+                loadOrganizationDetail();
+            }
+        });
+        
+        // Показываем/скрываем секцию создания аккаунта
+        document.getElementById('chairman-owner').addEventListener('change', function() {
+            const section = document.getElementById('chairman-account-section');
+            section.style.display = this.value ? 'block' : 'none';
+            
+            if (this.value) {
+                const selectedOwner = availableOwners.find(o => o.id === parseInt(this.value));
+                if (selectedOwner) {
+                    // Проверяем, есть ли у владельца email или телефон для логина
+                    const login = selectedOwner.primary_phone?.replace(/\D/g, '') || 
+                                 selectedOwner.primary_email?.split('@')[0] || 
+                                 selectedOwner.full_name.toLowerCase().replace(/\s+/g, '.');
+                    document.getElementById('chairman-username').placeholder = login;
+                }
+            }
+        });
+    }
+
+    // ==================== НАЗНАЧЕНИЕ БУХГАЛТЕРА ====================
+
+    async function openAssignAccountantModal() {
+        if (availableOwners.length === 0) {
+            await loadAvailableOwners();
+        }
+        
+        const membersData = await apiFetch(`/api/organizations/${orgId}/members/`);
+        const members = membersData ? membersData.results : [];
+        
+        const ownerOptions = availableOwners.map(o => {
+            const isMember = members.some(m => m.owner === o.id);
+            const phone = o.primary_phone ? ` (${o.primary_phone})` : '';
+            return `<option value="${o.id}" ${orgData.accountant === o.id ? 'selected' : ''}>
+                ${escapeHtml(o.full_name)}${phone}${isMember ? ' [Член СНТ]' : ''}
+            </option>`;
+        }).join('');
+        
+        const modalContent = `
+            <div style="margin-bottom: 16px; padding: 12px; background: #f0f7ff; border-radius: 8px;">
+                <strong>📌 Назначение бухгалтера</strong>
+                <p style="margin: 4px 0 0; font-size: 0.85rem; color: var(--gray-600);">
+                    Бухгалтер получит доступ к финансовым операциям СНТ.
+                    Если у владельца нет аккаунта, он будет создан автоматически.
+                </p>
+            </div>
+            <div class="form-group">
+                <label>Выберите владельца</label>
+                <select id="accountant-owner" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
+                    <option value="">— Выберите владельца —</option>
+                    ${ownerOptions}
+                </select>
+            </div>
+            <div class="form-group" id="accountant-account-section" style="display: none;">
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                    <input type="checkbox" id="create-accountant-account" checked>
+                    Создать аккаунт для доступа в систему
+                </label>
+                <div id="accountant-credentials" style="margin-top: 12px; padding: 12px; background: #f9f9f9; border-radius: 6px;">
+                    <div class="form-group">
+                        <label>Логин</label>
+                        <input type="text" id="accountant-username" placeholder="Автоматически" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
+                    </div>
+                    <div class="form-group">
+                        <label>Пароль</label>
+                        <input type="text" id="accountant-password" placeholder="Автоматически" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        openModal('Назначить бухгалтера', modalContent, 'Назначить', async () => {
+            const ownerId = document.getElementById('accountant-owner').value;
+            if (!ownerId) {
+                showAlert('Выберите владельца', 'error');
+                return;
+            }
+            
+            const createAccount = document.getElementById('create-accountant-account').checked;
+            const username = document.getElementById('accountant-username')?.value.trim() || null;
+            const password = document.getElementById('accountant-password')?.value.trim() || null;
+            
+            const result = await apiFetch(`/api/organizations/${orgId}/assign-accountant-from-owner/`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    owner_id: parseInt(ownerId),
+                    create_account: createAccount,
+                    username: username,
+                    password: password,
+                }),
+            });
+            
+            if (result) {
+                let message = 'Бухгалтер назначен';
+                if (result.account_created) {
+                    message += `. Аккаунт создан! Логин: ${result.username}`;
+                    if (result.password) {
+                        message += `, Пароль: ${result.password}`;
+                        navigator.clipboard.writeText(`Логин: ${result.username}\nПароль: ${result.password}`);
+                    }
+                }
+                showAlert(message, 'success');
+                closeModal();
+                loadOrganizationDetail();
+            }
+        });
+        
+        document.getElementById('accountant-owner').addEventListener('change', function() {
+            const section = document.getElementById('accountant-account-section');
+            section.style.display = this.value ? 'block' : 'none';
+            
+            if (this.value) {
+                const selectedOwner = availableOwners.find(o => o.id === parseInt(this.value));
+                if (selectedOwner) {
+                    const login = selectedOwner.primary_phone?.replace(/\D/g, '') || 
+                                 selectedOwner.primary_email?.split('@')[0] || 
+                                 selectedOwner.full_name.toLowerCase().replace(/\s+/g, '.');
+                    document.getElementById('accountant-username').placeholder = login;
+                }
+            }
+        });
+    }
+
+    // ==================== ДОБАВЛЕНИЕ ЧЛЕНА ПРАВЛЕНИЯ ====================
+
+    async function openAddBoardMemberModal() {
+        if (availableOwners.length === 0) {
+            await loadAvailableOwners();
+        }
+        
+        const membersData = await apiFetch(`/api/organizations/${orgId}/members/`);
+        const members = membersData ? membersData.results : [];
+        
+        const ownerOptions = availableOwners.map(o => {
+            const isMember = members.some(m => m.owner === o.id);
+            const phone = o.primary_phone ? ` (${o.primary_phone})` : '';
+            return `<option value="${o.id}">
+                ${escapeHtml(o.full_name)}${phone}${isMember ? ' [Член СНТ]' : ''}
+            </option>`;
+        }).join('');
+        
+        const modalContent = `
+            <div class="form-group">
+                <label>Владелец *</label>
+                <select id="board-member-owner" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
+                    <option value="">— Выберите владельца —</option>
+                    ${ownerOptions}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Должность в правлении</label>
+                <input type="text" id="board-member-position" placeholder="Например: Секретарь, Казначей" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
+            </div>
+            <div class="form-group">
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                    <input type="checkbox" id="create-board-account" checked>
+                    Создать аккаунт для доступа в систему
+                </label>
+                <div id="board-credentials" style="margin-top: 12px; padding: 12px; background: #f9f9f9; border-radius: 6px;">
+                    <div class="form-group">
+                        <label>Логин</label>
+                        <input type="text" id="board-username" placeholder="Автоматически" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
+                    </div>
+                    <div class="form-group">
+                        <label>Пароль</label>
+                        <input type="text" id="board-password" placeholder="Автоматически" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        openModal('Добавить члена правления', modalContent, 'Добавить', async () => {
+            const ownerId = document.getElementById('board-member-owner').value;
+            if (!ownerId) {
+                showAlert('Выберите владельца', 'error');
+                return;
+            }
+            
+            const position = document.getElementById('board-member-position').value.trim();
+            const createAccount = document.getElementById('create-board-account').checked;
+            const username = document.getElementById('board-username')?.value.trim() || null;
+            const password = document.getElementById('board-password')?.value.trim() || null;
+            
+            const result = await apiFetch(`/api/organizations/${orgId}/add-board-member/`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    owner_id: parseInt(ownerId),
+                    position: position || 'Член правления',
+                    create_account: createAccount,
+                    username: username,
+                    password: password,
+                }),
+            });
+            
+            if (result) {
+                let message = 'Член правления добавлен';
+                if (result.account_created) {
+                    message += `. Аккаунт создан! Логин: ${result.username}`;
+                    if (result.password) {
+                        message += `, Пароль: ${result.password}`;
+                        navigator.clipboard.writeText(`Логин: ${result.username}\nПароль: ${result.password}`);
+                    }
+                }
+                showAlert(message, 'success');
+                closeModal();
+                loadBoardMembers();
+            }
+        });
+        
+        document.getElementById('board-member-owner').addEventListener('change', function() {
+            if (this.value) {
+                const selectedOwner = availableOwners.find(o => o.id === parseInt(this.value));
+                if (selectedOwner) {
+                    const login = selectedOwner.primary_phone?.replace(/\D/g, '') || 
+                                 selectedOwner.primary_email?.split('@')[0] || 
+                                 selectedOwner.full_name.toLowerCase().replace(/\s+/g, '.');
+                    document.getElementById('board-username').placeholder = login;
+                }
+            }
+        });
+    }
+
+    // ==================== СОЗДАНИЕ АККАУНТА ДЛЯ ЧЛЕНА ПРАВЛЕНИЯ ====================
+
+    async function createAccountForBoardMember(memberId, ownerName) {
+        openModal(`Создать аккаунт: ${escapeHtml(ownerName)}`, `
+            <div style="margin-bottom: 16px; padding: 12px; background: #f0f7ff; border-radius: 8px;">
+                <strong>📌 Создание аккаунта</strong>
+                <p style="margin: 4px 0 0; font-size: 0.85rem; color: var(--gray-600);">
+                    Будет создан аккаунт для доступа в систему с правами члена правления.
+                </p>
+            </div>
+            <div class="form-group">
+                <label>Логин</label>
+                <input type="text" id="create-username" placeholder="Автоматически" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
+            </div>
+            <div class="form-group">
+                <label>Пароль</label>
+                <input type="text" id="create-password" placeholder="Автоматически" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
+            </div>
+        `, 'Создать', async () => {
+            const username = document.getElementById('create-username').value.trim() || null;
+            const password = document.getElementById('create-password').value.trim() || null;
+            
+            const result = await apiFetch(`/api/organizations/${orgId}/create-board-member-account/${memberId}/`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    username: username,
+                    password: password,
+                }),
+            });
+            
+            if (result) {
+                let message = 'Аккаунт создан!';
+                message += ` Логин: ${result.username}`;
+                if (result.password) {
+                    message += `, Пароль: ${result.password}`;
+                    navigator.clipboard.writeText(`Логин: ${result.username}\nПароль: ${result.password}`);
+                }
+                showAlert(message, 'success');
+                closeModal();
+                loadBoardMembers();
+            }
+        });
+    }
+
+    // ==================== СБРОС ПАРОЛЯ ====================
+
+    async function resetPassword(userId, userName) {
+        openModal(`Сброс пароля: ${escapeHtml(userName)}`, `
+            <p>Вы уверены, что хотите сбросить пароль для пользователя <strong>${escapeHtml(userName)}</strong>?</p>
+            <p style="color: var(--warning); font-size: 0.85rem;">Новый пароль будет сгенерирован автоматически.</p>
+        `, 'Сбросить', async () => {
+            const result = await apiFetch(`/api/users/${userId}/reset-password/`, {
+                method: 'POST',
+            });
+            
+            if (result) {
+                showAlert(`Пароль сброшен! Новый пароль: ${result.new_password}`, 'success');
+                navigator.clipboard.writeText(`Логин: ${userName}\nПароль: ${result.new_password}`);
+                closeModal();
+            }
+        });
+    }
+
+    // ==================== УДАЛЕНИЕ ЧЛЕНА ПРАВЛЕНИЯ ====================
+
+    async function removeBoardMember(memberId, ownerName) {
+        openModal('Удалить члена правления', `
+            <p>Вы действительно хотите удалить <strong>${escapeHtml(ownerName)}</strong> из членов правления?</p>
+            <p style="color: var(--gray-500); font-size: 0.85rem;">Аккаунт пользователя не будет удален.</p>
+        `, 'Удалить', async () => {
+            const result = await apiFetch(`/api/organizations/${orgId}/remove-board-member/${memberId}/`, {
+                method: 'POST',
+            });
+            
+            if (result) {
+                showAlert('Член правления удален', 'success');
+                closeModal();
+                loadBoardMembers();
+            }
+        });
+    }
+
+    // ==================== ОСТАЛЬНЫЕ ФУНКЦИИ (без изменений) ====================
 
     async function loadOrgStats() {
         const stats = await apiFetch(`/api/organizations/${orgId}/stats/`);
@@ -295,338 +777,7 @@
         return map[status] || 'badge-inactive';
     }
 
-    // ==================== НАЗНАЧЕНИЕ ПРЕДСЕДАТЕЛЯ ====================
-
-    async function openAssignChairmanModal() {
-        if (availableUsers.length === 0) {
-            await loadAvailableUsers();
-        }
-        
-        const userOptions = availableUsers
-            .filter(u => u.is_active)
-            .map(u => `<option value="${u.id}" ${orgData.chairman === u.id ? 'selected' : ''}>${escapeHtml(u.full_name || u.username)} (${u.role_display})</option>`)
-            .join('');
-        
-        const modalContent = `
-            <div class="form-group">
-                <label>Выберите председателя СНТ</label>
-                <select id="chairman-user" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
-                    <option value="">— Не назначен —</option>
-                    ${userOptions}
-                </select>
-                <small style="color: var(--gray-500);">Председатель будет иметь права на управление СНТ</small>
-            </div>
-        `;
-        
-        openModal('Назначить председателя', modalContent, 'Сохранить', async () => {
-            const userId = document.getElementById('chairman-user').value;
-            
-            const payload = {
-                chairman_id: userId ? parseInt(userId) : null
-            };
-            
-            const result = await apiFetch(`/api/organizations/${orgId}/`, {
-                method: 'PATCH',
-                body: JSON.stringify(payload)
-            });
-            
-            if (result) {
-                showAlert(userId ? 'Председатель назначен' : 'Председатель удален', 'success');
-                closeModal();
-                loadOrganizationDetail();
-            }
-        });
-    }
-
-    // ==================== НАЗНАЧЕНИЕ БУХГАЛТЕРА ====================
-
-    async function openAssignAccountantModal() {
-        if (availableUsers.length === 0) {
-            await loadAvailableUsers();
-        }
-        
-        const userOptions = availableUsers
-            .filter(u => u.is_active)
-            .map(u => `<option value="${u.id}" ${orgData.accountant === u.id ? 'selected' : ''}>${escapeHtml(u.full_name || u.username)} (${u.role_display})</option>`)
-            .join('');
-        
-        const modalContent = `
-            <div class="form-group">
-                <label>Выберите бухгалтера СНТ</label>
-                <select id="accountant-user" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
-                    <option value="">— Не назначен —</option>
-                    ${userOptions}
-                </select>
-                <small style="color: var(--gray-500);">Бухгалтер будет иметь доступ к финансовым операциям</small>
-            </div>
-        `;
-        
-        openModal('Назначить бухгалтера', modalContent, 'Сохранить', async () => {
-            const userId = document.getElementById('accountant-user').value;
-            
-            const payload = {
-                accountant_id: userId ? parseInt(userId) : null
-            };
-            
-            const result = await apiFetch(`/api/organizations/${orgId}/`, {
-                method: 'PATCH',
-                body: JSON.stringify(payload)
-            });
-            
-            if (result) {
-                showAlert(userId ? 'Бухгалтер назначен' : 'Бухгалтер удален', 'success');
-                closeModal();
-                loadOrganizationDetail();
-            }
-        });
-    }
-
-    // ==================== ДОБАВЛЕНИЕ ЧЛЕНА СНТ ====================
-
-    async function openAddMemberModal() {
-        // Загружаем список владельцев
-        const ownersData = await apiFetch('/api/owners/?limit=100');
-        if (!ownersData || !ownersData.results) {
-            showAlert('Не удалось загрузить список владельцев', 'error');
-            return;
-        }
-
-        // Получаем уже привязанных владельцев
-        const membersData = await apiFetch(`/api/organizations/${orgId}/members/`);
-        const existingOwnerIds = new Set();
-        if (membersData && membersData.results) {
-            membersData.results.forEach(m => existingOwnerIds.add(m.owner));
-        }
-
-        const availableOwners = ownersData.results.filter(o => !existingOwnerIds.has(o.id));
-        
-        if (availableOwners.length === 0) {
-            showAlert('Все владельцы уже привязаны к этому СНТ', 'info');
-            return;
-        }
-
-        const ownerOptions = availableOwners.map(o => 
-            `<option value="${o.id}">${escapeHtml(o.full_name)}${o.primary_phone ? ' (' + o.primary_phone + ')' : ''}</option>`
-        ).join('');
-
-        const modalContent = `
-            <div class="form-group">
-                <label>Владелец *</label>
-                <select id="member-owner" required style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
-                    <option value="">— Выберите владельца —</option>
-                    ${ownerOptions}
-                </select>
-            </div>
-            <div class="form-group">
-                <label>Статус членства</label>
-                <select id="member-status" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
-                    <option value="active">Активный член</option>
-                    <option value="inactive">Неактивный член</option>
-                    <option value="excluded">Исключён</option>
-                    <option value="left">Вышел добровольно</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label>Член с</label>
-                <input type="date" id="member-since" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
-            </div>
-            <div class="form-group">
-                <label>Номер членского билета</label>
-                <input type="text" id="member-card-number" placeholder="например: 00123" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
-            </div>
-            <div class="form-group">
-                <label>Примечания</label>
-                <textarea id="member-notes" rows="2" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ddd;"></textarea>
-            </div>
-        `;
-
-        openModal('Привязать владельца к СНТ', modalContent, 'Привязать', async () => {
-            const ownerSelect = document.getElementById('member-owner');
-            if (!ownerSelect || !ownerSelect.value) {
-                showAlert('Выберите владельца', 'error');
-                return;
-            }
-            
-            const selectedOwnerId = parseInt(ownerSelect.value);
-            const status = document.getElementById('member-status').value;
-            const memberSince = document.getElementById('member-since').value;
-            const cardNumber = document.getElementById('member-card-number').value.trim();
-            const notes = document.getElementById('member-notes').value.trim();
-
-            const result = await apiFetch(`/api/organizations/${orgId}/add-member/`, {
-                method: 'POST',
-                body: JSON.stringify({
-                    owner: selectedOwnerId,
-                    status: status,
-                    member_since: memberSince || null,
-                    member_card_number: cardNumber,
-                    notes: notes,
-                }),
-            });
-
-            if (result) {
-                showAlert('Владелец привязан к СНТ', 'success');
-                closeModal();
-                loadMembers();
-                loadOrgStats();
-            }
-        });
-    }
-
-    // ==================== РЕДАКТИРОВАНИЕ ЧЛЕНА ====================
-
-    function openEditMemberModal(memberId, ownerName, currentStatus, currentSince, currentCardNumber) {
-        openModal(`Редактировать членство: ${escapeHtml(ownerName)}`, `
-            <div class="form-group">
-                <label>Статус членства</label>
-                <select id="edit-member-status">
-                    <option value="active" ${currentStatus === 'active' ? 'selected' : ''}>Активный член</option>
-                    <option value="inactive" ${currentStatus === 'inactive' ? 'selected' : ''}>Неактивный член</option>
-                    <option value="excluded" ${currentStatus === 'excluded' ? 'selected' : ''}>Исключён</option>
-                    <option value="left" ${currentStatus === 'left' ? 'selected' : ''}>Вышел добровольно</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label>Член с</label>
-                <input type="date" id="edit-member-since" value="${currentSince}">
-            </div>
-            <div class="form-group">
-                <label>Номер членского билета</label>
-                <input type="text" id="edit-member-card-number" value="${escapeHtml(currentCardNumber)}" placeholder="например: 00123">
-            </div>
-        `, 'Сохранить', async () => {
-            const status = document.getElementById('edit-member-status').value;
-            const memberSince = document.getElementById('edit-member-since').value;
-            const cardNumber = document.getElementById('edit-member-card-number').value.trim();
-
-            const result = await apiFetch(`/api/organization-members/${memberId}/`, {
-                method: 'PATCH',
-                body: JSON.stringify({
-                    status: status,
-                    member_since: memberSince || null,
-                    member_card_number: cardNumber,
-                }),
-            });
-
-            if (result) {
-                showAlert('Членство обновлено', 'success');
-                closeModal();
-                loadMembers();
-            }
-        });
-    }
-
-    // ==================== УДАЛЕНИЕ ЧЛЕНА ====================
-
-    function removeMember(memberId, ownerName) {
-        openModal('Отвязать владельца', `
-            <p>Вы действительно хотите отвязать владельца <strong>${escapeHtml(ownerName)}</strong> от этого СНТ?</p>
-            <p style="color: var(--warning); font-size: 0.85rem;">Членство будет прекращено, но данные владельца сохранятся.</p>
-        `, 'Отвязать', async () => {
-            const result = await apiFetch(`/api/organization-members/${memberId}/`, {
-                method: 'DELETE',
-            });
-            if (result !== null) {
-                showAlert('Владелец отвязан от СНТ', 'success');
-                closeModal();
-                loadMembers();
-                loadOrgStats();
-            }
-        });
-    }
-
-    // ==================== РЕДАКТИРОВАНИЕ СНТ ====================
-
-    function openEditOrganizationModal() {
-        if (!orgData) return;
-
-        openModal(`Редактировать: ${escapeHtml(orgData.short_name)}`, `
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-                <div class="form-group">
-                    <label>Полное наименование *</label>
-                    <input type="text" id="edit-name" value="${escapeHtml(orgData.name || '')}">
-                </div>
-                <div class="form-group">
-                    <label>Краткое наименование *</label>
-                    <input type="text" id="edit-short-name" value="${escapeHtml(orgData.short_name || '')}">
-                </div>
-            </div>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-                <div class="form-group">
-                    <label>ИНН *</label>
-                    <input type="text" id="edit-inn" value="${escapeHtml(orgData.inn || '')}" maxlength="12">
-                </div>
-                <div class="form-group">
-                    <label>КПП</label>
-                    <input type="text" id="edit-kpp" value="${escapeHtml(orgData.kpp || '')}" maxlength="9">
-                </div>
-            </div>
-            <div class="form-group">
-                <label>Юридический адрес *</label>
-                <textarea id="edit-legal-address" rows="2">${escapeHtml(orgData.legal_address || '')}</textarea>
-            </div>
-            <div class="form-group">
-                <label>Телефон</label>
-                <input type="text" id="edit-phone" value="${escapeHtml(orgData.phone || '')}">
-            </div>
-            <div class="form-group">
-                <label>Email</label>
-                <input type="email" id="edit-email" value="${escapeHtml(orgData.email || '')}">
-            </div>
-            <hr style="margin: 16px 0;">
-            <div class="form-group">
-                <label>Банк *</label>
-                <input type="text" id="edit-bank-name" value="${escapeHtml(orgData.bank_name || '')}">
-            </div>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-                <div class="form-group">
-                    <label>БИК *</label>
-                    <input type="text" id="edit-bank-bik" value="${escapeHtml(orgData.bank_bik || '')}" maxlength="9">
-                </div>
-                <div class="form-group">
-                    <label>Расчётный счёт *</label>
-                    <input type="text" id="edit-bank-account" value="${escapeHtml(orgData.bank_account || '')}" maxlength="20">
-                </div>
-            </div>
-            <div class="form-group">
-                <label>Корреспондентский счёт *</label>
-                <input type="text" id="edit-bank-corr" value="${escapeHtml(orgData.bank_corr_account || '')}" maxlength="20">
-            </div>
-            <div class="form-group">
-                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                    <input type="checkbox" id="edit-is-active" ${orgData.is_active ? 'checked' : ''}> СНТ активно
-                </label>
-            </div>
-        `, 'Сохранить', async () => {
-            const payload = {
-                name: document.getElementById('edit-name').value.trim(),
-                short_name: document.getElementById('edit-short-name').value.trim(),
-                inn: document.getElementById('edit-inn').value.trim(),
-                kpp: document.getElementById('edit-kpp').value.trim(),
-                legal_address: document.getElementById('edit-legal-address').value.trim(),
-                phone: document.getElementById('edit-phone').value.trim(),
-                email: document.getElementById('edit-email').value.trim(),
-                bank_name: document.getElementById('edit-bank-name').value.trim(),
-                bank_bik: document.getElementById('edit-bank-bik').value.trim(),
-                bank_account: document.getElementById('edit-bank-account').value.trim(),
-                bank_corr_account: document.getElementById('edit-bank-corr').value.trim(),
-                is_active: document.getElementById('edit-is-active').checked,
-            };
-
-            const result = await apiFetch(`/api/organizations/${orgId}/`, {
-                method: 'PATCH',
-                body: JSON.stringify(payload),
-            });
-
-            if (result) {
-                showAlert('СНТ обновлено', 'success');
-                closeModal();
-                loadOrganizationDetail();
-            }
-        });
-    }
-
-    // ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
+    // ... (остальные функции addMember, editMember, removeMember, editOrganization остаются без изменений)
 
     function safeSetText(id, text) {
         const el = document.getElementById(id);
@@ -651,6 +802,13 @@
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
+    }
+
+    function formatAccount(account) {
+        if (!account) return '—';
+        const digits = account.replace(/\D/g, '');
+        const groups = digits.match(/.{1,4}/g);
+        return groups ? groups.join(' ') : account;
     }
 
     // Инициализация

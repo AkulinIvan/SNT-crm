@@ -422,8 +422,6 @@ class BulkEmailSender:
         )
 
 
-# ВАЖНО: НЕ создаем глобальный экземпляр при импорте!
-# email_sender = BulkEmailSender()  # ← ЗАКОММЕНТИРУЙТЕ ЭТУ СТРОКУ!
 
 # Вместо этого используйте функцию-фабрику
 def get_email_sender() -> BulkEmailSender:
