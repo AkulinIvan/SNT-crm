@@ -62,7 +62,7 @@ class LandPlotViewSet(OrganizationMixin, viewsets.ModelViewSet):
         """Расширенная фильтрация с учетом организации"""
         # Базовый queryset с фильтрацией по организации
         queryset = super().get_queryset()
-        
+
         # Дополнительная фильтрация по наличию координат
         has_coordinates = self.request.query_params.get('has_coordinates')
         if has_coordinates is not None:
@@ -75,7 +75,21 @@ class LandPlotViewSet(OrganizationMixin, viewsets.ModelViewSet):
                 queryset = queryset.filter(
                     Q(latitude__isnull=True) | Q(longitude__isnull=True)
                 )
-        
+
+        # ФИЛЬТРАЦИЯ ПО НАЛИЧИЮ ГРАНИЦ
+        has_boundaries = self.request.query_params.get('has_boundaries')
+        if has_boundaries is not None:
+            if has_boundaries.lower() == 'true':
+                # Ищем участки, у которых есть границы (не пустой массив)
+                queryset = queryset.filter(
+                    boundaries__isnull=False
+                ).exclude(boundaries=[])
+            else:
+                # Ищем участки без границ (null или пустой массив)
+                queryset = queryset.filter(
+                    Q(boundaries__isnull=True) | Q(boundaries=[])
+                )
+
         # Фильтрация по диапазону площади
         area_min = self.request.query_params.get('area_min')
         area_max = self.request.query_params.get('area_max')
@@ -83,14 +97,14 @@ class LandPlotViewSet(OrganizationMixin, viewsets.ModelViewSet):
             queryset = queryset.filter(area_sqm__gte=float(area_min))
         if area_max:
             queryset = queryset.filter(area_sqm__lte=float(area_max))
-        
+
         # Поиск по владельцам
         owner_search = self.request.query_params.get('owner_search')
         if owner_search:
             queryset = queryset.filter(
                 ownerships__owner__full_name__icontains=owner_search
             ).distinct()
-        
+
         return queryset
 
     def perform_create(self, serializer):
@@ -165,7 +179,7 @@ class LandPlotViewSet(OrganizationMixin, viewsets.ModelViewSet):
     def geo(self, request):
         """
         GET /api/plots/geo/
-        
+
         Возвращает координаты и границы участков для карты.
         """
         status_filter = request.query_params.get('status')
@@ -207,9 +221,9 @@ class LandPlotViewSet(OrganizationMixin, viewsets.ModelViewSet):
 
         # Добавляем информацию о владельцах
         queryset = queryset.prefetch_related('ownerships__owner')
-        
+
         logger.info(f"Geo API: найдено участков: {queryset.count()}")
-        
+
         serializer = LandPlotGeoSerializer(queryset, many=True)
         return Response({
             'count': queryset.count(),
@@ -510,13 +524,9 @@ class LandPlotViewSet(OrganizationMixin, viewsets.ModelViewSet):
     
     @action(detail=False, methods=['get'], url_path='stats')
     def stats(self, request):
-        """
-        GET /api/plots/stats/
-
-        Расширенная статистика по участкам с учетом СНТ пользователя.
-        """
+        """Расширенная статистика по участкам с учетом СНТ пользователя."""
         # Базовый queryset с фильтрацией по организации
-        queryset = LandPlot.objects.all()
+        queryset = LandPlot.objects.all()   
 
         # Фильтруем по организации пользователя (если не админ)
         if not request.user.is_superuser and not request.user.is_admin:
@@ -537,9 +547,20 @@ class LandPlotViewSet(OrganizationMixin, viewsets.ModelViewSet):
                     'average_area': 0,
                     'average_owners_per_plot': 0,
                     'last_added': None,
-                })
+                    'with_boundaries': 0,  # ДОБАВИТЬ
+                    'without_boundaries': 0,  # ДОБАВИТЬ
+                })  
 
-        total = queryset.count()
+        total = queryset.count()    
+
+        # Подсчет участков с границами
+        with_boundaries = queryset.filter(
+            boundaries__isnull=False
+        ).exclude(boundaries=[]).count()
+        
+        without_boundaries = queryset.filter(
+            Q(boundaries__isnull=True) | Q(boundaries=[])
+        ).count()   
 
         stats = {
             'total': total,
@@ -570,7 +591,9 @@ class LandPlotViewSet(OrganizationMixin, viewsets.ModelViewSet):
             ),
             'last_added': queryset.order_by('-created_at').first().plot_number 
                 if queryset.exists() else None,
-        }
+            'with_boundaries': with_boundaries,  # ДОБАВИТЬ
+            'without_boundaries': without_boundaries,  # ДОБАВИТЬ
+        }   
 
         return Response(stats)
 

@@ -183,15 +183,18 @@
     const plotId = {{ plot_id }};
     let plotData = null;
     let plotMap = null;
+    let markersLayer = null;
     let plotMarker = null;
     let boundariesLayer = null;
 
     // Инициализация карты Leaflet
-    function initPlotMap() {
+        function initializeMap() {
         const container = document.getElementById('plot-map');
         if (!container) return;
         
-        // Проверяем, есть ли координаты
+        // Проверяем, не создана ли уже карта
+        if (plotMap) return;
+        
         const hasCoords = plotData && plotData.latitude && plotData.longitude;
         const centerLat = hasCoords ? plotData.latitude : 55.7558;
         const centerLon = hasCoords ? plotData.longitude : 37.6173;
@@ -202,46 +205,87 @@
             attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
             maxZoom: 19
         }).addTo(plotMap);
-        
-        // Добавляем масштабную линейку
+
         L.control.scale().addTo(plotMap);
-        
-        // Создаем слой для границ
+
+        // Создаем слои
+        markersLayer = L.layerGroup().addTo(plotMap);
         boundariesLayer = L.layerGroup().addTo(plotMap);
-        
-        // Добавляем маркер если есть координаты
-        if (hasCoords) {
-            addMarker(plotData.latitude, plotData.longitude);
+
+        // Добавляем контроль слоев
+        const overlayMaps = {
+            "📍 Маркеры": markersLayer,
+            "🗺️ Границы": boundariesLayer
+        };
+        L.control.layers(null, overlayMaps, { collapsed: false }).addTo(plotMap);
+    }
+    
+    // Функция обновления карты (без пересоздания)
+    function updateMap() {
+        if (!plotMap) {
+            initializeMap();
         }
-        
-        // Отрисовываем границы если есть
+
+        // Очищаем слои, но НЕ удаляем карту
+        if (markersLayer) markersLayer.clearLayers();
+        if (boundariesLayer) boundariesLayer.clearLayers();
+
+        // Добавляем маркер если есть координаты
+        if (plotData && plotData.latitude && plotData.longitude) {
+            const marker = L.marker([plotData.latitude, plotData.longitude], {
+                draggable: true,
+                icon: L.divIcon({
+                    className: 'custom-div-icon',
+                    html: `<div style="
+                        background-color: #4CAF50;
+                        width: 16px;
+                        height: 16px;
+                        border-radius: 50%;
+                        border: 3px solid white;
+                        box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+                    "></div>`,
+                    iconSize: [16, 16],
+                    iconAnchor: [8, 8]
+                })
+            }).addTo(markersLayer);
+
+            marker.on('dragend', function(e) {
+                const position = marker.getLatLng();
+                updateCoordinatesFromMap(position.lat, position.lng);
+            });
+
+            plotMap.setView([plotData.latitude, plotData.longitude], 16);
+        }
+
+        // Добавляем границы если есть
         if (plotData.boundaries && plotData.boundaries.length >= 3) {
             drawBoundaries(plotData.boundaries, plotData.status);
         }
     }
-    
+
     // Отрисовка границ на карте
     function drawBoundaries(boundaries, status) {
-        if (!boundariesLayer || !boundaries || boundaries.length < 3) return;
-        
+        if (!boundariesLayer) return;
+
+        if (!boundaries || boundaries.length < 3) return;
+
         try {
             let coords = [...boundaries];
             const first = coords[0];
             const last = coords[coords.length - 1];
-            
+
             // Замыкаем полигон если нужно
             if (first[0] !== last[0] || first[1] !== last[1]) {
                 coords = [...coords, [...first]];
             }
-            
-            // Цвета в зависимости от статуса
+
             const colors = {
                 'active': { border: '#4CAF50', fill: '#4CAF50', opacity: 0.2 },
                 'abandoned': { border: '#FF9800', fill: '#FF9800', opacity: 0.2 },
                 'disputed': { border: '#f44336', fill: '#f44336', opacity: 0.15 }
             };
             const color = colors[status] || { border: '#2196F3', fill: '#2196F3', opacity: 0.2 };
-            
+
             const polygon = L.polygon(coords, {
                 color: color.border,
                 fillColor: color.fill,
@@ -252,8 +296,7 @@
                 lineCap: 'round',
                 dashArray: status === 'disputed' ? '5, 5' : null
             }).addTo(boundariesLayer);
-            
-            // Всплывающая подсказка
+
             polygon.bindPopup(`
                 <div style="min-width: 180px;">
                     <b>🏠 Участок №${escapeHtml(plotData.plot_number)}</b><br>
@@ -262,10 +305,12 @@
                     <a href="/plots/${plotId}/" style="color: #4CAF50;">📋 Открыть карточку</a>
                 </div>
             `);
-            
-            // Центрируем карту по границам
-            plotMap.fitBounds(polygon.getBounds(), { padding: [30, 30] });
-            
+
+            // Центрируем карту по границам только если маркера нет
+            if (!plotData.latitude || !plotData.longitude) {
+                plotMap.fitBounds(polygon.getBounds(), { padding: [30, 30] });
+            }
+
         } catch (e) {
             console.error('Ошибка отрисовки границ:', e);
         }
@@ -404,8 +449,12 @@
                 ? `<p style="white-space: pre-wrap;">${escapeHtml(plotData.notes)}</p>` 
                 : '<span style="color: var(--gray-400);">Нет примечаний</span>';
 
-        // Инициализируем карту
-        initPlotMap();
+        // Обновляем карту (без пересоздания)
+        if (!plotMap) {
+            initializeMap();
+        } else {
+            updateMap();  // Просто обновляем слои
+        }
         
         // Загружаем владельцев
         loadOwners();
@@ -572,7 +621,8 @@
             });
             if (result) {
                 showAlert('Координаты обновлены', 'success');
-                loadPlotDetail();
+                closeModal();
+                await loadPlotDetail();
             }
         });
     }
@@ -628,6 +678,7 @@
 
             if (result) {
                 showAlert('Участок обновлён', 'success');
+                closeModal();
                 loadPlotDetail();
             }
         });
@@ -653,7 +704,7 @@
     // --- Управление владельцами ---
 
     async function openAddOwnerModal() {
-        const ownersData = await apiFetch('/api/owners/?limit=100');
+        const ownersData = await apiFetch('/api/owners/?limit=10');
         if (!ownersData || !ownersData.results) {
             showAlert('Не удалось загрузить список владельцев', 'error');
             return;
@@ -713,7 +764,8 @@
 
             if (result) {
                 showAlert('Владелец привязан', 'success');
-                loadOwners();
+                closeModal();
+                await loadOwners();
                 if (typeof loadStats === 'function') loadStats();
             }
         });
@@ -744,7 +796,8 @@
             });
             if (result) {
                 showAlert('Данные обновлены', 'success');
-                loadOwners();
+                closeModal();
+                await loadOwners();
             }
         });
     }

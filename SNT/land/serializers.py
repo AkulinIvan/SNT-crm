@@ -11,6 +11,7 @@ class LandPlotListSerializer(serializers.ModelSerializer):
     owners_count = serializers.SerializerMethodField(read_only=True)
     has_coordinates = serializers.SerializerMethodField(read_only=True)
     organization_name = serializers.CharField(source='organization.short_name', read_only=True)
+    has_boundaries = serializers.SerializerMethodField(read_only=True)
     
     class Meta:
         model = LandPlot
@@ -19,8 +20,9 @@ class LandPlotListSerializer(serializers.ModelSerializer):
             'area_sqm', 'status', 'status_display', 'address', 
             'latitude', 'longitude', 'has_coordinates',
             'owners_count', 'created_at', 'organization_name',
+            'has_boundaries', 'boundaries',
         ]
-        read_only_fields = ['id', 'created_at', 'has_coordinates']
+        read_only_fields = ['id', 'created_at', 'has_coordinates', 'has_boundaries']
 
     def get_has_coordinates(self, obj):
         return obj.has_coordinates
@@ -28,6 +30,10 @@ class LandPlotListSerializer(serializers.ModelSerializer):
     def get_owners_count(self, obj):
         """Получаем количество владельцев через property модели"""
         return obj.owners_count
+    
+    def get_has_boundaries(self, obj):
+        """Проверка наличия границ"""
+        return obj.boundaries is not None and len(obj.boundaries) > 0
 
 
 class LandPlotDetailSerializer(serializers.ModelSerializer):
