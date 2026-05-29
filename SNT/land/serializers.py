@@ -145,17 +145,18 @@ class LandPlotGeoSerializer(serializers.ModelSerializer):
     """
     Специальный сериализатор для отображения участков на карте.
     """
-    owners_info = serializers.SerializerMethodField(read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
-    boundaries = serializers.JSONField(read_only=True)
+    owners_info = serializers.SerializerMethodField(read_only=True)
+    boundaries = serializers.SerializerMethodField(read_only=True)
     
     class Meta:
         model = LandPlot
         fields = [
-            'id', 'plot_number', 'latitude', 'longitude', 
+            'id', 'plot_number', 'cadastral_number', 'latitude', 'longitude', 
             'status', 'status_display', 'owners_info', 'area_sqm', 'boundaries',
+            'address'
         ]
-
+    
     def get_owners_info(self, obj):
         """Информация о владельцах для отображения на карте"""
         owners = []
@@ -166,3 +167,9 @@ class LandPlotGeoSerializer(serializers.ModelSerializer):
                 'share': ownership.share,
             })
         return owners
+    
+    def get_boundaries(self, obj):
+        """Получение границ участка"""
+        if obj.boundaries and len(obj.boundaries) >= 3:
+            return obj.boundaries
+        return None

@@ -35,6 +35,48 @@
     margin: 12px 16px;
     line-height: 1.6;
 }
+
+.badge-success {
+    background: #d4edda;
+    color: #155724;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    font-weight: 500;
+}
+
+.badge-warning {
+    background: #fff3cd;
+    color: #856404;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    font-weight: 500;
+}
+
+.info-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--gray-200);
+}
+
+.info-label {
+    font-weight: 500;
+    color: var(--gray-600);
+}
+
+.info-value {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.btn-sm {
+    padding: 4px 12px;
+    font-size: 0.85rem;
+}
 </style>
 
 <div id="plot-detail">
@@ -66,6 +108,8 @@
                     <tr><td style="color: var(--gray-500);">Статус</td><td id="info-status">—</td></tr>
                     <tr><td style="color: var(--gray-500);">Дата добавления</td><td id="info-created">—</td></tr>
                     <tr><td style="color: var(--gray-500);">Последнее обновление</td><td id="info-updated">—</td></tr>
+                    <!-- Блок границ участка -->
+                    <tr><td style="color: var(--gray-500);">🗺️ Границы участка</td><td id="info-boundaries">—</td></tr>
                 </tbody>
             </table>
         </div>
@@ -140,6 +184,7 @@
     let plotData = null;
     let plotMap = null;
     let plotMarker = null;
+    let boundariesLayer = null;
 
     // Инициализация карты Leaflet
     function initPlotMap() {
@@ -161,9 +206,68 @@
         // Добавляем масштабную линейку
         L.control.scale().addTo(plotMap);
         
+        // Создаем слой для границ
+        boundariesLayer = L.layerGroup().addTo(plotMap);
+        
         // Добавляем маркер если есть координаты
         if (hasCoords) {
             addMarker(plotData.latitude, plotData.longitude);
+        }
+        
+        // Отрисовываем границы если есть
+        if (plotData.boundaries && plotData.boundaries.length >= 3) {
+            drawBoundaries(plotData.boundaries, plotData.status);
+        }
+    }
+    
+    // Отрисовка границ на карте
+    function drawBoundaries(boundaries, status) {
+        if (!boundariesLayer || !boundaries || boundaries.length < 3) return;
+        
+        try {
+            let coords = [...boundaries];
+            const first = coords[0];
+            const last = coords[coords.length - 1];
+            
+            // Замыкаем полигон если нужно
+            if (first[0] !== last[0] || first[1] !== last[1]) {
+                coords = [...coords, [...first]];
+            }
+            
+            // Цвета в зависимости от статуса
+            const colors = {
+                'active': { border: '#4CAF50', fill: '#4CAF50', opacity: 0.2 },
+                'abandoned': { border: '#FF9800', fill: '#FF9800', opacity: 0.2 },
+                'disputed': { border: '#f44336', fill: '#f44336', opacity: 0.15 }
+            };
+            const color = colors[status] || { border: '#2196F3', fill: '#2196F3', opacity: 0.2 };
+            
+            const polygon = L.polygon(coords, {
+                color: color.border,
+                fillColor: color.fill,
+                fillOpacity: color.opacity,
+                weight: 3,
+                opacity: 0.8,
+                lineJoin: 'round',
+                lineCap: 'round',
+                dashArray: status === 'disputed' ? '5, 5' : null
+            }).addTo(boundariesLayer);
+            
+            // Всплывающая подсказка
+            polygon.bindPopup(`
+                <div style="min-width: 180px;">
+                    <b>🏠 Участок №${escapeHtml(plotData.plot_number)}</b><br>
+                    📐 Площадь: ${plotData.area_sqm} м²<br>
+                    🗺️ Точек границ: ${boundaries.length}<br>
+                    <a href="/plots/${plotId}/" style="color: #4CAF50;">📋 Открыть карточку</a>
+                </div>
+            `);
+            
+            // Центрируем карту по границам
+            plotMap.fitBounds(polygon.getBounds(), { padding: [30, 30] });
+            
+        } catch (e) {
+            console.error('Ошибка отрисовки границ:', e);
         }
     }
     
@@ -207,10 +311,31 @@
         });
         
         if (result) {
-            // Обновляем отображение
             document.getElementById('info-latitude').textContent = lat.toFixed(6);
             document.getElementById('info-longitude').textContent = lon.toFixed(6);
             showAlert('Координаты обновлены', 'success');
+        }
+    }
+
+    // Загрузка границ из Росреестра
+    async function loadBoundariesFromRosreestr(plotId) {
+        try {
+            const result = await apiFetch(`/api/plots/${plotId}/load-boundaries/`, {
+                method: 'POST'
+            });
+            
+            if (result && result.boundaries) {
+                showAlert(`✅ Границы успешно загружены (${result.boundaries.length} точек)`, 'success');
+                // Обновляем данные участка
+                await loadPlotDetail();
+                return true;
+            } else {
+                showAlert('❌ Границы не найдены в кадастре', 'warning');
+                return false;
+            }
+        } catch (error) {
+            showAlert(`❌ Ошибка: ${error.message}`, 'error');
+            return false;
         }
     }
 
@@ -253,6 +378,20 @@
         document.getElementById('info-updated').textContent = 
             formatDateTime(plotData.updated_at);
 
+        // Границы участка
+        const hasBoundaries = plotData.boundaries && plotData.boundaries.length >= 3;
+        const boundariesHtml = hasBoundaries
+            ? `<span class="badge-success">Загружены (${plotData.boundaries.length} точек)</span>
+               <button class="btn btn-secondary btn-sm" onclick="refreshBoundaries(${plotId})" style="margin-left: 8px;">
+                   🔄 Обновить
+               </button>`
+            : `<span class="badge-warning">Не загружены</span>
+               ${plotData.cadastral_number ? 
+                   `<button class="btn btn-primary btn-sm" onclick="loadBoundaries(${plotId})" style="margin-left: 8px;">
+                        🗺️ Загрузить из Росреестра
+                    </button>` : ''}`;
+        document.getElementById('info-boundaries').innerHTML = boundariesHtml;
+
         // Координаты
         document.getElementById('info-latitude').textContent = 
             plotData.latitude ? plotData.latitude.toFixed(6) : '—';
@@ -279,6 +418,76 @@
             'disputed': '<span class="badge-status badge-warning">Спорный</span>',
         };
         return badges[status] || `<span class="badge-status badge-inactive">${status}</span>`;
+    }
+
+    // Функция загрузки границ (вызывается из кнопки)
+    async function loadBoundaries(plotId) {
+        const button = event ? event.target : null;
+        const originalText = button ? button.innerHTML : 'Загрузить';
+        
+        try {
+            if (button) {
+                button.disabled = true;
+                button.innerHTML = '⏳ Загрузка...';
+            }
+            
+            const result = await apiFetch(`/api/plots/${plotId}/load-boundaries/`, {
+                method: 'POST'
+            });
+            
+            if (result && result.boundaries) {
+                showAlert(`✅ Границы успешно загружены (${result.boundaries.length} точек)`, 'success');
+                setTimeout(() => location.reload(), 1500);
+            } else {
+                showAlert('❌ Границы не найдены в кадастре. Проверьте правильность кадастрового номера.', 'warning');
+                if (button) {
+                    button.disabled = false;
+                    button.innerHTML = originalText;
+                }
+            }
+        } catch (error) {
+            showAlert(`❌ Ошибка: ${error.message}`, 'error');
+            if (button) {
+                button.disabled = false;
+                button.innerHTML = originalText;
+            }
+        }
+    }
+
+    // Функция обновления границ
+    async function refreshBoundaries(plotId) {
+        if (!confirm('Обновить границы? Это может занять несколько секунд.')) return;
+        
+        const button = event ? event.target : null;
+        const originalText = button ? button.innerHTML : 'Обновить';
+        
+        try {
+            if (button) {
+                button.disabled = true;
+                button.innerHTML = '⏳ Обновление...';
+            }
+            
+            const result = await apiFetch(`/api/plots/${plotId}/load-boundaries/`, {
+                method: 'POST'
+            });
+            
+            if (result && result.boundaries) {
+                showAlert(`✅ Границы обновлены (${result.boundaries.length} точек)`, 'success');
+                setTimeout(() => location.reload(), 1500);
+            } else {
+                showAlert('❌ Границы не найдены', 'warning');
+                if (button) {
+                    button.disabled = false;
+                    button.innerHTML = originalText;
+                }
+            }
+        } catch (error) {
+            showAlert(`❌ Ошибка: ${error.message}`, 'error');
+            if (button) {
+                button.disabled = false;
+                button.innerHTML = originalText;
+            }
+        }
     }
 
     async function loadOwners() {
@@ -555,9 +764,22 @@
     }
 
     function escapeHtml(text) {
+        if (!text) return '';
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
+    }
+
+    function formatDate(dateStr) {
+        if (!dateStr) return '—';
+        const date = new Date(dateStr);
+        return date.toLocaleDateString('ru-RU');
+    }
+
+    function formatDateTime(dateStr) {
+        if (!dateStr) return '—';
+        const date = new Date(dateStr);
+        return date.toLocaleString('ru-RU');
     }
 
     document.addEventListener('DOMContentLoaded', loadPlotDetail);

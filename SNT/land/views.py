@@ -165,31 +165,36 @@ class LandPlotViewSet(OrganizationMixin, viewsets.ModelViewSet):
     def geo(self, request):
         """
         GET /api/plots/geo/
-
-        Возвращает координаты участков для карты с учетом СНТ пользователя.
+        
+        Возвращает координаты и границы участков для карты.
         """
         status_filter = request.query_params.get('status')
         has_owners = request.query_params.get('has_owners')
+        show_without_coords = request.query_params.get('show_without_coords', 'false').lower() == 'true'    
 
-        # Базовый queryset с фильтрацией по организации
-        queryset = LandPlot.objects.filter(
-            latitude__isnull=False,
-            longitude__isnull=False,
-        )
+        # Базовый queryset - показываем участки ИЛИ с координатами, ИЛИ с границами
+        if show_without_coords:
+            # Показываем все участки (для отладки)
+            queryset = LandPlot.objects.all()
+        else:
+            # Показываем участки, у которых есть координаты ИЛИ границы
+            queryset = LandPlot.objects.filter(
+                Q(latitude__isnull=False, longitude__isnull=False) |
+                Q(boundaries__isnull=False)
+            ).exclude(boundaries=[])    
 
         # Фильтруем по организации пользователя (если не админ)
         if not request.user.is_superuser and not request.user.is_admin:
             if hasattr(request, 'current_organization') and request.current_organization:
                 queryset = queryset.filter(organization=request.current_organization)
             else:
-                # Если у пользователя нет организации, возвращаем пустой результат
                 return Response({
                     'count': 0,
                     'results': []
-                })
+                })  
 
         if status_filter:
-            queryset = queryset.filter(status=status_filter)
+            queryset = queryset.filter(status=status_filter)    
 
         if has_owners is not None:
             queryset = queryset.annotate(
@@ -198,11 +203,13 @@ class LandPlotViewSet(OrganizationMixin, viewsets.ModelViewSet):
             if has_owners.lower() == 'true':
                 queryset = queryset.filter(owners_count__gt=0)
             else:
-                queryset = queryset.filter(owners_count=0)
+                queryset = queryset.filter(owners_count=0)  
 
-        # Добавляем информацию о владельцах для всплывающих подсказок
+        # Добавляем информацию о владельцах
         queryset = queryset.prefetch_related('ownerships__owner')
-
+        
+        logger.info(f"Geo API: найдено участков: {queryset.count()}")
+        
         serializer = LandPlotGeoSerializer(queryset, many=True)
         return Response({
             'count': queryset.count(),
@@ -267,57 +274,45 @@ class LandPlotViewSet(OrganizationMixin, viewsets.ModelViewSet):
     def load_boundaries(self, request, pk=None):
         """
         POST /api/plots/{id}/load-boundaries/
-        
-        Загрузка границ участка из Росреестра через бесплатное API ПКК
+
+        Загрузка границ участка из Росреестра через НСПД
         """
         land_plot = self.get_object()
-        
+
         if not land_plot.cadastral_number:
             return Response(
                 {'detail': 'Отсутствует кадастровый номер'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         try:
-            if land_plot.has_coordinates:
-                boundaries = rosreestr_service.get_boundaries_from_nspd_by_coords(
-                    land_plot.latitude, 
-                    land_plot.longitude
-                )
-                if boundaries:
-                    land_plot.boundaries = boundaries
-                    land_plot.rosreestr_updated = timezone.now()
-                    land_plot.save(update_fields=['boundaries', 'rosreestr_updated'])
-                
+            # Получаем границы через сервис
+            boundaries = rosreestr_service.get_parcel_boundaries(
+                land_plot.cadastral_number
+            )
+
+            if boundaries and len(boundaries) >= 3:
+                # Сохраняем в БД
+                land_plot.boundaries = boundaries
+                land_plot.rosreestr_updated = timezone.now()
+                land_plot.save(update_fields=['boundaries', 'rosreestr_updated', 'updated_at'])
+
                 logger.info(
                     f'Границы загружены для участка #{land_plot.plot_number}: '
-                    f'{len(enriched_data["boundaries"])} точек'
+                    f'{len(boundaries)} точек'
                 )
-                
+
                 return Response({
-                    'detail': f'Границы загружены ({len(enriched_data["boundaries"])} точек)',
-                    'boundaries': enriched_data['boundaries'],
+                    'detail': f'Границы загружены ({len(boundaries)} точек)',
+                    'boundaries': boundaries,
                     'updated_at': land_plot.rosreestr_updated,
                 })
             else:
-                # Пробуем найти по координатам
-                if land_plot.has_coordinates:
-                    parcel_info = rosreestr_service.get_parcel_by_coordinates(
-                        land_plot.latitude, 
-                        land_plot.longitude
-                    )
-                    if parcel_info and parcel_info.get('cadastral_number'):
-                        return Response({
-                            'detail': 'Границы не найдены, но найден участок поблизости',
-                            'suggested_cadastral': parcel_info['cadastral_number'],
-                            'parcel_info': parcel_info
-                        })
-                
                 return Response(
-                    {'detail': 'Границы не найдены в ПКК'},
+                    {'detail': 'Границы не найдены в кадастре. Проверьте правильность кадастрового номера.'},
                     status=status.HTTP_404_NOT_FOUND
                 )
-                
+
         except Exception as e:
             logger.error(f'Ошибка загрузки границ: {str(e)}')
             return Response(
