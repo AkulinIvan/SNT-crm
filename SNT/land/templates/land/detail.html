@@ -522,45 +522,463 @@
     }
     
     async function openAddOwnerModal() {
-        const ownersData = await apiFetch('/api/owners/?limit=100');
+        // Загружаем больше владельцев и добавляем поиск
+        let searchQuery = '';
+        let allOwners = [];
+        let currentPage = 1;
+        let hasMore = true;
+        
+        // Функция загрузки владельцев с пагинацией
+        async function loadOwnersPage(page, search = '') {
+            const params = new URLSearchParams({
+                limit: 50,
+                offset: (page - 1) * 50
+            });
+            if (search) params.append('search', search);    
+
+            const data = await apiFetch(`/api/owners/?${params}`);
+            return data;
+        }   
+
+        // Загружаем первую страницу
+        let ownersData = await loadOwnersPage(1);
         if (!ownersData?.results) {
             showAlert('Не удалось загрузить список владельцев', 'error');
             return;
-        }
-        
+        }   
+
+        allOwners = ownersData.results;
+        hasMore = !!ownersData.next;    
+
+        // Получаем уже привязанных владельцев
         const ownershipsData = await apiFetch(`/api/ownerships/?land_plot=${plotId}`);
-        const existingIds = ownershipsData?.results?.map(o => o.owner) || [];
-        const available = ownersData.results.filter(o => !existingIds.includes(o.id));
-        
-        if (!available.length) {
-            showAlert('Все владельцы уже привязаны', 'info');
-            return;
-        }
-        
-        openModal('Привязать владельца', `
-            <div class="form-group"><label>Владелец</label><select id="owner-select">${available.map(o => `<option value="${o.id}">${escapeHtml(o.full_name)}${o.primary_phone ? ' (' + o.primary_phone + ')' : ''}</option>`).join('')}</select></div>
-            <div class="form-group"><label>Доля</label><input type="text" id="owner-share" value="1/1"></div>
-            <div class="form-group"><label>Дата вступления</label><input type="date" id="owner-since"></div>
-            <div class="form-group"><label>Документ-основание</label><input type="text" id="owner-document"></div>
-        `, 'Привязать', async () => {
+        const existingIds = ownershipsData?.results?.map(o => o.owner) || [];   
+
+        // Фильтруем доступных владельцев
+        let availableOwners = allOwners.filter(o => !existingIds.includes(o.id));   
+
+        // Создаем HTML с улучшенным визуалом
+        const modalContent = `
+            <style>
+                .owner-modal-section {
+                    background: white;
+                    border-radius: 12px;
+                    padding: 16px;
+                    margin-bottom: 16px;
+                    border: 1px solid #e5e7eb;
+                    transition: all 0.2s;
+                }
+                .owner-modal-section:hover {
+                    border-color: #cbd5e1;
+                    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+                }
+                .owner-modal-label {
+                    display: block;
+                    font-size: 0.85rem;
+                    font-weight: 600;
+                    color: #374151;
+                    margin-bottom: 8px;
+                }
+                .owner-modal-label i {
+                    margin-right: 6px;
+                }
+                .owner-search-wrapper {
+                    position: relative;
+                }
+                .owner-search-wrapper input {
+                    width: 100%;
+                    padding: 10px 12px 10px 36px;
+                    border: 1px solid #e5e7eb;
+                    border-radius: 10px;
+                    font-size: 0.9rem;
+                    transition: all 0.2s;
+                    background: white;
+                }
+                .owner-search-wrapper input:focus {
+                    outline: none;
+                    border-color: var(--primary);
+                    box-shadow: 0 0 0 3px rgba(44, 122, 71, 0.1);
+                }
+                .owner-search-icon {
+                    position: absolute;
+                    left: 12px;
+                    top: 50%;
+                    transform: translateY(-50%);
+                    color: #9ca3af;
+                    font-size: 1rem;
+                }
+                .owner-select-wrapper {
+                    position: relative;
+                }
+                .owner-select-wrapper select {
+                    width: 100%;
+                    padding: 10px 12px;
+                    border: 1px solid #e5e7eb;
+                    border-radius: 10px;
+                    font-size: 0.9rem;
+                    background: white;
+                    cursor: pointer;
+                    transition: all 0.2s;
+                }
+                .owner-select-wrapper select:focus {
+                    outline: none;
+                    border-color: var(--primary);
+                    box-shadow: 0 0 0 3px rgba(44, 122, 71, 0.1);
+                }
+                .owner-select-wrapper select option {
+                    padding: 8px;
+                }
+                .owner-input-group {
+                    margin-bottom: 16px;
+                }
+                .owner-input-group input, .owner-input-group textarea {
+                    width: 100%;
+                    padding: 10px 12px;
+                    border: 1px solid #e5e7eb;
+                    border-radius: 10px;
+                    font-size: 0.9rem;
+                    transition: all 0.2s;
+                    background: white;
+                }
+                .owner-input-group input:focus, .owner-input-group textarea:focus {
+                    outline: none;
+                    border-color: var(--primary);
+                    box-shadow: 0 0 0 3px rgba(44, 122, 71, 0.1);
+                }
+                .owner-input-group label {
+                    display: block;
+                    font-size: 0.8rem;
+                    font-weight: 500;
+                    color: #6b7280;
+                    margin-bottom: 4px;
+                }
+                .owner-hint {
+                    font-size: 0.7rem;
+                    color: #9ca3af;
+                    margin-top: 4px;
+                }
+                .owner-divider {
+                    height: 1px;
+                    background: linear-gradient(to right, #e5e7eb, transparent);
+                    margin: 16px 0;
+                }
+                .owner-info-card {
+                    background: #f9fafb;
+                    border-radius: 10px;
+                    padding: 12px;
+                    margin-top: 12px;
+                    border-left: 3px solid var(--primary);
+                }
+                .owner-info-card p {
+                    margin: 4px 0;
+                    font-size: 0.8rem;
+                    color: #6b7280;
+                }
+                .btn-create-owner {
+                    background: linear-gradient(135deg, #f3f4f6, #e5e7eb);
+                    border: 1px solid #d1d5db;
+                    padding: 8px 16px;
+                    border-radius: 10px;
+                    font-size: 0.85rem;
+                    cursor: pointer;
+                    transition: all 0.2s;
+                    width: 100%;
+                    text-align: center;
+                }
+                .btn-create-owner:hover {
+                    background: linear-gradient(135deg, #e5e7eb, #d1d5db);
+                    transform: translateY(-1px);
+                }
+                .owner-badge {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 4px;
+                    padding: 2px 8px;
+                    background: #f3f4f6;
+                    border-radius: 12px;
+                    font-size: 0.7rem;
+                    color: #6b7280;
+                }
+            </style>    
+
+            <div class="owner-modal-section">
+                <div class="owner-search-wrapper">
+                    <span class="owner-search-icon">🔍</span>
+                    <input type="text" id="owner-search-input" placeholder="Поиск по ФИО или телефону..." autocomplete="off">
+                </div>
+                <div class="owner-hint" style="margin-top: 6px;">💡 Введите минимум 2 символа для поиска</div>
+            </div>  
+
+            <div class="owner-modal-section">
+                <div class="owner-modal-label">👤 Выберите владельца</div>
+                <div class="owner-select-wrapper">
+                    <select id="owner-select" size="6">
+                        ${availableOwners.length > 0 
+                            ? availableOwners.map(o => `<option value="${o.id}">${escapeHtml(o.full_name)}${o.primary_phone ? ' 📱 ' + o.primary_phone : ''}</option>`).join('')
+                            : '<option disabled>❌ Нет доступных владельцев</option>'}
+                    </select>
+                </div>
+                ${hasMore && availableOwners.length > 0 ? '<div class="owner-hint" style="margin-top: 6px;">📋 Показаны первые 50 записей. Используйте поиск для уточнения.</div>' : ''}
+            </div>  
+
+            <div class="owner-modal-section">
+                <div class="owner-modal-label">📋 Информация о праве собственности</div>
+                
+                <div class="owner-input-group">
+                    <label>Доля владения</label>
+                    <input type="text" id="owner-share" value="1/1" placeholder="например: 1/1, 1/2, 1/3">
+                    <div class="owner-hint">Доля в праве общей долевой собственности</div>
+                </div>  
+
+                <div class="owner-input-group">
+                    <label>Дата возникновения права</label>
+                    <input type="date" id="owner-since">
+                    <div class="owner-hint">Дата, с которой участок принадлежит владельцу</div>
+                </div>  
+
+                <div class="owner-input-group">
+                    <label>Документ-основание</label>
+                    <input type="text" id="owner-document" placeholder="Например: Свидетельство о праве собственности №...">
+                    <div class="owner-hint">Номер и наименование документа, подтверждающего право собственности</div>
+                </div>
+            </div>  
+
+            <div class="owner-modal-section">
+                <div class="owner-info-card">
+                    <p>💡 <strong>Не нашли нужного владельца?</strong></p>
+                    <p style="margin-top: 8px;">Вы можете создать нового владельца прямо сейчас, и он автоматически добавится в список.</p>
+                </div>
+                <button type="button" class="btn-create-owner" onclick="event.preventDefault(); closeModal(); setTimeout(() => openAddNewOwnerModal(), 100);">
+                    ➕ Создать нового владельца
+                </button>
+            </div>
+        `;  
+
+        openModal('Привязать владельца к участку', modalContent, 'Привязать', async () => {
+            const ownerSelect = document.getElementById('owner-select');
+            const ownerId = parseInt(ownerSelect?.value);
+            
+            if (isNaN(ownerId) || !ownerSelect || ownerSelect.selectedIndex === -1) {
+                showAlert('Пожалуйста, выберите владельца из списка', 'error');
+                return;
+            }   
+
+            const share = document.getElementById('owner-share').value.trim() || '1/1';
+            const since = document.getElementById('owner-since').value || null;
+            const doc = document.getElementById('owner-document').value.trim(); 
+
+            // Валидация формата доли
+            const sharePattern = /^(\d+)\/(\d+)$/;
+            if (!sharePattern.test(share)) {
+                showAlert('Доля должна быть в формате: числитель/знаменатель (например: 1/2, 3/4)', 'error');
+                return;
+            }   
+
             const result = await apiFetch('/api/ownerships/', {
                 method: 'POST',
                 body: JSON.stringify({
-                    owner: parseInt(document.getElementById('owner-select').value),
+                    owner: ownerId,
                     land_plot: plotId,
-                    share: document.getElementById('owner-share').value.trim() || '1/1',
-                    ownership_since: document.getElementById('owner-since').value || null,
-                    document_basis: document.getElementById('owner-document').value.trim(),
+                    share: share,
+                    ownership_since: since,
+                    document_basis: doc,
                 }),
-            });
+            }); 
+
             if (result) {
-                showAlert('Владелец привязан', 'success');
+                showAlert('✅ Владелец успешно привязан к участку', 'success');
                 closeModal();
                 await loadOwners();
             }
+        }); 
+
+        // Добавляем обработчик поиска после открытия модального окна
+        setTimeout(() => {
+            const searchInput = document.getElementById('owner-search-input');
+            const ownerSelect = document.getElementById('owner-select');    
+
+            if (searchInput) {
+                let searchTimeout;
+                searchInput.addEventListener('input', async (e) => {
+                    clearTimeout(searchTimeout);
+                    const query = e.target.value.trim();
+                    
+                    if (query.length < 2 && query.length > 0) {
+                        return;
+                    }
+                    
+                    searchTimeout = setTimeout(async () => {
+                        if (ownerSelect) {
+                            ownerSelect.innerHTML = '<option disabled>🔍 Поиск владельцев...</option>';
+                        }
+                        
+                        const params = new URLSearchParams({
+                            limit: 50,
+                            search: query
+                        });
+                        
+                        const searchData = await apiFetch(`/api/owners/?${params}`);
+                        
+                        if (ownerSelect) {
+                            if (searchData?.results?.length) {
+                                const filtered = searchData.results.filter(o => !existingIds.includes(o.id));
+                                if (filtered.length) {
+                                    ownerSelect.innerHTML = filtered.map(o => 
+                                        `<option value="${o.id}">${escapeHtml(o.full_name)}${o.primary_phone ? ' 📱 ' + o.primary_phone : ''}</option>`
+                                    ).join('');
+                                } else {
+                                    ownerSelect.innerHTML = '<option disabled>❌ Нет доступных владельцев</option>';
+                                }
+                            } else if (query.length >= 2) {
+                                ownerSelect.innerHTML = '<option disabled>❌ Владельцы не найдены</option>';
+                            } else {
+                                // Восстанавливаем полный список
+                                const fullList = await loadOwnersPage(1);
+                                if (fullList?.results) {
+                                    const filtered = fullList.results.filter(o => !existingIds.includes(o.id));
+                                    ownerSelect.innerHTML = filtered.map(o => 
+                                        `<option value="${o.id}">${escapeHtml(o.full_name)}${o.primary_phone ? ' 📱 ' + o.primary_phone : ''}</option>`
+                                    ).join('');
+                                }
+                            }
+                        }
+                    }, 500);
+                });
+            }
+        }, 100);
+    }   
+
+    // Улучшенная функция создания нового владельца
+    async function openAddNewOwnerModal() {
+        const modalContent = `
+            <style>
+                .new-owner-form {
+                    background: white;
+                    border-radius: 12px;
+                }
+                .new-owner-field {
+                    margin-bottom: 20px;
+                }
+                .new-owner-field label {
+                    display: block;
+                    font-size: 0.85rem;
+                    font-weight: 600;
+                    color: #374151;
+                    margin-bottom: 6px;
+                }
+                .new-owner-field label i {
+                    margin-right: 6px;
+                }
+                .new-owner-field input, .new-owner-field textarea {
+                    width: 100%;
+                    padding: 10px 12px;
+                    border: 1px solid #e5e7eb;
+                    border-radius: 10px;
+                    font-size: 0.9rem;
+                    transition: all 0.2s;
+                }
+                .new-owner-field input:focus, .new-owner-field textarea:focus {
+                    outline: none;
+                    border-color: var(--primary);
+                    box-shadow: 0 0 0 3px rgba(44, 122, 71, 0.1);
+                }
+                .new-owner-hint {
+                    font-size: 0.7rem;
+                    color: #9ca3af;
+                    margin-top: 4px;
+                }
+                .required-star {
+                    color: #ef4444;
+                    margin-left: 2px;
+                }
+            </style>    
+
+            <div class="new-owner-form">
+                <div class="new-owner-field">
+                    <label>👤 ФИО <span class="required-star">*</span></label>
+                    <input type="text" id="new-owner-name" placeholder="Иванов Иван Иванович" autocomplete="off">
+                    <div class="new-owner-hint">Полное имя владельца участка</div>
+                </div>  
+
+                <div class="new-owner-field">
+                    <label>📞 Телефон</label>
+                    <input type="tel" id="new-owner-phone" placeholder="+7 (XXX) XXX-XX-XX">
+                    <div class="new-owner-hint">Основной контактный телефон</div>
+                </div>  
+
+                <div class="new-owner-field">
+                    <label>✉️ Email</label>
+                    <input type="email" id="new-owner-email" placeholder="example@mail.ru">
+                    <div class="new-owner-hint">Электронная почта для уведомлений</div>
+                </div>  
+
+                <div class="new-owner-field">
+                    <label>📍 Адрес</label>
+                    <input type="text" id="new-owner-address" placeholder="г. Москва, ул. Примерная, д. 1">
+                    <div class="new-owner-hint">Фактический адрес проживания</div>
+                </div>  
+
+                <div class="new-owner-field">
+                    <label>📝 Примечания</label>
+                    <textarea id="new-owner-notes" rows="3" placeholder="Дополнительная информация о владельце..."></textarea>
+                    <div class="new-owner-hint">Любая полезная информация</div>
+                </div>
+            </div>
+        `;  
+
+        openModal('➕ Создание нового владельца', modalContent, 'Создать и привязать', async () => {
+            const fullName = document.getElementById('new-owner-name').value.trim();
+            if (!fullName) {
+                showAlert('Пожалуйста, введите ФИО владельца', 'error');
+                return;
+            }
+            
+            const phone = document.getElementById('new-owner-phone').value.trim();
+            const email = document.getElementById('new-owner-email').value.trim();
+            
+            // Простая валидация email если указан
+            if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+                showAlert('Пожалуйста, введите корректный email адрес', 'error');
+                return;
+            }
+            
+            // Создаем владельца
+            const newOwner = await apiFetch('/api/owners/', {
+                method: 'POST',
+                body: JSON.stringify({
+                    full_name: fullName,
+                    primary_phone: phone,
+                    email: email,
+                    address: document.getElementById('new-owner-address').value.trim(),
+                    notes: document.getElementById('new-owner-notes').value.trim(),
+                }),
+            });
+            
+            if (newOwner && newOwner.id) {
+                showAlert(`✅ Владелец "${fullName}" успешно создан`, 'success');
+                closeModal();
+                
+                // Открываем модалку привязки с новым владельцем
+                setTimeout(async () => {
+                    await openAddOwnerModal();
+                    setTimeout(() => {
+                        const ownerSelect = document.getElementById('owner-select');
+                        if (ownerSelect) {
+                            for (let i = 0; i < ownerSelect.options.length; i++) {
+                                if (parseInt(ownerSelect.options[i].value) === newOwner.id) {
+                                    ownerSelect.selectedIndex = i;
+                                    break;
+                                }
+                            }
+                        }
+                    }, 200);
+                }, 100);
+            } else {
+                showAlert('❌ Ошибка при создании владельца. Попробуйте еще раз.', 'error');
+            }
         });
     }
-    
+
     function editOwnership(id, share, since, doc) {
         openModal('Редактировать право собственности', `
             <div class="form-group"><label>Доля</label><input type="text" id="edit-share" value="${escapeHtml(share)}"></div>
