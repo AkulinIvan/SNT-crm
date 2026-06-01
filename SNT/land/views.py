@@ -60,10 +60,21 @@ class LandPlotViewSet(OrganizationMixin, viewsets.ModelViewSet):
 
     def get_queryset(self):
         """Расширенная фильтрация с учетом организации"""
-        # Базовый queryset с фильтрацией по организации
+        # Базовый queryset
         queryset = super().get_queryset()
-
-        # Дополнительная фильтрация по наличию координат
+        
+        # Фильтрация по организации
+        if hasattr(self.request, 'current_organization') and self.request.current_organization:
+            queryset = queryset.filter(organization=self.request.current_organization)
+        
+        # ========== ОСНОВНЫЕ ФИЛЬТРЫ ==========
+        
+        # 1. Фильтр по статусу
+        status = self.request.query_params.get('status')
+        if status and status in ['active', 'abandoned', 'disputed']:
+            queryset = queryset.filter(status=status)
+        
+        # 2. Фильтр по координатам
         has_coordinates = self.request.query_params.get('has_coordinates')
         if has_coordinates is not None:
             if has_coordinates.lower() == 'true':
@@ -71,41 +82,65 @@ class LandPlotViewSet(OrganizationMixin, viewsets.ModelViewSet):
                     latitude__isnull=False, 
                     longitude__isnull=False
                 )
-            else:
+            elif has_coordinates.lower() == 'false':
                 queryset = queryset.filter(
                     Q(latitude__isnull=True) | Q(longitude__isnull=True)
                 )
-
-        # ФИЛЬТРАЦИЯ ПО НАЛИЧИЮ ГРАНИЦ
+        
+        # 3. Фильтр по границам
         has_boundaries = self.request.query_params.get('has_boundaries')
         if has_boundaries is not None:
             if has_boundaries.lower() == 'true':
-                # Ищем участки, у которых есть границы (не пустой массив)
                 queryset = queryset.filter(
                     boundaries__isnull=False
                 ).exclude(boundaries=[])
-            else:
-                # Ищем участки без границ (null или пустой массив)
+            elif has_boundaries.lower() == 'false':
                 queryset = queryset.filter(
                     Q(boundaries__isnull=True) | Q(boundaries=[])
                 )
-
-        # Фильтрация по диапазону площади
+        
+        # 4. Фильтр по наличию владельцев
+        has_owners = self.request.query_params.get('has_owners')
+        if has_owners is not None:
+            if has_owners.lower() == 'true':
+                queryset = queryset.annotate(
+                    owners_cnt=Count('ownerships')
+                ).filter(owners_cnt__gt=0)
+            elif has_owners.lower() == 'false':
+                queryset = queryset.annotate(
+                    owners_cnt=Count('ownerships')
+                ).filter(owners_cnt=0)
+        
+        # 5. Фильтр по площади
         area_min = self.request.query_params.get('area_min')
-        area_max = self.request.query_params.get('area_max')
         if area_min:
-            queryset = queryset.filter(area_sqm__gte=float(area_min))
+            try:
+                queryset = queryset.filter(area_sqm__gte=float(area_min))
+            except ValueError:
+                pass
+            
+        area_max = self.request.query_params.get('area_max')
         if area_max:
-            queryset = queryset.filter(area_sqm__lte=float(area_max))
-
-        # Поиск по владельцам
-        owner_search = self.request.query_params.get('owner_search')
-        if owner_search:
+            try:
+                queryset = queryset.filter(area_sqm__lte=float(area_max))
+            except ValueError:
+                pass
+            
+        # 6. Поиск по тексту (номер, кадастр, адрес)
+        search = self.request.query_params.get('search')
+        if search:
             queryset = queryset.filter(
-                ownerships__owner__full_name__icontains=owner_search
-            ).distinct()
-
+                Q(plot_number__icontains=search) |
+                Q(cadastral_number__icontains=search) |
+                Q(address__icontains=search)
+            )
+        
+        # Применяем distinct для избежания дублей при join'ах
+        queryset = queryset.distinct()
+        
+        logger.debug(f"Final queryset count: {queryset.count()}")
         return queryset
+            
 
     def perform_create(self, serializer):
         """При создании автоматически подставляем организацию"""
@@ -557,7 +592,7 @@ class LandPlotViewSet(OrganizationMixin, viewsets.ModelViewSet):
         with_boundaries = queryset.filter(
             boundaries__isnull=False
         ).exclude(boundaries=[]).count()
-        
+
         without_boundaries = queryset.filter(
             Q(boundaries__isnull=True) | Q(boundaries=[])
         ).count()   
