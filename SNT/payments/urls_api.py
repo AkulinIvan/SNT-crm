@@ -4,7 +4,7 @@ from .views import (
     ConsolidatedAssessmentViewSet, PaymentCategoryViewSet, PaymentPeriodViewSet,
     AssessmentViewSet, PaymentViewSet,
     BankStatementViewSet, BankTransactionViewSet, ReceiptTemplateViewSet,
-    QuickPaymentViewSet,
+    QuickPaymentViewSet, bulk_update_assessments,
 )
 
 router = DefaultRouter()
@@ -20,6 +20,7 @@ router.register(r'quick-payment', QuickPaymentViewSet, basename='quick-payment')
 
 urlpatterns = [
     path('', include(router.urls)),
+    path('assessments/bulk-update-amounts/', bulk_update_assessments, name='bulk-update-assessments'),
 ]
 
 # Список всех доступных эндпоинтов после добавления:

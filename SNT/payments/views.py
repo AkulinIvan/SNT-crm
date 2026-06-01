@@ -3,7 +3,8 @@ from decimal import Decimal
 from django.shortcuts import render
 from django.views import View
 from rest_framework import viewsets, status
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
@@ -1755,3 +1756,78 @@ class ConsolidatedAssessmentViewSet(viewsets.ModelViewSet):
             return render(request, 'payments/consolidated_receipt.html', data)
 
         return Response(data)
+    
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def bulk_update_assessments(request):
+    """
+    Массовое обновление сумм начислений.
+    
+    Принимает список объектов:
+    [
+        {"id": 1, "amount": 5000.00},
+        {"id": 2, "amount": 3000.00},
+        ...
+    ]
+    """
+    updates = request.data
+    
+    if not isinstance(updates, list):
+        return Response(
+            {'error': 'Ожидается список объектов с id и amount'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    updated = []
+    errors = []
+    
+    try:
+        with db_transaction.atomic():
+            for item in updates:
+                assessment_id = item.get('id')
+                new_amount = item.get('amount')
+                
+                if not assessment_id or new_amount is None:
+                    errors.append({
+                        'id': assessment_id,
+                        'error': 'Не указан id или amount'
+                    })
+                    continue
+                
+                try:
+                    assessment = Assessment.objects.select_for_update().get(id=assessment_id)
+                    
+                    # Сохраняем старую сумму для истории
+                    old_amount = assessment.amount
+                    
+                    # Обновляем сумму
+                    assessment.amount = new_amount
+                    assessment.save()  # save() пересчитает статус
+                    
+                    updated.append({
+                        'id': assessment.id,
+                        'old_amount': str(old_amount),
+                        'new_amount': str(new_amount),
+                        'status': assessment.status,
+                        'debt': str(assessment.debt)
+                    })
+                    
+                except Assessment.DoesNotExist:
+                    errors.append({
+                        'id': assessment_id,
+                        'error': 'Начисление не найдено'
+                    })
+    
+    except Exception as e:
+        return Response(
+            {'error': f'Ошибка при обновлении: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+    
+    return Response({
+        'success': True,
+        'updated_count': len(updated),
+        'error_count': len(errors),
+        'updated': updated,
+        'errors': errors
+    })

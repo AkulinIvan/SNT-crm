@@ -16,10 +16,58 @@
         <div style="display: flex; gap: 8px;">
             <button class="btn btn-secondary" onclick="window.location.href='/payments/'">← К платежам</button>
             <button class="btn btn-primary" onclick="openGenerateModal()">🔄 Сгенерировать</button>
+            <button class="btn btn-secondary" onclick="window.location.href='/payments/categories/'">⚙️ Тарифы</button>
         </div>
     </div>
 </div>
+<style>
+.amount-cell {
+    cursor: pointer;
+    position: relative;
+    transition: background-color 0.2s;
+}
 
+.amount-cell:hover {
+    background-color: rgba(76, 175, 80, 0.05);
+}
+
+.amount-display {
+    display: block;
+    font-weight: bold;
+}
+
+.amount-input {
+    padding: 4px 8px;
+    border: 2px solid var(--primary);
+    border-radius: 6px;
+    font-size: inherit;
+    font-family: inherit;
+    text-align: right;
+    font-weight: bold;
+}
+
+.amount-input:focus {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.2);
+}
+
+/* Индикатор редактируемой ячейки */
+.amount-cell::after {
+    content: '✎';
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    opacity: 0;
+    transition: opacity 0.2s;
+    font-size: 0.8rem;
+    color: var(--primary);
+}
+
+.amount-cell:hover::after {
+    opacity: 0.5;
+}
+</style>
 <!-- Фильтры -->
 <div class="filters-bar">
     <div class="filter-group">
@@ -71,6 +119,184 @@
     let statusFilter = '';
     let searchQuery = '';
     
+    // Вспомогательные функции для редактирования
+    function formatMoney(amount) {
+        return parseFloat(amount).toLocaleString('ru-RU', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        });
+    }
+
+    function getStatusBadge(status) {
+        const map = {
+            'paid': '<span class="badge-status badge-active">✅ Оплачено</span>',
+            'pending': '<span class="badge-status badge-warning">⏳ Ожидает</span>',
+            'partial': '<span class="badge-status badge-warning">📊 Частично</span>',
+            'overdue': '<span class="badge-status badge-danger">🔴 Просрочено</span>',
+            'cancelled': '<span class="badge-status badge-inactive">❌ Отменено</span>',
+            'Оплачено': '<span class="badge-status badge-active">✅ Оплачено</span>',
+            'Ожидает оплаты': '<span class="badge-status badge-warning">⏳ Ожидает</span>',
+            'Частично оплачено': '<span class="badge-status badge-warning">📊 Частично</span>',
+            'Просрочено': '<span class="badge-status badge-danger">🔴 Просрочено</span>',
+            'Отменено': '<span class="badge-status badge-inactive">❌ Отменено</span>',
+        };
+        return map[status] || `<span class="badge-status badge-inactive">${escapeHtml(status)}</span>`;
+    }
+
+    // Функция для начала редактирования суммы
+    function startEditAmount(assessmentId, cell) {
+        const display = cell.querySelector('.amount-display');
+        const input = cell.querySelector('.amount-input');
+
+        if (display && input) {
+            display.style.display = 'none';
+            input.style.display = 'block';
+            input.focus();
+            input.select();
+        }
+    }
+
+    // Функция для сохранения измененной суммы
+    async function saveAmount(assessmentId, input) {
+        const newAmount = parseFloat(input.value);
+        const cell = input.parentElement;
+        const display = cell.querySelector('.amount-display');
+
+        if (isNaN(newAmount) || newAmount < 0) {
+            showAlert('Введите корректную сумму', 'error');
+            input.value = display.textContent.replace(/[^0-9.]/g, '');
+            display.style.display = 'block';
+            input.style.display = 'none';
+            return;
+        }
+
+        try {
+            const result = await apiFetch('/api/assessments/bulk-update-amounts/', {
+                method: 'POST',
+                body: JSON.stringify([{
+                    id: assessmentId,
+                    amount: newAmount
+                }])
+            });
+
+            if (result && result.success) {
+                display.textContent = formatMoney(newAmount) + ' ₽';
+                display.style.display = 'block';
+                input.style.display = 'none';
+
+                // Обновляем строку таблицы
+                if (result.updated && result.updated.length > 0) {
+                    const update = result.updated[0];
+                    const row = input.closest('tr');
+
+                    // Обновляем сумму долга (6-я ячейка, индекс 5)
+                    const debtCell = row.querySelectorAll('td')[6];
+                    if (debtCell && update.debt) {
+                        debtCell.innerHTML = `<span style="color: ${update.debt > 0 ? 'var(--danger)' : 'var(--primary)'}; font-weight: 600;">${formatMoney(update.debt)} ₽</span>`;
+                    }
+
+                    // Обновляем статус (7-я ячейка, индекс 7)
+                    const statusCell = row.querySelectorAll('td')[7];
+                    if (statusCell && update.status) {
+                        const statusMap = {
+                            'paid': 'Оплачено',
+                            'pending': 'Ожидает оплаты',
+                            'partial': 'Частично оплачено',
+                            'overdue': 'Просрочено',
+                            'cancelled': 'Отменено'
+                        };
+                        statusCell.innerHTML = getStatusBadge(statusMap[update.status] || update.status);
+                    }
+                }
+
+                showAlert(`Сумма начисления #${assessmentId} обновлена: ${formatMoney(newAmount)} ₽`, 'success');
+            } else {
+                throw new Error('Ошибка обновления');
+            }
+        } catch (error) {
+            console.error('Ошибка сохранения:', error);
+            showAlert('Ошибка при сохранении суммы', 'error');
+            display.style.display = 'block';
+            input.style.display = 'none';
+        }
+    }
+
+    // Функция для открытия модального окна редактирования начисления
+    async function editAssessment(assessmentId) {
+        try {
+            const assessment = await apiFetch(`/api/assessments/${assessmentId}/`);
+            if (!assessment) return;
+
+            const categories = await apiFetch('/api/payment-categories/');
+            const periods = await apiFetch('/api/payment-periods/');
+
+            // Обработка данных
+            let catsList = Array.isArray(categories) ? categories : (categories?.results || []);
+            let perList = Array.isArray(periods) ? periods : (periods?.results || []);
+
+            openModal(`✏️ Редактирование начисления #${assessmentId}`, `
+                <div class="form-group">
+                    <label>Владелец</label>
+                    <input type="text" value="${escapeHtml(assessment.owner_name)}" disabled>
+                </div>
+                <div class="form-group">
+                    <label>Участок</label>
+                    <input type="text" value="${escapeHtml(assessment.plot_number)}" disabled>
+                </div>
+                <div class="form-group">
+                    <label>Категория</label>
+                    <select id="edit-category">
+                        ${catsList.map(c => `
+                            <option value="${c.id}" ${c.id === assessment.category ? 'selected' : ''}>
+                                ${escapeHtml(c.name)}
+                            </option>
+                        `).join('')}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Период</label>
+                    <select id="edit-period">
+                        ${perList.map(p => `
+                            <option value="${p.id}" ${p.id === assessment.period ? 'selected' : ''}>
+                                ${p.year} ${p.quarter ? 'Q' + p.quarter : ''}
+                            </option>
+                        `).join('')}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Сумма начисления (₽)</label>
+                    <input type="number" id="edit-amount" value="${assessment.amount}" step="0.01" min="0">
+                </div>
+                <div class="form-group">
+                    <label>Примечания</label>
+                    <textarea id="edit-notes" rows="3">${escapeHtml(assessment.notes || '')}</textarea>
+                </div>
+            `, '💾 Сохранить', async () => {
+                const data = {
+                    category: parseInt(document.getElementById('edit-category').value),
+                    period: parseInt(document.getElementById('edit-period').value),
+                    amount: parseFloat(document.getElementById('edit-amount').value),
+                    notes: document.getElementById('edit-notes').value
+                };
+
+                try {
+                    await apiFetch(`/api/assessments/${assessmentId}/`, {
+                        method: 'PATCH',
+                        body: JSON.stringify(data)
+                    });
+
+                    showAlert('Начисление обновлено', 'success');
+                    setTimeout(() => location.reload(), 1000);
+                } catch (error) {
+                    showAlert(`Ошибка: ${error.message}`, 'error');
+                }
+            });
+
+        } catch (error) {
+            console.error('Ошибка загрузки данных:', error);
+            showAlert('Ошибка загрузки данных начисления', 'error');
+        }
+    }
 
     function debounceSearch() {
         clearTimeout(searchTimeout);
@@ -101,26 +327,35 @@
         }   
 
         tbody.innerHTML = data.results.map(a => {
-            // Проверяем наличие email (owner_email может быть null или пустой строкой)
             const hasEmail = a.owner_email && a.owner_email.trim() !== '';
             const emailIcon = hasEmail ? '📧' : '📧❌';
-            const emailTitle = hasEmail ? 'Отправить квитанцию на email' : 'Нет email у владельца. Добавьте контакт';
+            const emailTitle = hasEmail ? 'Отправить квитанцию на email' : 'Нет email у владельца';
             const emailDisabled = !hasEmail ? 'disabled style="opacity: 0.5; cursor: not-allowed;"' : '';
 
             return `
-                <tr>
+                <tr data-assessment-id="${a.id}">
                     <td><a href="/owners/${a.owner}/" style="color: var(--primary); text-decoration: none;">${escapeHtml(a.owner_name)}</a></td>
-                    <td>Уч. №${escapeHtml(a.plot_number)}</a></td>
-                    <td>${escapeHtml(a.category_name)}</a></td>
-                    <td>${escapeHtml(a.period_display)}</a></td>
-                    <td><strong>${a.amount} ₽</strong></td>
-                    <td>${a.paid_amount} ₽</a></td>
+                    <td>Уч. №${escapeHtml(a.plot_number)}</td>
+                    <td>${escapeHtml(a.category_name)}</td>
+                    <td>${escapeHtml(a.period_display)}</td>
+                    <td class="amount-cell" onclick="startEditAmount(${a.id}, this)" title="Нажмите для редактирования">
+                        <span class="amount-display">${formatMoney(a.amount)} ₽</span>
+                        <input type="number" 
+                               class="amount-input" 
+                               value="${a.amount}" 
+                               style="display: none; width: 120px;"
+                               onblur="saveAmount(${a.id}, this)"
+                               onkeypress="if(event.key === 'Enter') saveAmount(${a.id}, this)"
+                               onclick="event.stopPropagation()">
+                    </td>
+                    <td>${formatMoney(a.paid_amount)} ₽</td>
                     <td style="color: ${a.debt > 0 ? 'var(--danger)' : 'var(--primary)'}; font-weight: 600;">
-                        ${a.debt} ₽
-                    </a></td>
-                    <td>${getStatusBadge(a.status_display)}</a></td>
+                        ${formatMoney(a.debt)} ₽
+                    </td>
+                    <td>${getStatusBadge(a.status_display)}</td>
                     <td>
                         <div class="table-actions">
+                            <button class="btn-icon" onclick="editAssessment(${a.id})" title="Редактировать">✏️</button>
                             <button class="btn-icon" onclick="window.open('/api/assessments/${a.id}/receipt-html/')" title="Просмотреть квитанцию">🧾</button>
                             <button class="btn-icon" onclick="sendReceiptEmail(${a.id}, '${escapeHtml(a.owner_name)}')" 
                                 title="${emailTitle}" ${emailDisabled}>
@@ -128,7 +363,7 @@
                             </button>
                             <button class="btn-icon" onclick="openAddPaymentModal(${a.id}, ${a.debt})" title="Добавить платёж">💳</button>
                         </div>
-                    </a>
+                    </td>
                 </tr>
             `;
         }).join('');    
@@ -227,7 +462,7 @@
             } else if (categoriesResponse && Array.isArray(categoriesResponse.data)) {
                 categories = categoriesResponse.data;
             }
-            
+
             // Обрабатываем периоды
             let periods = [];
             if (Array.isArray(periodsResponse)) {
@@ -237,15 +472,15 @@
             } else if (periodsResponse && Array.isArray(periodsResponse.data)) {
                 periods = periodsResponse.data;
             }
-            
+
             console.log('Categories loaded:', categories.length);
             console.log('Periods loaded:', periods.length);
-            
+
             if (categories.length === 0) {
                 showAlert('Нет доступных категорий для начислений', 'error');
                 return;
             }
-            
+
             if (periods.length === 0) {
                 showAlert('Нет доступных периодов для начислений', 'error');
                 return;
@@ -255,7 +490,7 @@
                 .filter(c => c.is_active !== false) // Показываем только активные
                 .map(c => `<option value="${c.id}">${escapeHtml(c.name)}${c.rate_per_unit ? ` (${c.rate_per_unit} ₽/${c.unit})` : ''}</option>`)
                 .join('');
-                
+
             const periodOptions = periods
                 .filter(p => p.is_active)
                 .map(p => `<option value="${p.id}">${p.year} год${p.quarter ? ', ' + p.quarter + ' кв.' : ''}${p.description ? ' - ' + p.description : ''}</option>`)
@@ -300,41 +535,41 @@
                 const periodId = document.getElementById('gen-period').value;
                 const customAmount = document.getElementById('gen-custom-amount').value;
                 const skipExisting = document.getElementById('gen-skip-existing').checked;
-                
+
                 if (!categoryId) {
                     showAlert('Выберите категорию', 'error');
                     return;
                 }
-                
+
                 if (!periodId) {
                     showAlert('Выберите период', 'error');
                     return;
                 }
-                
+
                 const body = {
                     period_id: parseInt(periodId),
                     category_id: parseInt(categoryId),
                     skip_existing: skipExisting,
                 };
-                
+
                 if (customAmount && parseFloat(customAmount) > 0) {
                     body.custom_amount = customAmount;
                 }
-                
+
                 showAlert('🔄 Генерация начислений...', 'info');
-                
+
                 const result = await apiFetch('/api/assessments/generate/', {
                     method: 'POST',
                     body: JSON.stringify(body),
                 });
-                
+
                 if (result) {
                     showAlert(`✅ Создано ${result.count} начислений`, 'success');
                     closeModal();
                     loadAssessments();
                 }
             });
-            
+
             // Показываем подсказку при выборе категории
             setTimeout(() => {
                 const categorySelect = document.getElementById('gen-category');
@@ -343,7 +578,7 @@
                         const selectedCategory = categories.find(c => c.id === parseInt(this.value));
                         const hint = document.getElementById('category-hint');
                         const customAmountGroup = document.getElementById('custom-amount-group');
-                        
+
                         if (selectedCategory) {
                             if (selectedCategory.rate_per_unit && selectedCategory.unit === 'сотка') {
                                 hint.textContent = `Тариф: ${selectedCategory.rate_per_unit} ₽/сотка (расчёт по площади участка)`;
@@ -362,7 +597,7 @@
                     });
                 }
             }, 100);
-            
+
         }).catch(error => {
             console.error('Error loading generate modal data:', error);
             showAlert('Ошибка загрузки данных: ' + error.message, 'error');

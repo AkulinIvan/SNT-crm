@@ -1,0 +1,466 @@
+{% extends "base.html" %}
+
+{% block title %}Управление тарифами | CRM СНТ{% endblock %}
+
+{% block breadcrumb %}
+<a href="/">Главная</a> <span>/</span> <a href="/payments/">Платежи</a> <span>/</span> <span>Тарифы</span>
+{% endblock %}
+
+{% block content %}
+<style>
+.tariff-card {
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    padding: 20px;
+    margin-bottom: 16px;
+    transition: all 0.3s;
+}
+.tariff-card:hover {
+    box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+}
+.tariff-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid var(--primary-light);
+}
+.tariff-title {
+    font-size: 1.2rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.tariff-badge {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+.badge-per-area { background: #e3f2fd; color: #1565c0; }
+.badge-fixed { background: #e8f5e9; color: #2e7d32; }
+.badge-energy { background: #fff3e0; color: #e65100; }
+.badge-inactive { background: #f5f5f5; color: #9e9e9e; }
+.tariff-body {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+}
+.tariff-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.tariff-field label {
+    font-size: 0.8rem;
+    color: var(--gray-600);
+    font-weight: 500;
+}
+.tariff-field input, .tariff-field select {
+    padding: 8px 12px;
+    border: 1px solid var(--gray-300);
+    border-radius: 8px;
+    font-size: 0.95rem;
+    transition: all 0.2s;
+}
+.tariff-field input:focus, .tariff-field select:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.1);
+}
+.tariff-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid var(--gray-100);
+}
+.add-category-form {
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    padding: 24px;
+    margin-bottom: 24px;
+    border: 2px dashed var(--primary);
+}
+.form-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin-bottom: 16px;
+}
+.quick-actions {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+}
+</style>
+
+<div class="page-header">
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+        <div>
+            <h2>⚙️ Управление тарифами и взносами</h2>
+            <p>Настройка сумм взносов за сотку и фиксированных платежей</p>
+        </div>
+        <div style="display: flex; gap: 8px;">
+            <button class="btn btn-secondary" onclick="window.location.href='/payments/'">← К платежам</button>
+            <button class="btn btn-primary" onclick="showAddForm()">➕ Добавить категорию</button>
+        </div>
+    </div>
+</div>
+
+<!-- Быстрые действия -->
+<div class="quick-actions">
+    <button class="btn btn-primary" onclick="applyToAllPlots()">🔄 Применить тарифы ко всем участкам</button>
+    <button class="btn btn-secondary" onclick="window.location.href='/payments/assessments/'">📋 Перейти к начислениям</button>
+</div>
+
+<!-- Форма добавления новой категории -->
+<div class="add-category-form" id="add-category-form" style="display: none;">
+    <h3 style="margin-bottom: 16px;">➕ Новая категория взноса</h3>
+    <div class="form-row">
+        <div class="tariff-field">
+            <label>Название *</label>
+            <input type="text" id="new-name" placeholder="Членские взносы">
+        </div>
+        <div class="tariff-field">
+            <label>Код *</label>
+            <input type="text" id="new-code" placeholder="membership">
+        </div>
+        <div class="tariff-field">
+            <label>Тип расчёта</label>
+            <select id="new-unit">
+                <option value="участок">Фиксированная сумма</option>
+                <option value="сотка">За сотку</option>
+                <option value="кВт·ч">За электричество (кВт·ч)</option>
+            </select>
+        </div>
+        <div class="tariff-field">
+            <label>Тариф (₽)</label>
+            <input type="number" id="new-rate" value="0" step="0.01" min="0">
+        </div>
+        <div class="tariff-field">
+            <label>Фиксированная сумма (₽)</label>
+            <input type="number" id="new-default" value="0" step="0.01" min="0" placeholder="0 = рассчитывать по тарифу">
+        </div>
+    </div>
+    <div class="tariff-field" style="margin-bottom: 16px;">
+        <label>Описание</label>
+        <textarea id="new-description" rows="2" placeholder="Описание категории взноса"></textarea>
+    </div>
+    <div style="display: flex; gap: 8px;">
+        <button class="btn btn-primary" onclick="saveNewCategory()">💾 Сохранить</button>
+        <button class="btn btn-secondary" onclick="hideAddForm()">Отмена</button>
+    </div>
+</div>
+
+<!-- Список категорий -->
+<div id="categories-list">
+    <div class="empty-state">
+        <div class="empty-icon">⏳</div>
+        <h3>Загрузка категорий...</h3>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let allCategories = [];
+
+// Загрузка всех категорий
+async function loadCategories() {
+    try {
+        const data = await apiFetch('/api/payment-categories/?limit=100');
+        allCategories = Array.isArray(data) ? data : (data?.results || []);
+        renderCategories();
+    } catch (error) {
+        console.error('Ошибка загрузки категорий:', error);
+        document.getElementById('categories-list').innerHTML = `
+            <div class="empty-state">
+                <div class="empty-icon">❌</div>
+                <h3>Ошибка загрузки</h3>
+                <p>${error.message}</p>
+            </div>`;
+    }
+}
+
+// Отрисовка категорий
+function renderCategories() {
+    const container = document.getElementById('categories-list');
+    
+    if (allCategories.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-icon">📋</div>
+                <h3>Нет категорий взносов</h3>
+                <p>Добавьте первую категорию для начала работы</p>
+            </div>`;
+        return;
+    }
+    
+    container.innerHTML = allCategories.map(cat => {
+        const unitLabels = {
+            'участок': 'Фиксированная',
+            'сотка': 'За сотку',
+            'кВт·ч': 'За электричество'
+        };
+        
+        const badgeClass = {
+            'участок': 'badge-fixed',
+            'сотка': 'badge-per-area',
+            'кВт·ч': 'badge-energy'
+        };
+        
+        const statusBadge = cat.is_active 
+            ? `<span class="tariff-badge ${badgeClass[cat.unit] || 'badge-fixed'}">✅ ${unitLabels[cat.unit] || cat.unit}</span>`
+            : '<span class="tariff-badge badge-inactive">❌ Неактивна</span>';
+        
+        return `
+            <div class="tariff-card" data-category-id="${cat.id}">
+                <div class="tariff-header">
+                    <div class="tariff-title">
+                        ${statusBadge}
+                        <span>${escapeHtml(cat.name)}</span>
+                        <code style="background: var(--gray-100); padding: 2px 8px; border-radius: 4px; font-size: 0.8rem;">${escapeHtml(cat.code)}</code>
+                    </div>
+                    <div>
+                        <button class="btn btn-sm btn-secondary" onclick="toggleCategory(${cat.id}, ${!cat.is_active})">
+                            ${cat.is_active ? '🔒 Деактивировать' : '🔓 Активировать'}
+                        </button>
+                    </div>
+                </div>
+                <div class="tariff-body">
+                    <div class="tariff-field">
+                        <label>Тип расчёта</label>
+                        <select onchange="updateCategoryField(${cat.id}, 'unit', this.value)">
+                            <option value="участок" ${cat.unit === 'участок' ? 'selected' : ''}>Фиксированная сумма</option>
+                            <option value="сотка" ${cat.unit === 'сотка' ? 'selected' : ''}>За сотку</option>
+                            <option value="кВт·ч" ${cat.unit === 'кВт·ч' ? 'selected' : ''}>За электричество (кВт·ч)</option>
+                        </select>
+                    </div>
+                    ${cat.unit === 'сотка' || cat.unit === 'кВт·ч' ? `
+                        <div class="tariff-field">
+                            <label>Тариф за единицу (₽)</label>
+                            <input type="number" 
+                                   value="${cat.rate_per_unit || 0}" 
+                                   step="0.01" min="0"
+                                   onchange="updateCategoryField(${cat.id}, 'rate_per_unit', this.value)">
+                        </div>
+                    ` : ''}
+                    <div class="tariff-field">
+                        <label>Фиксированная сумма (₽)</label>
+                        <input type="number" 
+                               value="${cat.default_amount || 0}" 
+                               step="0.01" min="0"
+                               onchange="updateCategoryField(${cat.id}, 'default_amount', this.value)">
+                    </div>
+                    <div class="tariff-field">
+                        <label>Описание</label>
+                        <input type="text" 
+                               value="${escapeHtml(cat.description || '')}" 
+                               placeholder="Описание категории"
+                               onchange="updateCategoryField(${cat.id}, 'description', this.value)">
+                    </div>
+                </div>
+                <div class="tariff-actions">
+                    <button class="btn btn-sm btn-primary" onclick="testCalculate(${cat.id})">
+                        🧮 Тестовый расчёт
+                    </button>
+                    <button class="btn btn-sm btn-danger" onclick="deleteCategory(${cat.id}, '${escapeHtml(cat.name)}')">
+                        🗑️ Удалить
+                    </button>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+// Обновление поля категории
+async function updateCategoryField(categoryId, field, value) {
+    try {
+        const data = { [field]: field === 'is_active' ? value : value };
+        
+        // Для числовых полей преобразуем
+        if (['rate_per_unit', 'default_amount'].includes(field)) {
+            data[field] = parseFloat(value) || 0;
+        }
+        
+        await apiFetch(`/api/payment-categories/${categoryId}/`, {
+            method: 'PATCH',
+            body: JSON.stringify(data)
+        });
+        
+        // Обновляем локальные данные
+        const idx = allCategories.findIndex(c => c.id === categoryId);
+        if (idx !== -1) {
+            allCategories[idx][field] = data[field];
+        }
+        
+        showAlert('✅ Изменения сохранены', 'success');
+        
+        // Перерисовываем если изменился тип расчёта
+        if (field === 'unit') {
+            renderCategories();
+        }
+    } catch (error) {
+        showAlert(`❌ Ошибка: ${error.message}`, 'error');
+        loadCategories(); // Перезагружаем для восстановления
+    }
+}
+
+// Активация/деактивация категории
+async function toggleCategory(categoryId, isActive) {
+    await updateCategoryField(categoryId, 'is_active', isActive);
+    loadCategories();
+}
+
+// Сохранение новой категории
+async function saveNewCategory() {
+    const name = document.getElementById('new-name').value.trim();
+    const code = document.getElementById('new-code').value.trim();
+    const unit = document.getElementById('new-unit').value;
+    const rate = parseFloat(document.getElementById('new-rate').value) || 0;
+    const defaultAmount = parseFloat(document.getElementById('new-default').value) || 0;
+    const description = document.getElementById('new-description').value.trim();
+    
+    if (!name || !code) {
+        showAlert('Название и код обязательны', 'error');
+        return;
+    }
+    
+    try {
+        await apiFetch('/api/payment-categories/', {
+            method: 'POST',
+            body: JSON.stringify({
+                name,
+                code,
+                unit,
+                rate_per_unit: rate,
+                default_amount: defaultAmount,
+                description,
+                is_active: true
+            })
+        });
+        
+        showAlert('✅ Категория создана', 'success');
+        hideAddForm();
+        loadCategories();
+    } catch (error) {
+        showAlert(`❌ Ошибка: ${error.message}`, 'error');
+    }
+}
+
+// Тестовый расчёт
+async function testCalculate(categoryId) {
+    try {
+        const result = await apiFetch(`/api/payment-categories/${categoryId}/test-calculate/`);
+        
+        if (result) {
+            let message = `🧮 Пример расчёта:\n\n`;
+            message += `Тариф: ${result.rate_per_unit || 0} ₽/${result.unit}\n`;
+            message += `Средняя площадь участка: ${result.avg_area || 0} м²\n`;
+            
+            if (result.sample_calculations) {
+                message += `\nПримеры:\n`;
+                result.sample_calculations.forEach(calc => {
+                    message += `• Участок ${calc.plot_number} (${calc.area} м²): ${calc.calculated_amount} ₽\n`;
+                });
+            }
+            
+            alert(message);
+        }
+    } catch (error) {
+        // Если эндпоинта нет, показываем простой расчёт
+        const cat = allCategories.find(c => c.id === categoryId);
+        if (cat) {
+            let message = `📐 Расчёт для категории "${cat.name}":\n\n`;
+            
+            if (cat.unit === 'сотка' && cat.rate_per_unit) {
+                const examples = [6, 8, 10, 12, 15];
+                message += `Тариф: ${cat.rate_per_unit} ₽/сотка\n\n`;
+                message += `Примеры расчёта:\n`;
+                examples.forEach(sot => {
+                    message += `• ${sot} соток: ${sot} × ${cat.rate_per_unit} = ${(sot * cat.rate_per_unit).toFixed(2)} ₽\n`;
+                });
+            } else if (cat.unit === 'кВт·ч' && cat.rate_per_unit) {
+                const examples = [100, 200, 300, 500];
+                message += `Тариф: ${cat.rate_per_unit} ₽/кВт·ч\n\n`;
+                message += `Примеры расчёта:\n`;
+                examples.forEach(kwh => {
+                    message += `• ${kwh} кВт·ч: ${kwh} × ${cat.rate_per_unit} = ${(kwh * cat.rate_per_unit).toFixed(2)} ₽\n`;
+                });
+            } else {
+                message += `Фиксированная сумма: ${cat.default_amount} ₽\n`;
+            }
+            
+            alert(message);
+        }
+    }
+}
+
+// Удаление категории
+async function deleteCategory(categoryId, name) {
+    if (!confirm(`Удалить категорию "${name}"?\n\nВНИМАНИЕ: Все связанные начисления также будут удалены!`)) {
+        return;
+    }
+    
+    try {
+        await apiFetch(`/api/payment-categories/${categoryId}/`, {
+            method: 'DELETE'
+        });
+        
+        showAlert('✅ Категория удалена', 'success');
+        loadCategories();
+    } catch (error) {
+        showAlert(`❌ Ошибка: ${error.message}`, 'error');
+    }
+}
+
+// Применить тарифы ко всем участкам
+async function applyToAllPlots() {
+    if (!confirm('Пересчитать начисления для всех участков по текущим тарифам?')) {
+        return;
+    }
+    
+    showAlert('🔄 Пересчёт начислений...', 'info');
+    
+    try {
+        const result = await apiFetch('/api/assessments/recalculate-all/', {
+            method: 'POST'
+        });
+        
+        if (result) {
+            showAlert(`✅ Обновлено: ${result.updated || 0} начислений`, 'success');
+        }
+    } catch (error) {
+        showAlert(`❌ Ошибка: ${error.message}`, 'error');
+    }
+}
+
+// Показать/скрыть форму добавления
+function showAddForm() {
+    document.getElementById('add-category-form').style.display = 'block';
+    document.getElementById('new-name').focus();
+}
+
+function hideAddForm() {
+    document.getElementById('add-category-form').style.display = 'none';
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// Загрузка при старте
+document.addEventListener('DOMContentLoaded', loadCategories);
+</script>
+{% endblock %}
