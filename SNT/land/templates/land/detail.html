@@ -196,9 +196,9 @@
         
         plotMap = L.map('plot-map').setView([centerLat, centerLon], 15);
         
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-            maxZoom: 19
+        L.tileLayer('https://tile2.maps.2gis.com/tiles?x={x}&y={y}&z={z}&v=1', {
+            attribution: '&copy; <a href="https://2gis.ru">2GIS</a>',
+            maxZoom: 18
         }).addTo(plotMap);
         
         L.control.scale().addTo(plotMap);
@@ -723,7 +723,7 @@
 
             <div class="owner-modal-section">
                 <div class="owner-modal-label">📋 Информация о праве собственности</div>
-                
+
                 <div class="owner-input-group">
                     <label>Доля владения</label>
                     <input type="text" id="owner-share" value="1/1" placeholder="например: 1/1, 1/2, 1/3">
@@ -757,7 +757,7 @@
         openModal('Привязать владельца к участку', modalContent, 'Привязать', async () => {
             const ownerSelect = document.getElementById('owner-select');
             const ownerId = parseInt(ownerSelect?.value);
-            
+
             if (isNaN(ownerId) || !ownerSelect || ownerSelect.selectedIndex === -1) {
                 showAlert('Пожалуйста, выберите владельца из списка', 'error');
                 return;
@@ -802,23 +802,23 @@
                 searchInput.addEventListener('input', async (e) => {
                     clearTimeout(searchTimeout);
                     const query = e.target.value.trim();
-                    
+
                     if (query.length < 2 && query.length > 0) {
                         return;
                     }
-                    
+
                     searchTimeout = setTimeout(async () => {
                         if (ownerSelect) {
                             ownerSelect.innerHTML = '<option disabled>🔍 Поиск владельцев...</option>';
                         }
-                        
+
                         const params = new URLSearchParams({
                             limit: 50,
                             search: query
                         });
-                        
+
                         const searchData = await apiFetch(`/api/owners/?${params}`);
-                        
+
                         if (ownerSelect) {
                             if (searchData?.results?.length) {
                                 const filtered = searchData.results.filter(o => !existingIds.includes(o.id));
@@ -932,16 +932,16 @@
                 showAlert('Пожалуйста, введите ФИО владельца', 'error');
                 return;
             }
-            
+
             const phone = document.getElementById('new-owner-phone').value.trim();
             const email = document.getElementById('new-owner-email').value.trim();
-            
+
             // Простая валидация email если указан
             if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
                 showAlert('Пожалуйста, введите корректный email адрес', 'error');
                 return;
             }
-            
+
             // Создаем владельца
             const newOwner = await apiFetch('/api/owners/', {
                 method: 'POST',
@@ -953,11 +953,11 @@
                     notes: document.getElementById('new-owner-notes').value.trim(),
                 }),
             });
-            
+
             if (newOwner && newOwner.id) {
                 showAlert(`✅ Владелец "${fullName}" успешно создан`, 'success');
                 closeModal();
-                
+
                 // Открываем модалку привязки с новым владельцем
                 setTimeout(async () => {
                     await openAddOwnerModal();
