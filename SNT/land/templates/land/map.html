@@ -444,10 +444,12 @@ async function loadMapData() {
         
         if (bounds.length > 0) {
             try {
-                map.fitBounds(bounds, { padding: [50, 50], maxZoom: 18 });
-                const center = map.getCenter();
-                mapCenterLat = center.lat;
-                mapCenterLon = center.lng;
+                if (map && typeof map.fitBounds === 'function') {
+                    map.fitBounds(bounds, { padding: [50, 50], maxZoom: 18 });
+                    const center = map.getCenter();
+                    mapCenterLat = center.lat;
+                    mapCenterLon = center.lng;
+                }
             } catch (e) {
                 console.error('Ошибка центрирования карты:', e);
             }
@@ -630,7 +632,6 @@ async function bulkLoadBoundaries() {
             });
         }
     }, 100);
-    closeModal();
 }
 
 // Загрузка участков без координат (с пагинацией)
