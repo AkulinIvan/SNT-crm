@@ -93,7 +93,6 @@
         <span style="font-weight: 600;">⚡ Быстрые действия</span>
     </div>
     <div style="padding: 20px; display: flex; gap: 12px; flex-wrap: wrap;">
-        <button class="btn btn-primary" onclick="openGenerateModal()">🔄 Сгенерировать начисления</button>
         <button class="btn btn-secondary" onclick="window.location.href='/payments/import/'">🏦 Импортировать выписку</button>
         <button class="btn btn-secondary" onclick="window.location.href='/payments/categories/'">⚙️ Управление тарифами</button>
     </div>
@@ -209,53 +208,7 @@
         return map[status] || `<span class="badge-status badge-inactive">${escapeHtml(status)}</span>`;
     }
 
-    function openGenerateModal() {
-        // Загружаем категории и периоды
-        Promise.all([
-            apiFetch('/api/payment-categories/'),
-            apiFetch('/api/payment-periods/'),
-        ]).then(([categories, periods]) => {
-            if (!categories || !periods) return;
-
-            const categoryOptions = categories.map(c => 
-                `<option value="${c.id}">${escapeHtml(c.name)} (${c.default_amount} ₽/${c.unit})</option>`
-            ).join('');
-
-            const periodOptions = periods.filter(p => p.is_active).map(p => 
-                `<option value="${p.id}">${p.year} ${p.quarter ? 'Q' + p.quarter : ''} (срок: ${formatDate(p.due_date)})</option>`
-            ).join('');
-
-            openModal('Сгенерировать начисления', `
-                <div class="form-group">
-                    <label>Категория взноса *</label>
-                    <select id="gen-category">${categoryOptions}</select>
-                </div>
-                <div class="form-group">
-                    <label>Период *</label>
-                    <select id="gen-period">${periodOptions}</select>
-                </div>
-                <p style="font-size: 0.85rem; color: var(--gray-500);">
-                    Начисления будут созданы для всех активных участков вашего СНТ
-                </p>
-            `, 'Сгенерировать', async () => {
-                const categoryId = document.getElementById('gen-category').value;
-                const periodId = document.getElementById('gen-period').value;
-
-                const result = await apiFetch('/api/assessments/generate/', {
-                    method: 'POST',
-                    body: JSON.stringify({
-                        period_id: parseInt(periodId),
-                        category_id: parseInt(categoryId),
-                    }),
-                });
-
-                if (result) {
-                    showAlert(`Создано ${result.count} начислений`, 'success');
-                    loadPaymentsDashboard();
-                }
-            });
-        });
-    }
+    
 
     function escapeHtml(text) {
         const div = document.createElement('div');

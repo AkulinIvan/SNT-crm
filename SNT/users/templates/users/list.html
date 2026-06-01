@@ -16,36 +16,197 @@
         <div style="display: flex; gap: 8px;">
             <button class="btn btn-primary" onclick="openAddOwnerModal()">+ Добавить владельца</button>
             <button class="btn btn-secondary" onclick="openMassAssessmentModal()">💰 Массовые начисления</button>
+            <button class="btn btn-secondary" onclick="exportOwners()">📥 Экспорт</button>
         </div>
     </div>
 </div>
 
-<!-- Фильтры -->
-<div class="filters-bar">
-    <div class="filter-group">
-        <label>🔍 Поиск:</label>
-        <input type="text" id="search-input" placeholder="ФИО владельца..." onkeyup="debounceSearch()">
+<!-- Расширенная панель фильтров -->
+<div class="filters-panel" style="background: white; border-radius: 12px; padding: 20px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <h3 style="font-size: 1rem; margin: 0;">🔍 Расширенный поиск владельцев</h3>
+        <button class="btn-link" onclick="toggleAdvancedFilters()" style="color: var(--primary);">
+            <span id="advanced-toggle-text">▼ Показать все фильтры</span>
+        </button>
     </div>
-    <div class="filter-group">
-        <label>Сортировка:</label>
-        <select id="sort-select" onchange="changeFilter()">
-            <option value="full_name">По ФИО</option>
-            <option value="-created_at">Сначала новые</option>
-        </select>
+    
+    <!-- Быстрый поиск -->
+    <div class="form-group" style="margin-bottom: 16px;">
+        <label>🔎 Быстрый поиск</label>
+        <div style="display: flex; gap: 8px;">
+            <input type="text" id="search-input" placeholder="ФИО, телефон, email, номер участка..." 
+                   style="flex: 1;" onkeyup="debounceSearch()">
+            <button class="btn btn-primary" onclick="searchOwners()">🔍 Найти</button>
+            <button class="btn btn-secondary" onclick="resetAllFilters()">🔄 Сбросить всё</button>
+        </div>
     </div>
-    <div class="filter-group">
-        <label>🏢 СНТ:</label>
-        <select id="organization-filter" onchange="changeFilter()">
-            <option value="">Все СНТ</option>
-        </select>
+    
+    <!-- Продвинутые фильтры (скрыты по умолчанию) -->
+    <div id="advanced-filters" style="display: none;">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px;">
+            <!-- Статус задолженности -->
+            <div class="form-group">
+                <label>💰 Задолженность</label>
+                <select id="debtor-filter">
+                    <option value="">Все</option>
+                    <option value="yes">Только должники</option>
+                    <option value="no">Без задолженности</option>
+                    <option value="critical">Критическая (>30 дней)</option>
+                </select>
+            </div>
+            
+            <!-- Сумма долга -->
+            <div class="form-group">
+                <label>💸 Сумма долга (₽)</label>
+                <div style="display: flex; gap: 8px;">
+                    <input type="number" id="debt-min" placeholder="от" step="1000" style="width: 100%;">
+                    <span style="align-self: center;">-</span>
+                    <input type="number" id="debt-max" placeholder="до" step="1000" style="width: 100%;">
+                </div>
+            </div>
+            
+            <!-- Количество участков -->
+            <div class="form-group">
+                <label>🏠 Количество участков</label>
+                <select id="plots-count-filter">
+                    <option value="">Все</option>
+                    <option value="0">Без участков</option>
+                    <option value="1">1 участок</option>
+                    <option value="2">2 участка</option>
+                    <option value="3">3+ участков</option>
+                    <option value="5">5+ участков</option>
+                </select>
+            </div>
+            
+            <!-- СНТ -->
+            <div class="form-group">
+                <label>🏢 СНТ</label>
+                <select id="organization-filter">
+                    <option value="">Все СНТ</option>
+                </select>
+            </div>
+            
+            <!-- Статус членства -->
+            <div class="form-group">
+                <label>📋 Статус членства</label>
+                <select id="membership-status">
+                    <option value="">Все</option>
+                    <option value="active">Активный</option>
+                    <option value="inactive">Неактивный</option>
+                    <option value="pending">На рассмотрении</option>
+                </select>
+            </div>
+            
+            <!-- Дата добавления -->
+            <div class="form-group">
+                <label>📅 Дата добавления</label>
+                <div style="display: flex; gap: 8px;">
+                    <input type="date" id="date-from">
+                    <span>—</span>
+                    <input type="date" id="date-to">
+                </div>
+            </div>
+            
+            <!-- Есть контакты -->
+            <div class="form-group">
+                <label>📞 Контакты</label>
+                <select id="has-contacts">
+                    <option value="">Все</option>
+                    <option value="yes">С контактами</option>
+                    <option value="no">Без контактов</option>
+                    <option value="phone">С телефоном</option>
+                    <option value="email">С email</option>
+                </select>
+            </div>
+            
+            <!-- Телефон -->
+            <div class="form-group">
+                <label>📱 Телефон</label>
+                <input type="text" id="phone-filter" placeholder="Часть номера">
+            </div>
+            
+            <!-- Email -->
+            <div class="form-group">
+                <label>✉️ Email</label>
+                <input type="text" id="email-filter" placeholder="Часть email">
+            </div>
+        </div>
+        
+        <!-- Дополнительные фильтры -->
+        <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--gray-200);">
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px;">
+                <!-- Сортировка -->
+                <div class="form-group">
+                    <label>📊 Сортировка</label>
+                    <select id="sort-select">
+                        <option value="full_name">По ФИО ↑</option>
+                        <option value="-full_name">По ФИО ↓</option>
+                        <option value="-created_at">Сначала новые</option>
+                        <option value="created_at">Сначала старые</option>
+                        <option value="-total_debt">По долгу (сначала большие)</option>
+                        <option value="total_debt">По долгу (сначала малые)</option>
+                        <option value="-plots_count">По кол-ву участков</option>
+                    </select>
+                </div>
+                
+                <!-- Количество на странице -->
+                <div class="form-group">
+                    <label>📄 Показывать</label>
+                    <select id="per-page" onchange="changePerPage()">
+                        <option value="25">25 записей</option>
+                        <option value="50" selected>50 записей</option>
+                        <option value="100">100 записей</option>
+                        <option value="200">200 записей</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Кнопки применения фильтров -->
+        <div style="display: flex; gap: 12px; margin-top: 20px; justify-content: flex-end;">
+            <button class="btn btn-secondary" onclick="resetAdvancedFilters()">Очистить фильтры</button>
+            <button class="btn btn-primary" onclick="applyAdvancedFilters()">🔍 Применить фильтры</button>
+        </div>
     </div>
-    <button class="btn btn-secondary" onclick="resetFilters()">Сбросить</button>
-    <span style="margin-left: auto; font-size: 0.85rem; color: var(--gray-600);" id="results-count">Загрузка...</span>
+</div>
+
+<!-- Быстрые фильтры-чипсы -->
+<div class="quick-filters" style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px;">
+    <button class="quick-filter-btn" data-filter="all" onclick="setQuickFilter('all')">📋 Все владельцы</button>
+    <button class="quick-filter-btn" data-filter="debtors" onclick="setQuickFilter('debtors')">💰 Должники</button>
+    <button class="quick-filter-btn" data-filter="without_plots" onclick="setQuickFilter('without_plots')">🏠 Без участков</button>
+    <button class="quick-filter-btn" data-filter="with_plots" onclick="setQuickFilter('with_plots')">✅ С участками</button>
+    <button class="quick-filter-btn" data-filter="no_contacts" onclick="setQuickFilter('no_contacts')">📞 Без контактов</button>
+    <button class="quick-filter-btn" data-filter="recent" onclick="setQuickFilter('recent')">🆕 За месяц</button>
+</div>
+
+<!-- Статистика -->
+<div class="stats-grid" style="margin-bottom: 20px;">
+    <div class="stat-card">
+        <div class="stat-label">👥 Всего владельцев</div>
+        <div class="stat-value" id="stat-total">—</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">💰 Должников</div>
+        <div class="stat-value" style="color: var(--danger);" id="stat-debtors">—</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">🏠 С участками</div>
+        <div class="stat-value" style="color: var(--primary);" id="stat-with-plots">—</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">📞 С контактами</div>
+        <div class="stat-value" id="stat-with-contacts">—</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">💰 Общий долг</div>
+        <div class="stat-value" id="stat-total-debt">—</div>
+    </div>
 </div>
 
 <!-- Таблица -->
 <div class="table-container">
-    <table>
+    <table style="width: 100%; border-collapse: collapse;">
         <thead>
             <tr>
                 <th style="width: 40px;">
@@ -56,13 +217,14 @@
                 <th>Email</th>
                 <th>СНТ</th>
                 <th>Участков</th>
+                <th>Долг (₽)</th>
                 <th>Дата добавления</th>
                 <th>Действия</th>
             </tr>
         </thead>
         <tbody id="owners-table-body">
             <tr>
-                <td colspan="8">
+                <td colspan="9">
                     <div class="empty-state">
                         <div class="empty-icon">⏳</div>
                         <h3>Загрузка данных...</h3>
@@ -75,15 +237,84 @@
 </div>
 
 <style>
+    .filters-panel {
+        background: white;
+        border-radius: 12px;
+        padding: 20px;
+        margin-bottom: 20px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    
+    .quick-filter-btn {
+        padding: 6px 14px;
+        border: 1px solid var(--gray-300);
+        background: white;
+        border-radius: 20px;
+        cursor: pointer;
+        transition: all 0.2s;
+        font-size: 0.85rem;
+        font-weight: 500;
+    }
+    
+    .quick-filter-btn:hover {
+        background: var(--gray-100);
+        border-color: var(--gray-400);
+        transform: translateY(-1px);
+    }
+    
+    .quick-filter-btn.active {
+        background: var(--primary);
+        color: white;
+        border-color: var(--primary);
+    }
+    
+    .btn-link {
+        background: none;
+        border: none;
+        cursor: pointer;
+        font-size: 0.85rem;
+    }
+    
+    .btn-link:hover {
+        text-decoration: underline;
+    }
+    
+    .debt-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 8px;
+        border-radius: 12px;
+        font-size: 0.75rem;
+        font-weight: 500;
+    }
+    
+    .debt-badge.critical {
+        background: #f8d7da;
+        color: #721c24;
+    }
+    
+    .debt-badge.warning {
+        background: #fff3cd;
+        color: #856404;
+    }
+    
+    .debt-badge.normal {
+        background: #d4edda;
+        color: #155724;
+    }
+    
     .checkbox-cell {
         text-align: center;
         vertical-align: middle;
     }
+    
     .checkbox-cell input[type="checkbox"] {
         width: 18px;
         height: 18px;
         cursor: pointer;
     }
+    
     #select-all {
         width: 18px;
         height: 18px;
@@ -95,56 +326,185 @@
 {% block extra_js %}
 <script>
     let currentPage = 1;
-    let searchQuery = '';
-    let currentSort = 'full_name';
+    let currentLimit = 50;
+    let quickFilterActive = 'all';
     let selectedOwners = new Set();
-    let orgFilter = '';
     
-    function debounceSearch() {
+    // Объект с активными фильтрами
+    let activeFilters = {
+        search: '',
+        debtor_status: '',
+        debt_min: '',
+        debt_max: '',
+        plots_count: '',
+        organization: '',
+        membership_status: '',
+        date_from: '',
+        date_to: '',
+        has_contacts: '',
+        phone: '',
+        email: '',
+        ordering: '-created_at'
+    };
+    
+    // Переключение расширенных фильтров
+    window.toggleAdvancedFilters = function() {
+        const advancedDiv = document.getElementById('advanced-filters');
+        const toggleText = document.getElementById('advanced-toggle-text');
+        
+        if (advancedDiv.style.display === 'none' || !advancedDiv.style.display) {
+            advancedDiv.style.display = 'block';
+            toggleText.textContent = '▲ Скрыть фильтры';
+        } else {
+            advancedDiv.style.display = 'none';
+            toggleText.textContent = '▼ Показать все фильтры';
+        }
+    };
+    
+    // Debounce для поиска
+    window.debounceSearch = function() {
         clearTimeout(searchTimeout);
         searchTimeout = setTimeout(() => {
-            searchQuery = document.getElementById('search-input').value.trim();
+            activeFilters.search = document.getElementById('search-input').value.trim();
             currentPage = 1;
-            selectedOwners.clear();
-            document.getElementById('select-all').checked = false;
             loadOwners();
         }, 300);
-    }
-
-    function changeFilter() {
-        currentSort = document.getElementById('sort-select').value;
-        orgFilter = document.getElementById('organization-filter').value;
+    };
+    
+    // Поиск по кнопке
+    window.searchOwners = function() {
+        activeFilters.search = document.getElementById('search-input').value.trim();
         currentPage = 1;
-        selectedOwners.clear();
-        document.getElementById('select-all').checked = false;
         loadOwners();
-    }
-
-    function resetFilters() {
+    };
+    
+    // Применение расширенных фильтров
+    window.applyAdvancedFilters = function() {
+        activeFilters.debtor_status = document.getElementById('debtor-filter').value;
+        activeFilters.debt_min = document.getElementById('debt-min').value;
+        activeFilters.debt_max = document.getElementById('debt-max').value;
+        activeFilters.plots_count = document.getElementById('plots-count-filter').value;
+        activeFilters.organization = document.getElementById('organization-filter').value;
+        activeFilters.membership_status = document.getElementById('membership-status').value;
+        activeFilters.date_from = document.getElementById('date-from').value;
+        activeFilters.date_to = document.getElementById('date-to').value;
+        activeFilters.has_contacts = document.getElementById('has-contacts').value;
+        activeFilters.phone = document.getElementById('phone-filter').value.trim();
+        activeFilters.email = document.getElementById('email-filter').value.trim();
+        activeFilters.ordering = document.getElementById('sort-select').value;
+        
+        quickFilterActive = 'custom';
+        updateQuickFilterUI();
+        
+        currentPage = 1;
+        loadOwners();
+    };
+    
+    // Сброс расширенных фильтров
+    window.resetAdvancedFilters = function() {
+        document.getElementById('debtor-filter').value = '';
+        document.getElementById('debt-min').value = '';
+        document.getElementById('debt-max').value = '';
+        document.getElementById('plots-count-filter').value = '';
+        document.getElementById('membership-status').value = '';
+        document.getElementById('date-from').value = '';
+        document.getElementById('date-to').value = '';
+        document.getElementById('has-contacts').value = '';
+        document.getElementById('phone-filter').value = '';
+        document.getElementById('email-filter').value = '';
+    };
+    
+    // Сброс всех фильтров
+    window.resetAllFilters = function() {
         document.getElementById('search-input').value = '';
-        document.getElementById('sort-select').value = 'full_name';
+        resetAdvancedFilters();
+        
+        activeFilters = {
+            search: '',
+            debtor_status: '',
+            debt_min: '',
+            debt_max: '',
+            plots_count: '',
+            organization: '',
+            membership_status: '',
+            date_from: '',
+            date_to: '',
+            has_contacts: '',
+            phone: '',
+            email: '',
+            ordering: '-created_at'
+        };
+        
+        document.getElementById('sort-select').value = '-created_at';
         document.getElementById('organization-filter').value = '';
-        searchQuery = '';
-        currentSort = 'full_name';
-        orgFilter = '';
+        
+        quickFilterActive = 'all';
+        updateQuickFilterUI();
         currentPage = 1;
         selectedOwners.clear();
-        document.getElementById('select-all').checked = false;
         loadOwners();
-    }
-
-    async function loadOrganizationsFilter() {
-        const orgsData = await apiFetch('/api/organizations/?limit=100');
-        if (orgsData && orgsData.results) {
-            const filterSelect = document.getElementById('organization-filter');
-            const options = orgsData.results.map(org => 
-                `<option value="${org.id}">${escapeHtml(org.short_name)}</option>`
-            ).join('');
-            filterSelect.innerHTML = '<option value="">Все СНТ</option>' + options;
+    };
+    
+    // Быстрые фильтры
+    window.setQuickFilter = function(type) {
+        quickFilterActive = type;
+        updateQuickFilterUI();
+        
+        // Сбрасываем расширенные фильтры
+        resetAdvancedFilters();
+        
+        // Применяем выбранный быстрый фильтр
+        switch(type) {
+            case 'debtors':
+                activeFilters.debtor_status = 'yes';
+                break;
+            case 'without_plots':
+                activeFilters.plots_count = '0';
+                break;
+            case 'with_plots':
+                activeFilters.plots_count = '1';
+                break;
+            case 'no_contacts':
+                activeFilters.has_contacts = 'no';
+                break;
+            case 'recent':
+                const today = new Date();
+                const monthAgo = new Date(today);
+                monthAgo.setMonth(monthAgo.getMonth() - 1);
+                activeFilters.date_from = monthAgo.toISOString().split('T')[0];
+                document.getElementById('date-from').value = activeFilters.date_from;
+                break;
+            case 'all':
+                // Все фильтры уже сброшены
+                break;
         }
+        
+        currentPage = 1;
+        loadOwners();
+    };
+    
+    function updateQuickFilterUI() {
+        document.querySelectorAll('.quick-filter-btn').forEach(btn => {
+            btn.classList.remove('active');
+            if (btn.getAttribute('data-filter') === quickFilterActive) {
+                btn.classList.add('active');
+            }
+        });
     }
-
-    function toggleSelectAll() {
+    
+    window.changePerPage = function() {
+        currentLimit = parseInt(document.getElementById('per-page').value);
+        currentPage = 1;
+        loadOwners();
+    };
+    
+    window.goToPage = function(page) {
+        currentPage = page;
+        loadOwners();
+    };
+    
+    // Выбор всех
+    window.toggleSelectAll = function() {
         const selectAll = document.getElementById('select-all');
         const checkboxes = document.querySelectorAll('.owner-checkbox');
         
@@ -157,61 +517,66 @@
                 selectedOwners.delete(ownerId);
             }
         });
-    }
-
-    function toggleOwnerSelection(checkbox, ownerId) {
+    };
+    
+    window.toggleOwnerSelection = function(checkbox, ownerId) {
         if (checkbox.checked) {
             selectedOwners.add(ownerId);
         } else {
             selectedOwners.delete(ownerId);
             document.getElementById('select-all').checked = false;
         }
-    }
-
-    function clearSelection() {
+    };
+    
+    window.clearSelection = function() {
         selectedOwners.clear();
         document.getElementById('select-all').checked = false;
         const checkboxes = document.querySelectorAll('.owner-checkbox');
         checkboxes.forEach(checkbox => checkbox.checked = false);
         showAlert('Выбор очищен', 'info');
-    }
-
-    // ==================== Массовые начисления ====================
-
-    async function openMassAssessmentModal() {
+    };
+    
+    // Экспорт
+    window.exportOwners = async function() {
+        const params = new URLSearchParams();
+        if (activeFilters.search) params.append('search', activeFilters.search);
+        if (activeFilters.debtor_status === 'yes') params.append('is_debtor', 'true');
+        if (activeFilters.organization) params.append('organization', activeFilters.organization);
+        
+        window.location.href = `/api/owners/export/?${params}`;
+        showAlert('Экспорт начат', 'success');
+    };
+    
+    // Массовые начисления
+    window.openMassAssessmentModal = async function() {
         if (selectedOwners.size === 0) {
             showAlert('Выберите хотя бы одного владельца', 'error');
             return;
         }
-
+        
         const [categories, periods] = await Promise.all([
             apiFetch('/api/payment-categories/'),
             apiFetch('/api/payment-periods/')
         ]);
-
+        
         if (!categories || !periods) {
             showAlert('Не удалось загрузить данные', 'error');
             return;
         }
-
+        
         const categoriesList = Array.isArray(categories) ? categories : (categories.results || []);
         const periodsList = Array.isArray(periods) ? periods : (periods.results || []);
-
+        
         const categoryOptions = categoriesList
             .filter(c => c.is_active)
-            .map(c => {
-                const label = c.unit === 'сотка' 
-                    ? `${c.name} (${c.rate_per_unit} ₽/сотка)` 
-                    : `${c.name} (${c.default_amount} ₽)`;
-                return `<option value="${c.id}">${escapeHtml(label)}</option>`;
-            })
+            .map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`)
             .join('');
-
+        
         const periodOptions = periodsList
             .filter(p => p.is_active)
             .map(p => `<option value="${p.id}">${escapeHtml(p.description || p.year + ' год')}</option>`)
             .join('');
-
+        
         openModal('💰 Массовое создание начислений', `
             <div style="background: var(--primary-light); padding: 12px; border-radius: var(--radius-sm); margin-bottom: 20px;">
                 <strong>Выбрано владельцев: ${selectedOwners.size}</strong>
@@ -219,214 +584,273 @@
             </div>
             <div class="form-group">
                 <label>Категория взноса *</label>
-                <select id="mass-category" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
+                <select id="mass-category" style="width: 100%; padding: 8px; border-radius: 6px;">
                     <option value="">— Выберите категорию —</option>
                     ${categoryOptions}
                 </select>
             </div>
             <div class="form-group">
                 <label>Период *</label>
-                <select id="mass-period" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
+                <select id="mass-period" style="width: 100%; padding: 8px; border-radius: 6px;">
                     <option value="">— Выберите период —</option>
                     ${periodOptions}
                 </select>
             </div>
             <div class="form-group">
-                <label>Фиксированная сумма (необязательно)</label>
-                <input type="number" id="mass-custom-amount" placeholder="Оставьте 0 для авторасчёта" step="0.01" min="0" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
-                <small style="color: var(--gray-500);">Если указать > 0, будет использована эта сумма для всех</small>
+                <label>Сумма (необязательно)</label>
+                <input type="number" id="mass-custom-amount" placeholder="Оставьте 0 для авторасчёта" step="0.01" style="width: 100%; padding: 8px; border-radius: 6px;">
             </div>
-            <div class="form-group">
-                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                    <input type="checkbox" id="skip-existing" checked>
-                    Пропускать существующие начисления
-                </label>
-            </div>
-            <p style="font-size: 0.85rem; color: var(--gray-500); margin-top: 12px;">
-                ⚠️ Для каждого владельца будут созданы начисления по всем его участкам
-            </p>
         `, 'Создать', async () => {
             const categoryId = parseInt(document.getElementById('mass-category').value);
             const periodId = parseInt(document.getElementById('mass-period').value);
             const customAmount = document.getElementById('mass-custom-amount').value;
-            const skipExisting = document.getElementById('skip-existing').checked;
-
-            if (!categoryId) {
-                showAlert('Выберите категорию', 'error');
+            
+            if (!categoryId || !periodId) {
+                showAlert('Выберите категорию и период', 'error');
                 return;
             }
-            if (!periodId) {
-                showAlert('Выберите период', 'error');
-                return;
+            
+            const body = {
+                owner_ids: Array.from(selectedOwners),
+                period_id: periodId,
+                category_id: categoryId,
+                skip_existing: true
+            };
+            
+            if (customAmount && parseFloat(customAmount) > 0) {
+                body.custom_amount = customAmount;
             }
-
-            showAlert('Создание начислений... Пожалуйста, подождите', 'info');
-
-            const ownerIdsArray = Array.from(selectedOwners);
-            const chunkSize = 10;
-            let totalCreated = 0;
-            let totalSkipped = 0;
-            let allResults = [];
-
-            for (let i = 0; i < ownerIdsArray.length; i += chunkSize) {
-                const chunk = ownerIdsArray.slice(i, i + chunkSize);
-
-                const body = {
-                    owner_ids: chunk,
-                    period_id: periodId,
-                    category_id: categoryId,
-                    skip_existing: skipExisting,
-                    generate_receipts: false,
-                    format: 'json'
-                };
-
-                if (customAmount && parseFloat(customAmount) > 0) {
-                    body.custom_amount = customAmount;
-                }
-
-                const result = await apiFetch('/api/assessments/mass-generate/', {
-                    method: 'POST',
-                    body: JSON.stringify(body),
-                });
-
-                if (result) {
-                    allResults.push(result);
-                    totalCreated += result.total_created || 0;
-                    
-                    // Считаем пропущенные
-                    if (result.results) {
-                        for (const ownerResult of result.results) {
-                            totalSkipped += ownerResult.skipped || 0;
-                        }
-                    }
-                }
-            }
-
+            
+            const result = await apiFetch('/api/assessments/mass-generate/', {
+                method: 'POST',
+                body: JSON.stringify(body),
+            });
+            
             closeModal();
-
-            if (totalCreated === 0) {
-                showAlert(`Не создано ни одного начисления (пропущено: ${totalSkipped})`, 'warning');
-                return;
+            
+            if (result) {
+                showAlert(`✅ Создано начислений: ${result.total_created || 0}`, 'success');
+                clearSelection();
             }
-
-            showAlert(`✅ Создано ${totalCreated} начислений, пропущено ${totalSkipped}`, 'success');
-            clearSelection();
         });
+    };
+    
+    // Загрузка списка организаций
+    async function loadOrganizationsFilter() {
+        const orgsData = await apiFetch('/api/organizations/?limit=100');
+        if (orgsData && orgsData.results) {
+            const filterSelect = document.getElementById('organization-filter');
+            const options = orgsData.results.map(org => 
+                `<option value="${org.id}">${escapeHtml(org.short_name)}</option>`
+            ).join('');
+            filterSelect.innerHTML = '<option value="">Все СНТ</option>' + options;
+        }
+    }
+    
+    // Загрузка статистики
+    async function loadStats() {
+        // Статистика с дашборда
+        const stats = await apiFetch('/api/dashboard/stats/');
+        if (stats) {
+            const statTotal = document.getElementById('stat-total');
+            const statTotalDebt = document.getElementById('stat-total-debt');   
+
+            if (statTotal) statTotal.textContent = stats.owners_count || 0;
+            if (statTotalDebt) statTotalDebt.textContent = formatMoney(stats.total_debt || 0);
+        }   
+
+        // Статистика по владельцам (должники, с участками)
+        try {
+            // Получаем общее количество владельцев
+            const allOwners = await apiFetch('/api/owners/?limit=1');
+            if (allOwners && allOwners.stats) {
+                const statDebtors = document.getElementById('stat-debtors');
+                const statWithPlots = document.getElementById('stat-with-plots');   
+
+                if (statDebtors) statDebtors.textContent = allOwners.stats.debtors || 0;
+                if (statWithPlots) statWithPlots.textContent = allOwners.stats.with_plots || 0;
+            }
+            
+            // Получаем количество владельцев с контактами
+            const ownersWithContacts = await apiFetch('/api/owners/?has_contacts=true&limit=1');
+            const statWithContacts = document.getElementById('stat-with-contacts');
+            if (statWithContacts && ownersWithContacts) {
+                statWithContacts.textContent = ownersWithContacts.count || 0;
+            }
+        } catch (e) {
+            console.warn('Ошибка загрузки статистики владельцев:', e);
+        }
     }
 
-    // ==================== Загрузка списка владельцев ====================
-
+    
+    // Основная функция загрузки владельцев
     async function loadOwners() {
         const params = new URLSearchParams({
             page: currentPage,
-            ordering: currentSort,
+            limit: currentLimit,
+            ordering: activeFilters.ordering
         });
-        if (searchQuery) params.append('search', searchQuery);
-        if (orgFilter) params.append('organization', orgFilter);
+
+        if (activeFilters.search) params.append('search', activeFilters.search);
+        if (activeFilters.debtor_status === 'yes') params.append('is_debtor', 'true');
+        if (activeFilters.debtor_status === 'no') params.append('is_debtor', 'false');
+        if (activeFilters.debt_min) params.append('debt_min', activeFilters.debt_min);
+        if (activeFilters.debt_max) params.append('debt_max', activeFilters.debt_max);
+        if (activeFilters.plots_count === '0') params.append('has_plots', 'false');
+        if (activeFilters.plots_count === '1') params.append('has_plots', 'true');
+        if (activeFilters.plots_count === '2') params.append('plots_count', '2');
+        if (activeFilters.plots_count === '3') params.append('plots_count_min', '3');
+        if (activeFilters.plots_count === '5') params.append('plots_count_min', '5');
+        if (activeFilters.organization) params.append('organization', activeFilters.organization);
+        if (activeFilters.date_from) params.append('created_after', activeFilters.date_from);
+        if (activeFilters.date_to) params.append('created_before', activeFilters.date_to);
+        if (activeFilters.has_contacts === 'yes') params.append('has_contacts', 'true');
+        if (activeFilters.has_contacts === 'no') params.append('has_contacts', 'false');
+        if (activeFilters.has_contacts === 'phone') params.append('has_phone', 'true');
+        if (activeFilters.has_contacts === 'email') params.append('has_email', 'true');
+        if (activeFilters.phone) params.append('phone_contains', activeFilters.phone);
+        if (activeFilters.email) params.append('email_contains', activeFilters.email);
 
         const data = await apiFetch(`/api/owners/?${params}`);
         if (!data) return;
 
-        document.getElementById('results-count').textContent = 
-            `Найдено: ${data.count || 0} ${pluralize(data.count || 0, 'владелец', 'владельца', 'владельцев')}`;
+        const resultsCount = document.getElementById('results-count');
+        if (resultsCount) {
+            resultsCount.textContent = `Найдено: ${data.count || 0} ${pluralize(data.count || 0, 'владелец', 'владельца', 'владельцев')}`;
+        }
 
         const tbody = document.getElementById('owners-table-body');
+        if (!tbody) return;
 
         if (!data.results || data.results.length === 0) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="8">
+                    <td colspan="9">
                         <div class="empty-state">
                             <div class="empty-icon">🔍</div>
                             <h3>Владельцы не найдены</h3>
-                            <p>Попробуйте изменить параметры поиска или добавьте нового владельца</p>
-                            <button class="btn btn-primary" onclick="openAddOwnerModal()">+ Добавить владельца</button>
+                            <p>Попробуйте изменить параметры поиска</p>
+                            <button class="btn btn-primary" onclick="resetAllFilters()">🔄 Сбросить фильтры</button>
+                        </div>
+                    </td>
+                </tr>`;
+            const paginationDiv = document.getElementById('pagination');
+            if (paginationDiv) paginationDiv.innerHTML = '';
+            return;
+        }
+
+        tbody.innerHTML = data.results.map(owner => {
+            const debt = owner.total_debt || 0;
+            let debtBadge = '';
+            if (debt > 0) {
+                if (debt > 50000) debtBadge = '<span class="debt-badge critical">Критический</span>';
+                else if (debt > 10000) debtBadge = '<span class="debt-badge warning">Просрочка</span>';
+                else debtBadge = '<span class="debt-badge normal">Должник</span>';
+            }
+
+            return `
+                <tr>
+                    <td class="checkbox-cell">
+                        <input type="checkbox" class="owner-checkbox" value="${owner.id}" 
+                               ${selectedOwners.has(owner.id) ? 'checked' : ''}
+                               onchange="toggleOwnerSelection(this, ${owner.id})">
+                    </td>
+                    <td>
+                        <a href="/owners/${owner.id}/" style="color: var(--primary); text-decoration: none; font-weight: 600;">
+                            ${escapeHtml(owner.full_name)}
+                        </a>
+                        ${debt > 0 ? '<br>' + debtBadge : ''}
+                    </td>
+                    <td>
+                        ${owner.primary_phone ? 
+                            `<a href="tel:${owner.primary_phone}" style="color: var(--gray-800); text-decoration: none;">${escapeHtml(owner.primary_phone)}</a>` : 
+                            '<span style="color: var(--gray-400);">—</span>'}
+                    </td>
+                    <td>
+                        ${owner.primary_email ? 
+                            `<a href="mailto:${owner.primary_email}" style="color: var(--gray-800); text-decoration: none;">${escapeHtml(owner.primary_email)}</a>` : 
+                            '<span style="color: var(--gray-400);">—</span>'}
+                    </td>
+                    <td>
+                        <span class="badge-status badge-info">${escapeHtml(owner.organization_name || '—')}</span>
+                    </td>
+                    <td>
+                        <span style="font-weight: 600; ${owner.plots_count === 0 ? 'color: var(--warning);' : ''}">${owner.plots_count || 0}</span>
+                    </td>
+                    <td>
+                        <span style="font-weight: 600; color: ${debt > 0 ? 'var(--danger)' : 'var(--gray-600)'};">
+                            ${formatMoney(debt)}
+                        </span>
+                    </td>
+                    <td>
+                        <span style="font-size: 0.85rem; color: var(--gray-500);">${formatDate(owner.created_at)}</span>
+                    </td>
+                    <td>
+                        <div class="table-actions">
+                            <button class="btn-icon" onclick="window.location.href='/owners/${owner.id}/'" title="Просмотр">👁️</button>
+                            <button class="btn-icon" onclick="openEditOwnerModal(${owner.id})" title="Редактировать">✏️</button>
+                            <button class="btn-icon danger" onclick="confirmDeleteOwner(${owner.id}, '${escapeHtml(owner.full_name)}')" title="Удалить">🗑️</button>
                         </div>
                     </td>
                 </tr>
             `;
-            document.getElementById('pagination').innerHTML = '';
-            return;
-        }
-
-        tbody.innerHTML = data.results.map(owner => `
-            <tr>
-                <td class="checkbox-cell">
-                    <input type="checkbox" class="owner-checkbox" value="${owner.id}" 
-                           ${selectedOwners.has(owner.id) ? 'checked' : ''}
-                           onchange="toggleOwnerSelection(this, ${owner.id})">
-                </td>
-                <td>
-                    <a href="/owners/${owner.id}/" style="color: var(--primary); text-decoration: none; font-weight: 600;">
-                        ${escapeHtml(owner.full_name)}
-                    </a>
-                </td>
-                <td>
-                    ${owner.primary_phone ? 
-                        `<a href="tel:${owner.primary_phone}" style="color: var(--gray-800); text-decoration: none;">${escapeHtml(owner.primary_phone)}</a>` : 
-                        '<span style="color: var(--gray-400);">—</span>'}
-                </td>
-                <td>
-                    ${owner.primary_email ? 
-                        `<a href="mailto:${owner.primary_email}" style="color: var(--gray-800); text-decoration: none;">${escapeHtml(owner.primary_email)}</a>` : 
-                        '<span style="color: var(--gray-400);">—</span>'}
-                </td>
-                <td>
-                    <span class="badge-status badge-info">${escapeHtml(owner.organization_name || '—')}</span>
-                </td>
-                <td>
-                    <span style="font-weight: 600;">${owner.plots_count || 0}</span>
-                </td>
-                <td>
-                    <span style="font-size: 0.85rem; color: var(--gray-500);">${formatDate(owner.created_at)}</span>
-                </td>
-                <td>
-                    <div class="table-actions">
-                        <button class="btn-icon" onclick="window.location.href='/owners/${owner.id}/'" title="Просмотр">👁️</button>
-                        <button class="btn-icon" onclick="openEditOwnerModal(${owner.id})" title="Редактировать">✏️</button>
-                        <button class="btn-icon danger" onclick="confirmDeleteOwner(${owner.id}, '${escapeHtml(owner.full_name)}')" title="Удалить">🗑️</button>
-                    </div>
-                </td>
-            </tr>
-        `).join('');
-
+        }).join('');
+        
         renderPagination(data);
     }
-
+    
     function renderPagination(data) {
         const paginationDiv = document.getElementById('pagination');
-        if (!data.next && !data.previous) {
+        if (!paginationDiv) return;
+        
+        const totalPages = Math.ceil(data.count / currentLimit);
+        
+        if (totalPages <= 1) {
             paginationDiv.innerHTML = '';
             return;
         }
-
-        const totalPages = Math.ceil(data.count / 25);
+        
         let html = '';
+        html += `<button onclick="goToPage(1)" ${currentPage === 1 ? 'disabled' : ''}>«</button>`;
+        html += `<button onclick="goToPage(${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''}>‹</button>`;
         
-        html += `<button onclick="currentPage=1;loadOwners()" ${currentPage === 1 ? 'disabled' : ''}>«</button>`;
-        html += `<button onclick="currentPage=${currentPage-1};loadOwners()" ${!data.previous ? 'disabled' : ''}>‹</button>`;
+        let startPage = Math.max(1, currentPage - 2);
+        let endPage = Math.min(totalPages, currentPage + 2);
         
-        for (let i = 1; i <= totalPages; i++) {
-            if (i === 1 || i === totalPages || (i >= currentPage - 2 && i <= currentPage + 2)) {
-                html += `<button class="${i === currentPage ? 'active' : ''}" onclick="currentPage=${i};loadOwners()">${i}</button>`;
-            } else if (i === currentPage - 3 || i === currentPage + 3) {
-                html += `<button disabled>…</button>`;
-            }
+        if (startPage > 1) {
+            html += `<button onclick="goToPage(1)">1</button>`;
+            if (startPage > 2) html += `<button disabled>…</button>`;
         }
         
-        html += `<button onclick="currentPage=${currentPage+1};loadOwners()" ${!data.next ? 'disabled' : ''}>›</button>`;
-        html += `<button onclick="currentPage=${totalPages};loadOwners()" ${currentPage === totalPages ? 'disabled' : ''}>»</button>`;
+        for (let i = startPage; i <= endPage; i++) {
+            html += `<button class="${i === currentPage ? 'active' : ''}" onclick="goToPage(${i})">${i}</button>`;
+        }
+        
+        if (endPage < totalPages) {
+            if (endPage < totalPages - 1) html += `<button disabled>…</button>`;
+            html += `<button onclick="goToPage(${totalPages})">${totalPages}</button>`;
+        }
+        
+        html += `<button onclick="goToPage(${currentPage + 1})" ${currentPage === totalPages ? 'disabled' : ''}>›</button>`;
+        html += `<button onclick="goToPage(${totalPages})" ${currentPage === totalPages ? 'disabled' : ''}>»</button>`;
         
         paginationDiv.innerHTML = html;
     }
-
-    // ==================== Добавление владельца ====================
-
-    function openAddOwnerModal() {
+    
+    // Добавление владельца
+    window.openAddOwnerModal = function() {
         openModal('Добавить владельца', `
             <div class="form-group">
                 <label>ФИО *</label>
-                <input type="text" id="owner-fullname" placeholder="Иванов Иван Иванович" required style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
+                <input type="text" id="owner-fullname" placeholder="Иванов Иван Иванович" required style="width: 100%; padding: 8px; border-radius: 6px;">
+            </div>
+            <div class="form-group">
+                <label>Телефон</label>
+                <input type="tel" id="owner-phone" placeholder="+7 (XXX) XXX-XX-XX" style="width: 100%; padding: 8px; border-radius: 6px;">
+            </div>
+            <div class="form-group">
+                <label>Email</label>
+                <input type="email" id="owner-email" placeholder="example@mail.ru" style="width: 100%; padding: 8px; border-radius: 6px;">
             </div>
         `, 'Добавить', async () => {
             const fullName = document.getElementById('owner-fullname').value.trim();
@@ -434,30 +858,48 @@
                 showAlert('Введите ФИО владельца', 'error');
                 return;
             }
-
+            
             const result = await apiFetch('/api/owners/', {
                 method: 'POST',
                 body: JSON.stringify({ full_name: fullName }),
             });
-
+            
             if (result) {
+                // Если указан телефон или email, добавляем контакты
+                const phone = document.getElementById('owner-phone').value.trim();
+                const email = document.getElementById('owner-email').value.trim();
+                
+                if (phone) {
+                    await apiFetch(`/api/owners/${result.id}/add-contact/`, {
+                        method: 'POST',
+                        body: JSON.stringify({ type: 'ph', value: phone })
+                    });
+                }
+                
+                if (email) {
+                    await apiFetch(`/api/owners/${result.id}/add-contact/`, {
+                        method: 'POST',
+                        body: JSON.stringify({ type: 'em', value: email })
+                    });
+                }
+                
                 showAlert('Владелец добавлен', 'success');
                 closeModal();
                 loadOwners();
+                loadStats();
             }
         });
-    }
-
-    // ==================== Редактирование владельца ====================
-
-    async function openEditOwnerModal(id) {
+    };
+    
+    // Редактирование владельца
+    window.openEditOwnerModal = async function(id) {
         const owner = await apiFetch(`/api/owners/${id}/`);
         if (!owner) return;
-
+        
         openModal('Редактировать владельца', `
             <div class="form-group">
                 <label>ФИО *</label>
-                <input type="text" id="edit-owner-fullname" value="${escapeHtml(owner.full_name)}" required style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ddd;">
+                <input type="text" id="edit-owner-fullname" value="${escapeHtml(owner.full_name)}" required style="width: 100%; padding: 8px; border-radius: 6px;">
             </div>
         `, 'Сохранить', async () => {
             const fullName = document.getElementById('edit-owner-fullname').value.trim();
@@ -465,23 +907,22 @@
                 showAlert('Введите ФИО владельца', 'error');
                 return;
             }
-
+            
             const result = await apiFetch(`/api/owners/${id}/`, {
                 method: 'PATCH',
                 body: JSON.stringify({ full_name: fullName }),
             });
-
+            
             if (result) {
                 showAlert('Владелец обновлён', 'success');
                 closeModal();
                 loadOwners();
             }
         });
-    }
-
-    // ==================== Удаление владельца ====================
-
-    function confirmDeleteOwner(id, fullName) {
+    };
+    
+    // Удаление владельца
+    window.confirmDeleteOwner = function(id, fullName) {
         openModal('Удаление владельца', `
             <p>Вы действительно хотите удалить владельца <strong>${escapeHtml(fullName)}</strong>?</p>
             <p style="color: var(--danger); font-size: 0.85rem; margin-top: 8px;">
@@ -495,12 +936,12 @@
                 showAlert('Владелец удалён', 'success');
                 closeModal();
                 loadOwners();
+                loadStats();
             }
         });
-    }
-
-    // ==================== Вспомогательные функции ====================
-
+    };
+    
+    // Вспомогательные функции
     function formatDate(dateString) {
         if (!dateString) return '—';
         try {
@@ -508,7 +949,12 @@
             return date.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
         } catch (e) { return dateString; }
     }
-
+    
+    function formatMoney(amount) {
+        if (!amount || amount === 0) return '0 ₽';
+        return new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', minimumFractionDigits: 0 }).format(amount);
+    }
+    
     function pluralize(n, one, few, many) {
         const mod10 = n % 10;
         const mod100 = n % 100;
@@ -516,18 +962,26 @@
         if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return few;
         return many;
     }
-
+    
     function escapeHtml(text) {
         if (!text) return '';
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
     }
-
+    
     // Инициализация
     document.addEventListener('DOMContentLoaded', () => {
         loadOrganizationsFilter();
         loadOwners();
+        loadStats();
+        
+        const searchInput = document.getElementById('search-input');
+        if (searchInput) {
+            searchInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') searchOwners();
+            });
+        }
     });
 </script>
 {% endblock %}
