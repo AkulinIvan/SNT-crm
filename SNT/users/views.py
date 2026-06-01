@@ -551,30 +551,83 @@ class OwnerViewSet(OrganizationMixin, viewsets.ModelViewSet):
     def export_owners(self, request):
         """
         GET /api/owners/export/?format=csv
-        Экспорт списка владельцев в CSV.
+        Экспорт списка владельцев в CSV с правильными разделителями.
         """
         import csv
         from django.http import HttpResponse
         
         owners = self.filter_queryset(self.get_queryset())
-        
-        response = HttpResponse(content_type='text/csv')
         timestamp = timezone.now().strftime('%Y%m%d_%H%M%S')
+        
+        response = HttpResponse(content_type='text/csv; charset=utf-8')
         response['Content-Disposition'] = f'attachment; filename="owners_{timestamp}.csv"'
         
-        writer = csv.writer(response)
-        writer.writerow(['ID', 'ФИО', 'Телефон', 'Email', 'Участков', 'Долг', 'Дата добавления'])
+        # Добавляем BOM для корректного отображения кириллицы в Excel
+        response.write('\ufeff')
         
+        # Используем точку с запятой как разделитель (Excel лучше понимает)
+        writer = csv.writer(response, delimiter=';')
+        
+        # Заголовки
+        writer.writerow([
+            'ID', 
+            'ФИО', 
+            'Телефон', 
+            'Email', 
+            'Номера участков', 
+            'Кадастровые номера', 
+            'Площади участков (м²)', 
+            'СНТ',
+            'Кол-во участков', 
+            'Долг (₽)', 
+            'Дата добавления'
+        ])
+        
+        # Данные
         for owner in owners:
-            writer.writerow([
-                owner.id,
-                owner.full_name,
-                owner.primary_phone or '',
-                owner.primary_email or '',
-                owner.plots_count,
-                owner.total_debt,
-                owner.created_at.strftime('%d.%m.%Y'),
-            ])
+            # Получаем список участков владельца
+            ownerships = owner.ownerships.select_related('land_plot').all()
+            
+            if ownerships:
+                plot_numbers = []
+                cadastral_numbers = []
+                areas = []
+                
+                for ownership in ownerships:
+                    plot = ownership.land_plot
+                    if plot:
+                        plot_numbers.append(plot.plot_number)
+                        cadastral_numbers.append(plot.cadastral_number)
+                        areas.append(f"{plot.area_sqm:.2f}" if plot.area_sqm else '')
+                
+                writer.writerow([
+                    owner.id,
+                    owner.full_name,
+                    owner.primary_phone or '',
+                    owner.primary_email or '',
+                    ', '.join(plot_numbers),
+                    ', '.join(cadastral_numbers),
+                    ', '.join(areas),
+                    owner.organization_name or '',
+                    owner.plots_count,
+                    f"{owner.total_debt:.2f}" if owner.total_debt else "0.00",
+                    owner.created_at.strftime('%d.%m.%Y'),
+                ])
+            else:
+                # Если у владельца нет участков
+                writer.writerow([
+                    owner.id,
+                    owner.full_name,
+                    owner.primary_phone or '',
+                    owner.primary_email or '',
+                    '',  # Номера участков
+                    '',  # Кадастровые номера
+                    '',  # Площади
+                    owner.organization_name or '',  # СНТ
+                    owner.plots_count,
+                    f"{owner.total_debt:.2f}" if owner.total_debt else "0.00",
+                    owner.created_at.strftime('%d.%m.%Y'),
+                ])
         
         return response
 
