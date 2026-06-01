@@ -3,6 +3,8 @@ from django.core.validators import RegexValidator
 from django.conf import settings
 from django.utils import timezone
 
+from users.models import Owner
+
 class Organization(models.Model):
     """
     +Модель СНТ (юридического лица).
@@ -122,8 +124,11 @@ class Organization(models.Model):
     
     @property
     def owners_count(self):
-        """Количество владельцев в организации"""
-        return self.memberships.filter(status='active').count()
+        """Количество уникальных владельцев в организации."""
+        return Owner.objects.filter(
+            memberships__organization=self,
+            memberships__status='active'
+        ).distinct().count()
 
     @property
     def plots_count(self):
@@ -132,23 +137,44 @@ class Organization(models.Model):
 
     @property
     def users_count(self):
+        """Количество пользователей системы, привязанных к организации."""
+        return self.staff_members.filter(is_active=True).count()
+    
+    def check_tariff_limit(self, resource_type):
         """
-        Количество пользователей в организации.
-        Пользователи - это сотрудники/администраторы, привязанные к организации.
-        Если у вас нет модели UserOrganization, возвращаем 1 (владелец организации)
+        Проверка лимита тарифа для ресурса.
+        
+        Args:
+            resource_type: 'owners', 'plots', 'users'
+            
+        Returns:
+            tuple: (is_allowed, current_count, max_limit, message)
         """
-        # Проверяем, есть ли связь User -> Organization
-        if hasattr(self, 'users'):
-            return self.users.count()
+        subscription = getattr(self, 'subscription', None)
         
-        # Базовая реализация: считаем уникальных пользователей через членства
-        # Если у вас есть поле user в OrganizationMembership
-        if hasattr(self.memberships.first(), 'user'):
-            return self.memberships.exclude(user__isnull=True).values('user').distinct().count()
+        if not subscription or not subscription.is_active:
+            return False, 0, 0, 'Нет активной подписки'
         
-        # По умолчанию возвращаем 1 (текущий пользователь или владелец)
-        return 1
-
+        tariff = subscription.tariff
+        
+        if resource_type == 'owners':
+            current = self.owners_count
+            max_limit = tariff.max_owners
+            message = f'Достигнут лимит владельцев ({current}/{max_limit}). Перейдите на более высокий тариф.'
+        elif resource_type == 'plots':
+            current = self.plots_count
+            max_limit = tariff.max_plots
+            message = f'Достигнут лимит участков ({current}/{max_limit}). Перейдите на более высокий тариф.'
+        elif resource_type == 'users':
+            current = self.users_count
+            max_limit = tariff.max_users
+            message = f'Достигнут лимит пользователей ({current}/{max_limit}). Перейдите на более высокий тариф.'
+        else:
+            return False, 0, 0, 'Неизвестный тип ресурса'
+        
+        return current < max_limit, current, max_limit, message
+    
+    
     def check_tariff_limit(self, resource_type='owners'):
         """
         Проверка лимитов тарифа

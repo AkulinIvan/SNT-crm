@@ -3,7 +3,7 @@ from django.db import models
 from django.core.exceptions import ValidationError
 from django.core.validators import EmailValidator
 from phonenumber_field.modelfields import PhoneNumberField
-from land.models import LandPlot
+
 
 
 class Owner(models.Model):
@@ -19,7 +19,7 @@ class Owner(models.Model):
         db_index=True
     )
     land_plots = models.ManyToManyField(
-        LandPlot,
+        'land.LandPlot',
         through='Ownership',
         related_name='owners'
     )
@@ -123,10 +123,10 @@ class Owner(models.Model):
         subscription = getattr(self.organization, 'subscription', None)
         if not subscription or not subscription.is_active:
             return False
-        
+
         tariff = subscription.tariff
         current_count = self.organization.owners_count
-        
+
         return current_count < tariff.max_owners    
 
     @property
@@ -135,10 +135,10 @@ class Owner(models.Model):
         subscription = getattr(self.organization, 'subscription', None)
         if not subscription or not subscription.is_active:
             return False
-        
+
         tariff = subscription.tariff
         current_count = self.organization.plots_count
-        
+
         return current_count < tariff.max_plots 
 
     @property
@@ -147,10 +147,10 @@ class Owner(models.Model):
         subscription = getattr(self.organization, 'subscription', None)
         if not subscription or not subscription.is_active:
             return 0
-        
+
         tariff = subscription.tariff
         current_count = self.organization.owners_count
-        
+
         return max(0, tariff.max_owners - current_count)    
 
     @property
@@ -159,10 +159,10 @@ class Owner(models.Model):
         subscription = getattr(self.organization, 'subscription', None)
         if not subscription or not subscription.is_active:
             return 0
-        
+
         tariff = subscription.tariff
         current_count = self.organization.plots_count
-        
+
         return max(0, tariff.max_plots - current_count)
 
 class Ownership(models.Model):
@@ -177,7 +177,7 @@ class Ownership(models.Model):
         related_name='ownerships'
     )
     land_plot = models.ForeignKey(
-        LandPlot,
+        'land.LandPlot',
         on_delete=models.CASCADE,
         related_name='ownerships'
     )

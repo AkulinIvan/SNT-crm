@@ -190,6 +190,9 @@ class SubscriptionViewSet(viewsets.ViewSet):
                 'has_finance_module': False,
                 'has_export': False,
                 'has_api_access': False,
+                'can_manage_assessments': False,
+                'can_manage_payments': False,
+                'can_import_bank': False,
                 'organization_exists': False,
             })
         
@@ -210,22 +213,29 @@ class SubscriptionViewSet(viewsets.ViewSet):
                     'has_finance_module': False,
                     'has_export': False,
                     'has_api_access': False,
+                    'can_manage_assessments': False,
+                    'can_manage_payments': False,
+                    'can_import_bank': False,
                     'subscription_active': False,
                 })
             
             tariff = subscription.tariff
             
+            # ВАЖНО: Явно возвращаем все поля, которые проверяет фронтенд
             return Response({
                 'organization_id': organization.id,
                 'organization_name': organization.short_name,
                 'tariff_name': tariff.name,
                 'tariff_slug': tariff.slug,
-                'max_owners': tariff.max_owners if hasattr(tariff, 'max_owners') else 999,
-                'max_plots': tariff.max_plots if hasattr(tariff, 'max_plots') else 999,
-                'max_users': tariff.max_users if hasattr(tariff, 'max_users') else 1,
-                'has_finance_module': getattr(tariff, 'has_finance_module', True),
-                'has_export': getattr(tariff, 'has_export', False),
-                'has_api_access': getattr(tariff, 'has_api_access', False),
+                'max_owners': tariff.max_owners,
+                'max_plots': tariff.max_plots,
+                'max_users': tariff.max_users,
+                'has_finance_module': tariff.can_manage_payments,  # Управление платежами
+                'has_export': tariff.can_export_data,
+                'has_api_access': tariff.can_import_bank,  # API доступ = импорт из банка
+                'can_manage_assessments': tariff.can_manage_assessments,
+                'can_manage_payments': tariff.can_manage_payments,
+                'can_import_bank': tariff.can_import_bank,
                 'subscription_active': True,
                 'subscription_status': subscription.status,
                 'days_left': (subscription.end_date - timezone.now()).days if subscription.end_date else None,
@@ -235,6 +245,15 @@ class SubscriptionViewSet(viewsets.ViewSet):
                 'detail': str(e),
                 'organization_exists': True,
                 'subscription_active': False,
+                'max_owners': 0,
+                'max_plots': 0,
+                'max_users': 1,
+                'has_finance_module': False,
+                'has_export': False,
+                'has_api_access': False,
+                'can_manage_assessments': False,
+                'can_manage_payments': False,
+                'can_import_bank': False,
             })
 
     

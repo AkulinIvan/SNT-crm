@@ -1355,11 +1355,15 @@ class PaymentViewSet(viewsets.ModelViewSet):
         org = getattr(self.request, 'current_organization', None)
         if org:
             queryset = queryset.filter(
-                owner__memberships__organization=org,
-                owner__memberships__status='active'
+                assessment__owner__memberships__organization=org,
+                assessment__owner__memberships__status='active'
             )
         
-        return queryset
+        else:
+            # Если у пользователя нет организации, возвращаем пустой queryset
+            queryset = queryset.none()
+        
+        return queryset.distinct()
 
 
 class BankStatementViewSet(viewsets.ModelViewSet):

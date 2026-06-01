@@ -176,7 +176,7 @@
         }
 
         // Последние платежи (только для организации пользователя)
-        let paymentsUrl = '/api/payments/?ordering=-payment_date&limit=5';
+        let paymentsUrl = '/api/payments/?ordering=-payment_date&page_size=5';
         if (currentOrganizationId) {
             paymentsUrl += `&organization=${currentOrganizationId}`;
         }

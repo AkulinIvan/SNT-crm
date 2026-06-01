@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}Тарифы | CRM СНТ{% endblock %}
 
@@ -7,72 +8,168 @@
 {% endblock %}
 
 {% block content %}
-<div class="page-header">
-    <h2>⭐ Выберите тарифный план</h2>
-    <p>Расширьте возможности вашего СНТ</p>
+<div class="page-header" style="text-align: center; margin-bottom: 48px;">
+    <h2 style="font-size: 2rem; font-weight: 700; margin-bottom: 12px;">
+        ⭐ Выберите тарифный план
+    </h2>
+    <p style="font-size: 1.1rem; color: var(--gray-500); max-width: 600px; margin: 0 auto;">
+        Начните бесплатно. Увеличивайте возможности по мере роста вашего СНТ.
+    </p>
 </div>
 
+<!-- Текущий тариф -->
 {% if current_subscription %}
-<div class="alert alert-info" style="background: var(--info-light); padding: 16px; border-radius: 8px; margin-bottom: 24px;">
-    <strong>Ваш текущий тариф:</strong> {{ current_subscription.tariff.name }}
-    <br>
-    <span style="font-size: 0.85rem;">
-        Действует до: {{ current_subscription.end_date|date:"d.m.Y" }}
-        {% if current_subscription.days_left %}
-            (осталось {{ current_subscription.days_left }} дней)
-        {% endif %}
-    </span>
+<div style="background: linear-gradient(135deg, #e8f5e9, #c8e6c9); border: 1px solid #a5d6a7; border-radius: 16px; padding: 20px 28px; margin-bottom: 40px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px;">
+    <div>
+        <div style="font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px; color: #2e7d32; font-weight: 600; margin-bottom: 4px;">
+            Ваш текущий тариф
+        </div>
+        <div style="font-size: 1.3rem; font-weight: 700; color: #1b5e20;">
+            {{ current_subscription.tariff.name }}
+        </div>
+        <div style="font-size: 0.85rem; color: #388e3c; margin-top: 4px;">
+            Действует до {{ current_subscription.end_date|date:"d.m.Y" }}
+            {% if current_subscription.days_left %}
+                · Осталось {{ current_subscription.days_left }} {{ current_subscription.days_left|pluralize:"день,дня,дней" }}
+            {% endif %}
+        </div>
+    </div>
+    <div style="background: white; border-radius: 12px; padding: 12px 20px; text-align: center;">
+        <div style="font-size: 0.8rem; color: var(--gray-500);">Следующее списание</div>
+        <div style="font-size: 1.2rem; font-weight: 700; color: var(--gray-900);">
+            {{ current_subscription.tariff.price }} ₽
+        </div>
+        <div style="font-size: 0.75rem; color: var(--gray-500);">{{ current_subscription.end_date|date:"d.m.Y" }}</div>
+    </div>
 </div>
 {% endif %}
 
-<div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 24px;">
+<!-- Переключатель: месяц / год -->
+<div style="display: flex; justify-content: center; margin-bottom: 40px;">
+    <div style="background: var(--gray-100); border-radius: 12px; padding: 4px; display: flex; gap: 4px;">
+        <button id="btn-monthly" class="period-btn active" onclick="switchPeriod('monthly')" style="padding: 10px 24px; border-radius: 10px; border: none; background: white; font-weight: 600; font-size: 0.95rem; cursor: pointer; transition: all 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.08);">
+            Помесячно
+        </button>
+        <button id="btn-yearly" class="period-btn" onclick="switchPeriod('yearly')" style="padding: 10px 24px; border-radius: 10px; border: none; background: transparent; font-weight: 600; font-size: 0.95rem; cursor: pointer; transition: all 0.2s; color: var(--gray-500);">
+            На год
+            <span style="background: #e8f5e9; color: #2e7d32; padding: 2px 8px; border-radius: 6px; font-size: 0.75rem; margin-left: 4px;">−17%</span>
+        </button>
+    </div>
+</div>
+
+<!-- Карточки тарифов -->
+<div class="tariff-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px; margin-bottom: 48px;">
     {% for tariff in tariffs %}
-    <div class="stat-card" style="display: flex; flex-direction: column; cursor: default; transition: transform 0.2s;">
-        <div style="text-align: center; margin-bottom: 16px;">
-            <div style="font-size: 2rem; font-weight: 700; color: var(--primary);">
-                {{ tariff.price }} ₽
-            </div>
-            <div style="font-size: 0.85rem; color: var(--gray-500);">
-                {{ tariff.get_price_period_display }}
-            </div>
+    <div class="tariff-card {% if tariff.price == 0 %}tariff-free{% elif tariff.price == 999 %}tariff-popular{% endif %}" style="
+        background: white;
+        border-radius: 20px;
+        padding: 32px 24px;
+        border: 2px solid {% if tariff.price == 2490 %}var(--primary){% else %}var(--gray-200){% endif %};
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        transition: transform 0.2s, box-shadow 0.2s;
+        {% if tariff.price == 2490 %}box-shadow: 0 8px 30px rgba(var(--primary-rgb), 0.15);{% endif %}
+    ">
+        <!-- Метка "Популярный" -->
+        {% if tariff.price == 2490 %}
+        <div style="position: absolute; top: -14px; left: 50%; transform: translateX(-50%); background: var(--primary); color: white; padding: 6px 20px; border-radius: 20px; font-size: 0.8rem; font-weight: 700; white-space: nowrap;">
+            ★ Самый популярный
         </div>
-        
-        <h3 style="text-align: center; margin-bottom: 16px;">{{ tariff.name }}</h3>
-        
-        <ul style="list-style: none; padding: 0; margin: 0 0 20px 0; flex: 1;">
-            <li style="padding: 8px 0; border-bottom: 1px solid var(--gray-100);">
-                {% if tariff.can_view_map %}✅{% else %}❌{% endif %} Карта СНТ
+        {% endif %}
+
+        <!-- Название -->
+        <h3 style="font-size: 1.2rem; font-weight: 700; margin-bottom: 4px; text-align: center;">
+            {{ tariff.name }}
+        </h3>
+        <p style="text-align: center; font-size: 0.85rem; color: var(--gray-500); margin-bottom: 20px;">
+            {% if tariff.price == 0 %}
+            Базовый функционал навсегда
+            {% elif tariff.price == 999 %}
+            Автоматизация рутины
+            {% elif tariff.price == 2490 %}
+            Полный контроль и документы
+            {% else %}
+            Для УК и крупных посёлков
+            {% endif %}
+        </p>
+
+        <!-- Цена -->
+        <div style="text-align: center; margin-bottom: 24px;">
+            <div class="price-monthly" style="font-size: 3rem; font-weight: 800; color: var(--gray-900); line-height: 1;">
+                {% if tariff.price == 0 %}0
+                {% elif tariff.price == 999 %}{{ tariff.price }}
+                {% elif tariff.price == 2490 %}{{ tariff.price }}
+                {% else %}{{ tariff.price }}{% endif %}
+                <span style="font-size: 1rem; font-weight: 500; color: var(--gray-500);">₽</span>
+            </div>
+            <div class="price-yearly" style="display: none; font-size: 3rem; font-weight: 800; color: var(--gray-900); line-height: 1;">
+                {% if tariff.price == 0 %}0
+                {% elif tariff.price == 999 %}833
+                {% elif tariff.price == 2490 %}2075
+                {% else %}{{ tariff.price|floatformat:0 }}{% endif %}
+                <span style="font-size: 1rem; font-weight: 500; color: var(--gray-500);">₽</span>
+            </div>
+            <div class="price-period-monthly" style="font-size: 0.85rem; color: var(--gray-500);">
+                / месяц
+            </div>
+            <div class="price-period-yearly" style="display: none; font-size: 0.85rem; color: var(--gray-500);">
+                / месяц при оплате за год
+            </div>
+            {% if tariff.price > 0 %}
+            <div class="price-yearly-save" style="display: none; margin-top: 6px; font-size: 0.8rem; color: #2e7d32; font-weight: 600;">
+                Экономия 
+                {% if tariff.price == 999 %}1 998
+                {% elif tariff.price == 2490 %}4 980
+                {% else %}9 980{% endif %} 
+                ₽ в год
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Список возможностей -->
+        <ul style="list-style: none; padding: 0; margin: 0 0 28px 0; flex: 1;">
+            <li style="padding: 10px 0; border-bottom: 1px solid var(--gray-100); display: flex; align-items: center; gap: 10px;">
+                <span style="font-size: 1.1rem;">{% if tariff.can_view_map %}✅{% else %}❌{% endif %}</span>
+                <span style="font-size: 0.9rem;">Карта СНТ</span>
             </li>
-            <li style="padding: 8px 0; border-bottom: 1px solid var(--gray-100);">
-                {% if tariff.can_manage_payments %}✅{% else %}❌{% endif %} Управление платежами
+            <li style="padding: 10px 0; border-bottom: 1px solid var(--gray-100); display: flex; align-items: center; gap: 10px;">
+                <span style="font-size: 1.1rem;">{% if tariff.can_manage_assessments %}✅{% else %}❌{% endif %}</span>
+                <span style="font-size: 0.9rem;">Управление начислениями</span>
             </li>
-            <li style="padding: 8px 0; border-bottom: 1px solid var(--gray-100);">
-                {% if tariff.can_import_bank %}✅{% else %}❌{% endif %} Импорт из банка
+            <li style="padding: 10px 0; border-bottom: 1px solid var(--gray-100); display: flex; align-items: center; gap: 10px;">
+                <span style="font-size: 1.1rem;">{% if tariff.can_manage_payments %}✅{% else %}❌{% endif %}</span>
+                <span style="font-size: 0.9rem;">Управление платежами</span>
             </li>
-            <li style="padding: 8px 0; border-bottom: 1px solid var(--gray-100);">
-                {% if tariff.can_export_data %}✅{% else %}❌{% endif %} Экспорт данных
+            <li style="padding: 10px 0; border-bottom: 1px solid var(--gray-100); display: flex; align-items: center; gap: 10px;">
+                <span style="font-size: 1.1rem;">{% if tariff.can_export_data %}✅{% else %}❌{% endif %}</span>
+                <span style="font-size: 0.9rem;">Экспорт данных</span>
             </li>
-            <li style="padding: 8px 0; border-bottom: 1px solid var(--gray-100);">
-                {% if tariff.can_manage_assessments %}✅{% else %}❌{% endif %} Управление начислениями
+            <li style="padding: 10px 0; border-bottom: 1px solid var(--gray-100); display: flex; align-items: center; gap: 10px;">
+                <span style="font-size: 1.1rem;">{% if tariff.can_import_bank %}✅{% else %}❌{% endif %}</span>
+                <span style="font-size: 0.9rem;">Импорт из банка</span>
             </li>
-            <li style="padding: 8px 0; border-bottom: 1px solid var(--gray-100);">
-                👥 До {{ tariff.max_users }} пользователей
-            </li>
-            <li style="padding: 8px 0;">
-                🏠 До {{ tariff.max_plots }} участков
+            <li style="padding: 10px 0; display: flex; align-items: center; gap: 10px;">
+                <span style="font-size: 1.1rem;">👥</span>
+                <span style="font-size: 0.9rem;">До {{ tariff.max_users }} пользователей</span>
             </li>
         </ul>
-        
+
+        <!-- Кнопка -->
         {% if current_subscription and current_subscription.tariff.id == tariff.id %}
-            <button class="btn btn-secondary" disabled style="width: 100%;">
+            <button class="btn" disabled style="width: 100%; padding: 14px; border-radius: 12px; background: var(--gray-100); border: none; font-weight: 700; font-size: 1rem; color: var(--gray-600); cursor: not-allowed;">
                 ✅ Текущий тариф
             </button>
         {% elif tariff.price == 0 %}
-            <button class="btn btn-primary" onclick="selectTariff({{ tariff.id }})" style="width: 100%;">
-                Бесплатно
+            <button class="btn" onclick="selectTariff({{ tariff.id }})" style="width: 100%; padding: 14px; border-radius: 12px; background: var(--gray-900); border: none; color: white; font-weight: 700; font-size: 1rem; cursor: pointer; transition: all 0.2s;"
+                onmouseover="this.style.background='var(--gray-800)'"
+                onmouseout="this.style.background='var(--gray-900)'">
+                Начать бесплатно
             </button>
         {% else %}
-            <button class="btn btn-primary" onclick="selectTariff({{ tariff.id }})" style="width: 100%;">
+            <button class="btn" onclick="selectTariff({{ tariff.id }})" style="width: 100%; padding: 14px; border-radius: 12px; background: {% if tariff.price == 2490 %}var(--primary){% else %}var(--gray-900){% endif %}; border: none; color: white; font-weight: 700; font-size: 1rem; cursor: pointer; transition: all 0.2s;"
+                onmouseover="this.style.opacity='0.9'"
+                onmouseout="this.style.opacity='1'">
                 Выбрать тариф
             </button>
         {% endif %}
@@ -80,23 +177,81 @@
             {% endfor %}
 </div>
 
+<!-- Блок FAQ / гарантии -->
+<div style="text-align: center; padding: 40px 0 20px;">
+    <p style="color: var(--gray-500); font-size: 0.9rem; margin-bottom: 8px;">
+        🔒 Безопасная оплата · Отмена в любой момент · 14 дней возврат
+    </p>
+    <p style="color: var(--gray-400); font-size: 0.8rem;">
+        Остались вопросы? Напишите нам в поддержку — поможем выбрать тариф.
+    </p>
+</div>
+
 <script>
+    let currentPeriod = 'monthly';
+
+    function switchPeriod(period) {
+        currentPeriod = period;
+        const btnMonthly = document.getElementById('btn-monthly');
+        const btnYearly = document.getElementById('btn-yearly');
+        
+        // Переключаем кнопки
+        if (period === 'monthly') {
+            btnMonthly.classList.add('active');
+            btnMonthly.style.background = 'white';
+            btnMonthly.style.boxShadow = '0 1px 3px rgba(0,0,0,0.08)';
+            btnMonthly.style.color = 'var(--gray-900)';
+            btnYearly.classList.remove('active');
+            btnYearly.style.background = 'transparent';
+            btnYearly.style.boxShadow = 'none';
+            btnYearly.style.color = 'var(--gray-500)';
+        } else {
+            btnYearly.classList.add('active');
+            btnYearly.style.background = 'white';
+            btnYearly.style.boxShadow = '0 1px 3px rgba(0,0,0,0.08)';
+            btnYearly.style.color = 'var(--gray-900)';
+            btnMonthly.classList.remove('active');
+            btnMonthly.style.background = 'transparent';
+            btnMonthly.style.boxShadow = 'none';
+            btnMonthly.style.color = 'var(--gray-500)';
+        }
+        
+        // Переключаем цены
+        document.querySelectorAll('.price-monthly').forEach(el => {
+            el.style.display = period === 'monthly' ? 'block' : 'none';
+        });
+        document.querySelectorAll('.price-yearly').forEach(el => {
+            el.style.display = period === 'yearly' ? 'block' : 'none';
+        });
+        document.querySelectorAll('.price-period-monthly').forEach(el => {
+            el.style.display = period === 'monthly' ? 'block' : 'none';
+        });
+        document.querySelectorAll('.price-period-yearly').forEach(el => {
+            el.style.display = period === 'yearly' ? 'block' : 'none';
+        });
+        document.querySelectorAll('.price-yearly-save').forEach(el => {
+            el.style.display = period === 'yearly' ? 'block' : 'none';
+        });
+    }
+
     async function selectTariff(tariffId) {
         showAlert('Обработка запроса...', 'info');
         
         try {
             const result = await apiFetch('/api/subscription/upgrade/', {
                 method: 'POST',
-                body: JSON.stringify({ tariff_id: tariffId })
+                body: JSON.stringify({ 
+                    tariff_id: tariffId,
+                    period: currentPeriod 
+                })
             });
 
             if (result && result.success) {
                 if (result.payment_url) {
-                    // Переход на страницу оплаты
                     window.location.href = result.payment_url;
                 } else {
-                    showAlert(result.message, 'success');
-                    window.location.reload();
+                    showAlert(result.message || 'Тариф успешно обновлён', 'success');
+                    setTimeout(() => window.location.reload(), 1500);
                 }
             } else {
                 showAlert(result?.detail || 'Ошибка при выборе тарифа', 'error');
@@ -120,9 +275,23 @@
         }
     }
 
-    // Вызываем после загрузки страницы
     document.addEventListener('DOMContentLoaded', () => {
         updateSubscriptionStatus();
     });
 </script>
+
+<style>
+    .tariff-card {
+        will-change: transform;
+    }
+    .tariff-card:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.1);
+    }
+    .period-btn.active {
+        background: white !important;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.08) !important;
+        color: var(--gray-900) !important;
+    }
+</style>
 {% endblock %}

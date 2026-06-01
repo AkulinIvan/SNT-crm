@@ -1,4 +1,3 @@
-# subscriptions/decorators.py
 from functools import wraps
 from django.shortcuts import redirect
 from django.contrib import messages
@@ -63,12 +62,13 @@ def subscription_required(feature=None, check_limits=False, redirect_url='subscr
             if feature:
                 has_access = False
                 
+                # Исправленная карта соответствия функций и полей тарифа
                 feature_map = {
-                    'map': tariff.can_view_map,
-                    'payments': tariff.can_manage_payments,
-                    'bank_import': tariff.can_import_bank,
-                    'export': tariff.can_export_data,
-                    'assessments': tariff.can_manage_assessments,
+                    'map': tariff.can_view_map,                      # Карта СНТ
+                    'payments': tariff.can_manage_payments,          # Управление платежами
+                    'bank_import': tariff.can_import_bank,           # Импорт из банка
+                    'export': tariff.can_export_data,                # Экспорт данных
+                    'assessments': tariff.can_manage_assessments,    # Управление начислениями
                 }
                 
                 has_access = feature_map.get(feature, False)
