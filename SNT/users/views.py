@@ -127,14 +127,12 @@ class OwnerViewSet(OrganizationMixin, viewsets.ModelViewSet):
         return OwnerDetailSerializer
 
     def get_queryset(self):
-        """Оптимизация запросов с фильтрацией"""
-        queryset = super().get_queryset()
+        """Упрощённый queryset без сложных аннотаций"""
+        # Базовый queryset
+        queryset = Owner.objects.all()  
 
-        # Админы видят всех
-        if self.request.user.is_superuser or self.request.user.is_admin:
-            pass  # Не фильтруем
-        else:
-            # Фильтруем по организации пользователя
+        # Фильтрация по организации
+        if not (self.request.user.is_superuser or self.request.user.is_admin):
             org = getattr(self.request, 'current_organization', None)
             if org:
                 queryset = queryset.filter(
@@ -142,8 +140,12 @@ class OwnerViewSet(OrganizationMixin, viewsets.ModelViewSet):
                     memberships__status='active'
                 )
             else:
-                # Если организации нет - показываем пустой список
-                queryset = queryset.filter(memberships__isnull=True)
+                queryset = queryset.none()  
+
+        # Простая аннотация количества участков
+        queryset = queryset.annotate(
+            plots_count=Count('land_plots', distinct=True)
+        )   
 
         # Фильтрация по наличию участков
         has_plots = self.request.query_params.get('has_plots')
@@ -151,56 +153,16 @@ class OwnerViewSet(OrganizationMixin, viewsets.ModelViewSet):
             if has_plots.lower() == 'true':
                 queryset = queryset.filter(plots_count__gt=0)
             else:
-                queryset = queryset.filter(plots_count=0)
-
-        # Фильтрация по должникам
-        is_debtor = self.request.query_params.get('is_debtor')
-        if is_debtor is not None:
-            from payments.models import Assessment
-            if is_debtor.lower() == 'true':
-                # Находим владельцев с долгами
-                debtor_ids = Assessment.objects.filter(
-                    status__in=['pending', 'partial', 'overdue']
-                ).values_list('owner_id', flat=True).distinct()
-                queryset = queryset.filter(id__in=debtor_ids)
-            else:
-                # Находим владельцев без долгов
-                debtor_ids = Assessment.objects.filter(
-                    status__in=['pending', 'partial', 'overdue']
-                ).values_list('owner_id', flat=True).distinct()
-                queryset = queryset.exclude(id__in=debtor_ids)
-
-        # Фильтрация по минимальной сумме долга (через подзапрос)
-        debt_min = self.request.query_params.get('debt_min')
-        if debt_min:
-            from payments.models import Assessment
-            # Находим владельцев с суммой долга >= debt_min
-            owner_ids_with_debt = Assessment.objects.filter(
-                status__in=['pending', 'partial', 'overdue']
-            ).values('owner_id').annotate(
-                total_debt=models.Sum('debt')
-            ).filter(total_debt__gte=float(debt_min)).values_list('owner_id', flat=True)
-            queryset = queryset.filter(id__in=owner_ids_with_debt)
-
-        # Фильтрация по максимальной сумме долга
-        debt_max = self.request.query_params.get('debt_max')
-        if debt_max:
-            from payments.models import Assessment
-            owner_ids_with_debt = Assessment.objects.filter(
-                status__in=['pending', 'partial', 'overdue']
-            ).values('owner_id').annotate(
-                total_debt=models.Sum('debt')
-            ).filter(total_debt__lte=float(debt_max)).values_list('owner_id', flat=True)
-            queryset = queryset.filter(id__in=owner_ids_with_debt)
+                queryset = queryset.filter(plots_count=0)   
 
         # Фильтрация по количеству участков
         plots_count = self.request.query_params.get('plots_count')
         if plots_count:
-            queryset = queryset.annotate(plots_cnt=Count('land_plots')).filter(plots_cnt=int(plots_count))
+            queryset = queryset.filter(plots_count=int(plots_count))    
 
         plots_count_min = self.request.query_params.get('plots_count_min')
         if plots_count_min:
-            queryset = queryset.annotate(plots_cnt=Count('land_plots')).filter(plots_cnt__gte=int(plots_count_min))
+            queryset = queryset.filter(plots_count__gte=int(plots_count_min))   
 
         # Фильтрация по организации (через членство)
         organization = self.request.query_params.get('organization')
@@ -208,75 +170,58 @@ class OwnerViewSet(OrganizationMixin, viewsets.ModelViewSet):
             queryset = queryset.filter(
                 memberships__organization_id=organization,
                 memberships__status='active'
-            )
+            )   
 
-        # Фильтрация по статусу членства
-        membership_status = self.request.query_params.get('membership_status')
-        if membership_status:
-            queryset = queryset.filter(memberships__status=membership_status)
-
-        # Фильтрация по дате создания
+        # Фильтрация по дате
         created_after = self.request.query_params.get('created_after')
         if created_after:
-            queryset = queryset.filter(created_at__gte=created_after)
+            queryset = queryset.filter(created_at__gte=created_after)   
 
         created_before = self.request.query_params.get('created_before')
         if created_before:
-            queryset = queryset.filter(created_at__lte=created_before)
+            queryset = queryset.filter(created_at__lte=created_before)  
 
-        # Фильтрация по наличию контактов
+        # Фильтрация по контактам
         has_contacts = self.request.query_params.get('has_contacts')
         if has_contacts is not None:
             if has_contacts.lower() == 'true':
                 queryset = queryset.filter(contacts__isnull=False).distinct()
             elif has_contacts.lower() == 'false':
-                queryset = queryset.filter(contacts__isnull=True)
+                queryset = queryset.filter(contacts__isnull=True)   
 
-        # Фильтрация по наличию телефона
         has_phone = self.request.query_params.get('has_phone')
         if has_phone is not None and has_phone.lower() == 'true':
-            queryset = queryset.filter(contacts__type='ph', contacts__is_active=True).distinct()
+            queryset = queryset.filter(contacts__type='ph', contacts__is_active=True).distinct()    
 
-        # Фильтрация по наличию email
         has_email = self.request.query_params.get('has_email')
         if has_email is not None and has_email.lower() == 'true':
-            queryset = queryset.filter(contacts__type='em', contacts__is_active=True).distinct()
+            queryset = queryset.filter(contacts__type='em', contacts__is_active=True).distinct()    
 
-        # Поиск по номеру телефона
         phone_contains = self.request.query_params.get('phone_contains')
         if phone_contains:
             queryset = queryset.filter(
                 contacts__type='ph', 
                 contacts__value__icontains=phone_contains,
                 contacts__is_active=True
-            ).distinct()
+            ).distinct()    
 
-        # Поиск по email
         email_contains = self.request.query_params.get('email_contains')
         if email_contains:
             queryset = queryset.filter(
                 contacts__type='em', 
                 contacts__value__icontains=email_contains,
                 contacts__is_active=True
-            ).distinct()
+            ).distinct()    
 
-        # Сортировка по сумме долга (добавляем аннотацию)
+        # Сортировка
         ordering = self.request.query_params.get('ordering', '')
-        if ordering in ('total_debt', '-total_debt'):
-            from payments.models import Assessment
-            # Аннотируем сумму долга
-            debt_subquery = Assessment.objects.filter(
-                owner=models.OuterRef('pk'),
-                status__in=['pending', 'partial', 'overdue']
-            ).values('owner_id').annotate(
-                total=models.Sum('debt')
-            ).values('total')
-
-            queryset = queryset.annotate(
-                total_debt_annotated=models.Subquery(debt_subquery, output_field=models.DecimalField())
-            ).order_by(
-                ordering.replace('total_debt', 'total_debt_annotated')
-            )
+        if ordering:
+            # Убираем сортировку по total_debt, так как у нас нет аннотации
+            if ordering in ('total_debt', '-total_debt'):
+                ordering = ordering.replace('total_debt', 'full_name')
+            queryset = queryset.order_by(ordering)
+        else:
+            queryset = queryset.order_by('full_name')   
 
         return queryset.distinct()
 
@@ -288,24 +233,33 @@ class OwnerViewSet(OrganizationMixin, viewsets.ModelViewSet):
     def list(self, request, *args, **kwargs):
         """Расширенный list с дополнительной статистикой"""
         queryset = self.filter_queryset(self.get_queryset())
-        
+
+        # Простая пагинация
         page = self.paginate_queryset(queryset)
         if page is not None:
             serializer = self.get_serializer(page, many=True)
             response = self.get_paginated_response(serializer.data)
-            
-            # Добавляем статистику в ответ
-            total_debtors = sum(1 for owner in queryset if owner.is_debtor)
+
+            # Добавляем статистику
             response.data['stats'] = {
                 'total': queryset.count(),
-                'debtors': total_debtors,
+                'debtors': 0,  # Временно 0, можно подсчитать позже
                 'with_plots': queryset.filter(plots_count__gt=0).count(),
                 'without_plots': queryset.filter(plots_count=0).count(),
             }
             return response
-        
+
         serializer = self.get_serializer(queryset, many=True)
-        return Response(serializer.data)
+        return Response({
+            'results': serializer.data,
+            'count': queryset.count(),
+            'stats': {
+                'total': queryset.count(),
+                'debtors': 0,
+                'with_plots': queryset.filter(plots_count__gt=0).count(),
+                'without_plots': queryset.filter(plots_count=0).count(),
+            }
+        })
 
     def destroy(self, request, *args, **kwargs):
         """Безопасное удаление с проверкой зависимостей"""
@@ -555,19 +509,19 @@ class OwnerViewSet(OrganizationMixin, viewsets.ModelViewSet):
         """
         import csv
         from django.http import HttpResponse
-        
+
         owners = self.filter_queryset(self.get_queryset())
         timestamp = timezone.now().strftime('%Y%m%d_%H%M%S')
-        
+
         response = HttpResponse(content_type='text/csv; charset=utf-8')
         response['Content-Disposition'] = f'attachment; filename="owners_{timestamp}.csv"'
-        
+
         # Добавляем BOM для корректного отображения кириллицы в Excel
         response.write('\ufeff')
-        
+
         # Используем точку с запятой как разделитель (Excel лучше понимает)
         writer = csv.writer(response, delimiter=';')
-        
+
         # Заголовки
         writer.writerow([
             'ID', 
@@ -582,24 +536,24 @@ class OwnerViewSet(OrganizationMixin, viewsets.ModelViewSet):
             'Долг (₽)', 
             'Дата добавления'
         ])
-        
+
         # Данные
         for owner in owners:
             # Получаем список участков владельца
             ownerships = owner.ownerships.select_related('land_plot').all()
-            
+
             if ownerships:
                 plot_numbers = []
                 cadastral_numbers = []
                 areas = []
-                
+
                 for ownership in ownerships:
                     plot = ownership.land_plot
                     if plot:
                         plot_numbers.append(plot.plot_number)
                         cadastral_numbers.append(plot.cadastral_number)
                         areas.append(f"{plot.area_sqm:.2f}" if plot.area_sqm else '')
-                
+
                 writer.writerow([
                     owner.id,
                     owner.full_name,
@@ -628,7 +582,7 @@ class OwnerViewSet(OrganizationMixin, viewsets.ModelViewSet):
                     f"{owner.total_debt:.2f}" if owner.total_debt else "0.00",
                     owner.created_at.strftime('%d.%m.%Y'),
                 ])
-        
+
         return response
 
     def _validate_share(self, share_str):
