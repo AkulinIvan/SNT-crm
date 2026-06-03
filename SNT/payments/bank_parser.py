@@ -103,121 +103,128 @@ class BankStatementParser:
         Специальный парсер для квитанций Альфа-Банка
         """
         transactions = []
-        
+
         logger.info("Парсинг квитанции Альфа-Банка...")
-        
-        # Нормализуем текст - разбиваем на строки для лучшего парсинга
-        lines = text.split('\n')
-        
-        # Извлекаем сумму (ищем "Сумма перевода" и число)
-        amount_patterns = [
-            r'Сумма\s+перевода\s+([\d\s]+,\d{2})\s*RUR',
-            r'Сумма\s+перевода.*?([\d\s]+,\d{2})\s*RUR',
-        ]
-        
+
+        # Нормализуем текст - разбиваем на строки
+        lines = [line.strip() for line in text.split('\n') if line.strip()]
+
+        # Извлекаем сумму
         amount = None
-        for pattern in amount_patterns:
-            amount_match = re.search(pattern, text, re.DOTALL)
-            if amount_match:
-                amount_str = amount_match.group(1).replace(' ', '').replace(',', '.')
-                amount = Decimal(amount_str)
-                logger.info(f"Найдена сумма: {amount}")
-                break
-            
+        for line in lines:
+            # Ищем строку с суммой перевода
+            if 'Сумма перевода' in line or 'Сумма' in line:
+                # Ищем число с пробелами и запятой
+                match = re.search(r'(\d[\d\s]*,\d{2})\s*RUR', line)
+                if match:
+                    amount_str = match.group(1).replace(' ', '').replace(',', '.')
+                    amount = Decimal(amount_str)
+                    logger.info(f"Найдена сумма: {amount}")
+                    break
+                
         if amount is None:
             logger.error("Не найдена сумма в квитанции")
             return []
-        
+
         # Извлекаем дату
-        date_patterns = [
-            r'Дата\s+и\s+время\s+перевода\s+(\d{2}\.\d{2}\.\d{4})',
-            r'(\d{2}\.\d{2}\.\d{4})\s+\d{2}:\d{2}:\d{2}',
-        ]
-        
         transaction_date = date.today()
-        for pattern in date_patterns:
-            date_match = re.search(pattern, text)
-            if date_match:
-                date_str = date_match.group(1)
-                try:
-                    transaction_date = datetime.strptime(date_str, '%d.%m.%Y').date()
-                    logger.info(f"Найдена дата: {transaction_date}")
-                    break
-                except:
-                    pass
-                
+        for line in lines:
+            if 'Дата и время перевода' in line:
+                # Ищем дату на следующей строке или в этой же
+                date_match = re.search(r'(\d{2}\.\d{2}\.\d{4})', line)
+                if date_match:
+                    date_str = date_match.group(1)
+                    try:
+                        transaction_date = datetime.strptime(date_str, '%d.%m.%Y').date()
+                        logger.info(f"Найдена дата: {transaction_date}")
+                        break
+                    except:
+                        pass
+                    
         # Извлекаем плательщика (улучшенный поиск)
         payer_name = ''
-        
-        # Ищем "Плательщик" и следующую строку
+
+        # Ищем строку "Плательщик" и берем следующую
         for i, line in enumerate(lines):
-            if 'Плательщик' in line and i + 1 < len(lines):
-                payer_name = lines[i + 1].strip()
-                if payer_name and len(payer_name) > 5:
-                    logger.info(f"Найден плательщик (по строке): {payer_name}")
-                    break
-                
-        # Если не нашли, ищем по шаблону ФИО
+            if line == 'Плательщик' or line.startswith('Плательщик'):
+                # Следующая строка должна содержать ФИО
+                if i + 1 < len(lines):
+                    potential_name = lines[i + 1]
+                    # Проверяем, что это похоже на ФИО (содержит буквы и пробелы)
+                    if re.match(r'^[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+$', potential_name):
+                        payer_name = potential_name
+                        logger.info(f"Найден плательщик: {payer_name}")
+                        break
+                    elif re.match(r'^[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+$', potential_name):
+                        payer_name = potential_name
+                        logger.info(f"Найден плательщик: {payer_name}")
+                        break
+                    
+        # Если не нашли, ищем ФИО в тексте
         if not payer_name:
-            name_patterns = [
-                r'Плательщик\s+([А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+)',
-                r'Плательщик\s+([А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+)',
-                r'([А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+)\s+Счёт\s+списания',
-            ]
-            
-            for pattern in name_patterns:
-                name_match = re.search(pattern, text)
-                if name_match:
-                    payer_name = name_match.group(1).strip()
+            # Ищем ФИО в формате "Фамилия Имя Отчество"
+            name_pattern = r'([А-ЯЁ][а-яё]+)\s+([А-ЯЁ][а-яё]+)\s+([А-ЯЁ][а-яё]+)'
+            matches = re.findall(name_pattern, text)
+            for match in matches:
+                full_name = f"{match[0]} {match[1]} {match[2]}"
+                # Исключаем "Строитель-43" и другие не-ФИО
+                if 'Строитель' not in full_name and len(full_name) > 10:
+                    payer_name = full_name
                     logger.info(f"Найден плательщик (по шаблону): {payer_name}")
                     break
                 
-        # Если всё ещё не нашли, ищем в конце текста после "Назначение перевода"
-        if not payer_name:
-            # Ищем ФИО в формате "Фамилия Имя Отчество"
-            name_pattern = r'([А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+)'
-            names = re.findall(name_pattern, text)
-            # Берём имя, которое не является получателем
-            for name in names:
-                if name != 'Строитель-43' and 'Строитель' not in name:
-                    payer_name = name
-                    logger.info(f"Найден плательщик (по ФИО): {payer_name}")
-                    break
-                
         # Извлекаем назначение платежа
-        purpose_patterns = [
-            r'Назначение\s+перевода\s+(.+?)(?:\s+[А-Я][а-я]+:|$)',
-            r'Назначение\s+перевода\s+(.+?)$',
-        ]
-        
         payment_purpose = ''
-        for pattern in purpose_patterns:
-            purpose_match = re.search(pattern, text, re.DOTALL)
-            if purpose_match:
-                payment_purpose = purpose_match.group(1).strip()
+        for i, line in enumerate(lines):
+            if 'Назначение перевода' in line:
+                # Собираем следующие строки до следующего поля
+                purpose_lines = []
+                for j in range(i + 1, len(lines)):
+                    if 'Плательщик' in lines[j] or 'Получатель' in lines[j] or 'Банк' in lines[j]:
+                        break
+                    purpose_lines.append(lines[j])
+                payment_purpose = ' '.join(purpose_lines)
                 payment_purpose = ' '.join(payment_purpose.split())
                 logger.info(f"Найдено назначение: {payment_purpose[:100]}...")
                 break
             
+        # Если не нашли назначение, ищем в остатке текста
+        if not payment_purpose:
+            purpose_match = re.search(r'Назначение\s+перевода\s+(.+?)(?=\s+[А-Я][а-я]+:|$)', text, re.DOTALL)
+            if purpose_match:
+                payment_purpose = purpose_match.group(1).strip()
+                payment_purpose = ' '.join(payment_purpose.split())
+
         # Извлекаем номер операции
-        operation_match = re.search(r'Номер\s+операции\s+(\w+)', text)
-        transaction_id = operation_match.group(1) if operation_match else ''
-        
+        transaction_id = ''
+        for line in lines:
+            if 'Номер операции' in line:
+                match = re.search(r'(\w+)', line.replace('Номер операции', ''))
+                if match:
+                    transaction_id = match.group(1)
+                    logger.info(f"Номер операции: {transaction_id}")
+                    break
+                
         # Извлекаем UID начисления
-        snt_id_pattern = r'SNT-(\d{6})'
-        snt_match = re.search(snt_id_pattern, payment_purpose)
-        matched_uid = f"SNT-{snt_match.group(1)}" if snt_match else ''
-        
+        matched_uid = ''
+        snt_match = re.search(r'SNT-\d{6}', payment_purpose)
+        if snt_match:
+            matched_uid = snt_match.group(0)
+            logger.info(f"Найден UID: {matched_uid}")
+
         # Если не нашли в назначении, ищем во всём тексте
         if not matched_uid:
             snt_match = re.search(r'ID:?(SNT-\d{6})', text)
             if snt_match:
                 matched_uid = snt_match.group(1)
-        
+                logger.info(f"Найден UID (в тексте): {matched_uid}")
+
         # Извлекаем номер участка
+        plot_number = ''
         plot_match = re.search(r'Уч\.№(\d+)', payment_purpose)
-        plot_number = plot_match.group(1) if plot_match else ''
-        
+        if plot_match:
+            plot_number = plot_match.group(1)
+
         transaction = {
             'transaction_date': transaction_date,
             'amount': amount,
@@ -227,10 +234,10 @@ class BankStatementParser:
             'matched_uid': matched_uid,
             'plot_number': plot_number,
         }
-        
+
         logger.info(f"✅ Распознан платёж: {amount} ₽ от {payer_name or 'неизвестного'}, UID: {matched_uid}")
         transactions.append(transaction)
-        
+
         return transactions
 
     
@@ -955,40 +962,22 @@ class PaymentMatcher:
     def match_owner(self, transaction: Dict[str, Any]) -> Optional[Tuple[Any, float]]:
         """
         Поиск владельца по транзакции.
-        Возвращает (owner, confidence) или None.
         """
         payer_name = transaction.get('payer_name', '').lower()
-        payer_account = transaction.get('payer_account', '')
-        payer_inn = transaction.get('payer_inn', '')
         payment_purpose = transaction.get('payment_purpose', '').lower()
-        matched_uid = transaction.get('matched_uid', '')  # Добавляем UID из квитанции
-
-        candidates: List[Tuple[Any, float]] = []
-
-        # 1. Поиск по UID из квитанции (самый точный метод)
+        matched_uid = transaction.get('matched_uid', '')
+        
+        # 1. САМЫЙ ПРИОРИТЕТНЫЙ: Поиск по UID из квитанции
         if matched_uid:
             from .models import Assessment
             try:
                 assessment = Assessment.objects.select_related('owner').get(payment_uid=matched_uid)
+                logger.info(f"Владелец найден по UID {matched_uid}: {assessment.owner.full_name}")
                 return (assessment.owner, 100.0)
             except Assessment.DoesNotExist:
-                logger.info(f'Начисление с UID {matched_uid} не найдено')
-
-        # 2. Поиск по номеру участка из назначения
-        plot_pattern = r'уч\.?№?(\d+)'
-        plot_match = re.search(plot_pattern, payment_purpose, re.IGNORECASE)
-        if plot_match:
-            plot_number = plot_match.group(1)
-            from land.models import LandPlot
-            try:
-                plot = LandPlot.objects.select_related('owners').filter(plot_number=plot_number).first()
-                if plot and plot.owners.exists():
-                    owner = plot.owners.first()
-                    return (owner, 95.0)
-            except Exception as e:
-                logger.warning(f'Ошибка поиска по участку: {e}')
-
-        # 3. Поиск по уникальному ID начисления в тексте
+                logger.warning(f"Начисление с UID {matched_uid} не найдено")
+        
+        # 2. Поиск по UID в назначении платежа
         snt_id_pattern = r'SNT-(\d{6})'
         snt_match = re.search(snt_id_pattern, payment_purpose, re.IGNORECASE)
         if snt_match:
@@ -996,36 +985,39 @@ class PaymentMatcher:
             from .models import Assessment
             try:
                 assessment = Assessment.objects.select_related('owner').get(id=assessment_id)
+                logger.info(f"Владелец найден по ID начисления {assessment_id}: {assessment.owner.full_name}")
                 return (assessment.owner, 100.0)
             except Assessment.DoesNotExist:
                 pass
             
-        # 4. Поиск по ФИО в назначении платежа
-        owners = self.Owner.objects.all()
-        for owner in owners:
-            confidence: float = 0.0
-            owner_name_parts = owner.full_name.lower().split()
-
-            # Проверяем ФИО в плательщике
-            name_match = sum(1 for part in owner_name_parts if part and part in payer_name)
-            if name_match >= 2:
-                confidence += 50
-            elif name_match >= 1:
-                confidence += 20
-
-            # Проверяем ФИО в назначении
-            name_in_purpose = sum(1 for part in owner_name_parts if part and part in payment_purpose)
-            if name_in_purpose >= 2:
-                confidence += 60
-
-            if confidence > 0:
-                candidates.append((owner, confidence))
-
-        candidates.sort(key=lambda x: x[1], reverse=True)
-
-        if candidates and candidates[0][1] >= 30:
-            return candidates[0]
-
+        # 3. Поиск по номеру участка
+        plot_pattern = r'уч\.?№?(\d+)'
+        plot_match = re.search(plot_pattern, payment_purpose, re.IGNORECASE)
+        if plot_match:
+            plot_number = plot_match.group(1)
+            from land.models import LandPlot
+            try:
+                plot = LandPlot.objects.filter(plot_number=plot_number).first()
+                if plot and plot.owners.exists():
+                    owner = plot.owners.first()
+                    logger.info(f"Владелец найден по участку №{plot_number}: {owner.full_name}")
+                    return (owner, 95.0)
+            except Exception as e:
+                logger.warning(f"Ошибка поиска по участку: {e}")
+        
+        # 4. Поиск по ФИО
+        if payer_name:
+            owners = self.Owner.objects.all()
+            for owner in owners:
+                owner_name_lower = owner.full_name.lower()
+                # Проверяем совпадение ФИО
+                if payer_name == owner_name_lower:
+                    return (owner, 90.0)
+                # Проверяем частичное совпадение
+                if len(payer_name) > 10 and payer_name in owner_name_lower:
+                    return (owner, 70.0)
+        
+        logger.warning(f"Не удалось найти владельца для платежа: {transaction}")
         return None
     
     def match_assessment(self, owner: Any, amount: Decimal, payment_purpose: str) -> Optional[Any]:
