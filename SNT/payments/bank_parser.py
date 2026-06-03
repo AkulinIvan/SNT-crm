@@ -2,7 +2,7 @@ import re
 import csv
 import json
 import logging
-from datetime import datetime
+from datetime import date, datetime
 from typing import List, Dict, Optional, Tuple, Any
 from decimal import Decimal
 
@@ -66,37 +66,212 @@ class BankStatementParser:
     
     def parse_file(self, file_path: str) -> List[Dict[str, Any]]:
         """Парсинг файла выписки"""
-        if file_path.endswith('.csv'):
-            return self._parse_csv(file_path)
-        elif file_path.endswith('.xlsx') or file_path.endswith('.xls'):
-            return self._parse_excel(file_path)
-        elif file_path.endswith('.json'):
-            return self._parse_json(file_path)
-        elif file_path.endswith('.txt'):
-            return self._parse_1c(file_path)
-        elif file_path.endswith('.pdf'):
-            return self._parse_pdf(file_path)
-        else:
-            raise ValueError(f'Неподдерживаемый формат файла: {file_path}')
+        logger.info(f"Начинаем парсинг файла: {file_path}")
+
+        try:
+            if file_path.endswith('.pdf'):
+                transactions = self._parse_pdf(file_path)
+                # Гарантируем, что возвращается список
+                if transactions is None:
+                    transactions = []
+                logger.info(f"PDF парсинг завершён, найдено {len(transactions)} транзакций")
+
+                # Выводим каждую транзакцию для отладки
+                for i, trans in enumerate(transactions):
+                    logger.info(f"Транзакция {i+1}: дата={trans.get('transaction_date')}, "
+                               f"сумма={trans.get('amount')}, плательщик={trans.get('payer_name')}, "
+                               f"UID={trans.get('matched_uid')}")
+
+                return transactions
+
+            elif file_path.endswith('.csv'):
+                return self._parse_csv(file_path)
+            elif file_path.endswith('.xlsx') or file_path.endswith('.xls'):
+                return self._parse_excel(file_path)
+            elif file_path.endswith('.json'):
+                return self._parse_json(file_path)
+            elif file_path.endswith('.txt'):
+                return self._parse_1c(file_path)
+            else:
+                raise ValueError(f'Неподдерживаемый формат файла: {file_path}')
+        except Exception as e:
+            logger.error(f"Ошибка парсинга: {e}", exc_info=True)
+            return []  # Всегда возвращаем список, даже при ошибке
+    
+    def _parse_alfa_receipt(self, text: str) -> List[Dict[str, Any]]:
+        """
+        Специальный парсер для квитанций Альфа-Банка
+        """
+        transactions = []
+        
+        logger.info("Парсинг квитанции Альфа-Банка...")
+        
+        # Нормализуем текст - разбиваем на строки для лучшего парсинга
+        lines = text.split('\n')
+        
+        # Извлекаем сумму (ищем "Сумма перевода" и число)
+        amount_patterns = [
+            r'Сумма\s+перевода\s+([\d\s]+,\d{2})\s*RUR',
+            r'Сумма\s+перевода.*?([\d\s]+,\d{2})\s*RUR',
+        ]
+        
+        amount = None
+        for pattern in amount_patterns:
+            amount_match = re.search(pattern, text, re.DOTALL)
+            if amount_match:
+                amount_str = amount_match.group(1).replace(' ', '').replace(',', '.')
+                amount = Decimal(amount_str)
+                logger.info(f"Найдена сумма: {amount}")
+                break
+            
+        if amount is None:
+            logger.error("Не найдена сумма в квитанции")
+            return []
+        
+        # Извлекаем дату
+        date_patterns = [
+            r'Дата\s+и\s+время\s+перевода\s+(\d{2}\.\d{2}\.\d{4})',
+            r'(\d{2}\.\d{2}\.\d{4})\s+\d{2}:\d{2}:\d{2}',
+        ]
+        
+        transaction_date = date.today()
+        for pattern in date_patterns:
+            date_match = re.search(pattern, text)
+            if date_match:
+                date_str = date_match.group(1)
+                try:
+                    transaction_date = datetime.strptime(date_str, '%d.%m.%Y').date()
+                    logger.info(f"Найдена дата: {transaction_date}")
+                    break
+                except:
+                    pass
+                
+        # Извлекаем плательщика (улучшенный поиск)
+        payer_name = ''
+        
+        # Ищем "Плательщик" и следующую строку
+        for i, line in enumerate(lines):
+            if 'Плательщик' in line and i + 1 < len(lines):
+                payer_name = lines[i + 1].strip()
+                if payer_name and len(payer_name) > 5:
+                    logger.info(f"Найден плательщик (по строке): {payer_name}")
+                    break
+                
+        # Если не нашли, ищем по шаблону ФИО
+        if not payer_name:
+            name_patterns = [
+                r'Плательщик\s+([А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+)',
+                r'Плательщик\s+([А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+)',
+                r'([А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+)\s+Счёт\s+списания',
+            ]
+            
+            for pattern in name_patterns:
+                name_match = re.search(pattern, text)
+                if name_match:
+                    payer_name = name_match.group(1).strip()
+                    logger.info(f"Найден плательщик (по шаблону): {payer_name}")
+                    break
+                
+        # Если всё ещё не нашли, ищем в конце текста после "Назначение перевода"
+        if not payer_name:
+            # Ищем ФИО в формате "Фамилия Имя Отчество"
+            name_pattern = r'([А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+)'
+            names = re.findall(name_pattern, text)
+            # Берём имя, которое не является получателем
+            for name in names:
+                if name != 'Строитель-43' and 'Строитель' not in name:
+                    payer_name = name
+                    logger.info(f"Найден плательщик (по ФИО): {payer_name}")
+                    break
+                
+        # Извлекаем назначение платежа
+        purpose_patterns = [
+            r'Назначение\s+перевода\s+(.+?)(?:\s+[А-Я][а-я]+:|$)',
+            r'Назначение\s+перевода\s+(.+?)$',
+        ]
+        
+        payment_purpose = ''
+        for pattern in purpose_patterns:
+            purpose_match = re.search(pattern, text, re.DOTALL)
+            if purpose_match:
+                payment_purpose = purpose_match.group(1).strip()
+                payment_purpose = ' '.join(payment_purpose.split())
+                logger.info(f"Найдено назначение: {payment_purpose[:100]}...")
+                break
+            
+        # Извлекаем номер операции
+        operation_match = re.search(r'Номер\s+операции\s+(\w+)', text)
+        transaction_id = operation_match.group(1) if operation_match else ''
+        
+        # Извлекаем UID начисления
+        snt_id_pattern = r'SNT-(\d{6})'
+        snt_match = re.search(snt_id_pattern, payment_purpose)
+        matched_uid = f"SNT-{snt_match.group(1)}" if snt_match else ''
+        
+        # Если не нашли в назначении, ищем во всём тексте
+        if not matched_uid:
+            snt_match = re.search(r'ID:?(SNT-\d{6})', text)
+            if snt_match:
+                matched_uid = snt_match.group(1)
+        
+        # Извлекаем номер участка
+        plot_match = re.search(r'Уч\.№(\d+)', payment_purpose)
+        plot_number = plot_match.group(1) if plot_match else ''
+        
+        transaction = {
+            'transaction_date': transaction_date,
+            'amount': amount,
+            'payer_name': payer_name,
+            'payment_purpose': payment_purpose,
+            'transaction_id': transaction_id,
+            'matched_uid': matched_uid,
+            'plot_number': plot_number,
+        }
+        
+        logger.info(f"✅ Распознан платёж: {amount} ₽ от {payer_name or 'неизвестного'}, UID: {matched_uid}")
+        transactions.append(transaction)
+        
+        return transactions
+
     
     def _parse_pdf(self, file_path: str) -> List[Dict[str, Any]]:
-        """Парсинг PDF выписки (сначала таблицы, потом текст)"""
-        
+        """
+        Парсинг PDF выписки или квитанции
+        """
         # Сначала пробуем извлечь таблицы
         transactions = self._parse_pdf_table(file_path)
-        if transactions:
+        if transactions and len(transactions) > 0:
             logger.info(f'Извлечено {len(transactions)} транзакций из таблиц PDF')
             return transactions
-        
-        # Если таблиц нет — извлекаем текст
+
+        # Если таблиц нет - извлекаем текст
         text = self._extract_text_from_pdf(file_path)
-        if not text:
-            raise ValueError('Не удалось извлечь текст из PDF')
-        
+
+        # Проверяем, что текст не пустой
+        if not text or not text.strip():
+            logger.error("Не удалось извлечь текст из PDF - файл пустой или защищён")
+            return []
+
         logger.info(f'Извлечён текст из PDF ({len(text)} символов)')
         logger.debug(f'Первые 500 символов: {text[:500]}')
-        
-        # Определяем банк по содержимому
+
+        # Пробуем разные форматы
+
+        # 1. Квитанция Альфа-Банка
+        if 'Квитанция о переводе' in text or 'АО "АЛЬФА-БАНК"' in text:
+            result = self._parse_alfa_receipt(text)
+            if result:
+                return result
+            else:
+                logger.warning("Не удалось распарсить как квитанцию Альфа-Банка, пробуем другие форматы")
+
+        # 2. Квитанция Сбербанка
+        if 'Сбербанк' in text and 'Квитанция' in text:
+            result = self._parse_sberbank_receipt(text)
+            if result:
+                return result
+
+        # 3. Выписка Сбербанка
         text_lower = text.lower()
         if 'сбербанк' in text_lower or 'sberbank' in text_lower:
             return self._parse_sberbank_text(text)
@@ -107,55 +282,156 @@ class BankStatementParser:
         else:
             return self._parse_generic_text(text)
     
-    def _extract_text_from_pdf(self, file_path: str) -> str:
-        """Извлечение текста из PDF"""
-        text = ""
+    def _parse_sberbank_receipt(self, text: str) -> List[Dict[str, Any]]:
+        """
+        Парсер для квитанций Сбербанка
+        """
+        transactions = []
         
-        # Метод 1: pdfplumber (лучше для таблиц)
+        logger.info("Парсинг квитанции Сбербанка...")
+        
+        # Извлекаем сумму
+        amount_patterns = [
+            r'Сумма\s+перевода[:\s]*([\d\s]+,\d{2})\s*₽',
+            r'Сумма[:\s]*([\d\s]+,\d{2})\s*₽',
+        ]
+        
+        amount = None
+        for pattern in amount_patterns:
+            amount_match = re.search(pattern, text)
+            if amount_match:
+                amount_str = amount_match.group(1).replace(' ', '').replace(',', '.')
+                amount = Decimal(amount_str)
+                break
+        
+        if amount is None:
+            logger.error("Не найдена сумма в квитанции Сбербанка")
+            return []
+        
+        # Извлекаем дату
+        date_pattern = r'Дата\s+(\d{2}\.\d{2}\.\d{4})'
+        date_match = re.search(date_pattern, text)
+        if date_match:
+            date_str = date_match.group(1)
+            transaction_date = datetime.strptime(date_str, '%d.%m.%Y').date()
+        else:
+            transaction_date = date.today()
+        
+        # Извлекаем плательщика
+        payer_pattern = r'Плательщик[:\s]+([А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+)'
+        payer_match = re.search(payer_pattern, text)
+        payer_name = payer_match.group(1) if payer_match else ''
+        
+        # Извлекаем назначение
+        purpose_pattern = r'Назначение\s+платежа[:\s]+(.+?)(?:\n|$)'
+        purpose_match = re.search(purpose_pattern, text, re.DOTALL)
+        payment_purpose = purpose_match.group(1).strip() if purpose_match else ''
+        
+        # Номер операции
+        operation_pattern = r'Номер\s+операции[:\s]+(\w+)'
+        operation_match = re.search(operation_pattern, text)
+        transaction_id = operation_match.group(1) if operation_match else ''
+        
+        # UID начисления
+        snt_id_pattern = r'SNT-(\d{6})'
+        snt_match = re.search(snt_id_pattern, payment_purpose)
+        matched_uid = f"SNT-{snt_match.group(1)}" if snt_match else ''
+        
+        transaction = {
+            'transaction_date': transaction_date,
+            'amount': amount,
+            'payer_name': payer_name,
+            'payment_purpose': payment_purpose,
+            'transaction_id': transaction_id,
+            'matched_uid': matched_uid,
+        }
+        
+        transactions.append(transaction)
+        return transactions
+
+    def _extract_text_from_pdf(self, file_path: str) -> str:
+        """
+        Извлечение текста из PDF с использованием нескольких методов
+        Всегда возвращает строку (пустую в случае ошибки)
+        """
+        text = ""
+
+        # Метод 1: pdfplumber
         try:
             import pdfplumber
+            logger.info("Пробуем pdfplumber...")
             with pdfplumber.open(file_path) as pdf:
-                for page in pdf.pages:
+                for page_num, page in enumerate(pdf.pages, 1):
                     page_text = page.extract_text()
                     if page_text:
                         text += page_text + "\n"
-            if text.strip():
-                logger.info('Текст извлечён через pdfplumber')
+                        logger.info(f"Страница {page_num}: извлечено {len(page_text)} символов")
+                    else:
+                        # Пробуем extract_text с другими параметрами
+                        page_text = page.extract_text(layout=True)
+                        if page_text:
+                            text += page_text + "\n"
+                            logger.info(f"Страница {page_num} (layout): {len(page_text)} символов")
+
+            if text and text.strip():
+                logger.info(f"pdfplumber извлёк {len(text)} символов")
                 return text
         except ImportError:
-            logger.info('pdfplumber не установлен')
+            logger.warning('pdfplumber не установлен')
         except Exception as e:
-            logger.warning(f'Ошибка pdfplumber: {e}')
-        
+            logger.error(f'Ошибка pdfplumber: {e}')
+
         # Метод 2: PyPDF2
         try:
             from PyPDF2 import PdfReader
+            logger.info("Пробуем PyPDF2...")
             reader = PdfReader(file_path)
-            for page in reader.pages:
+            for page_num, page in enumerate(reader.pages, 1):
                 page_text = page.extract_text()
                 if page_text:
                     text += page_text + "\n"
-            if text.strip():
-                logger.info('Текст извлечён через PyPDF2')
+                    logger.info(f"Страница {page_num}: {len(page_text)} символов")
+
+            if text and text.strip():
+                logger.info(f"PyPDF2 извлёк {len(text)} символов")
                 return text
         except ImportError:
-            logger.info('PyPDF2 не установлен')
+            logger.warning('PyPDF2 не установлен')
         except Exception as e:
-            logger.warning(f'Ошибка PyPDF2: {e}')
-        
+            logger.error(f'Ошибка PyPDF2: {e}')
+
         # Метод 3: pdfminer
         try:
             from pdfminer.high_level import extract_text
-            text = extract_text(file_path)
-            if text.strip():
-                logger.info('Текст извлечён через pdfminer')
+            logger.info("Пробуем pdfminer...")
+            extracted = extract_text(file_path)
+            if extracted and extracted.strip():
+                text = extracted
+                logger.info(f"pdfminer извлёк {len(text)} символов")
                 return text
         except ImportError:
-            logger.info('pdfminer не установлен')
+            logger.warning('pdfminer не установлен')
         except Exception as e:
-            logger.warning(f'Ошибка pdfminer: {e}')
-        
-        return text
+            logger.error(f'Ошибка pdfminer: {e}')
+
+        # Метод 4: пробуем прочитать как бинарный файл
+        try:
+            with open(file_path, 'rb') as f:
+                raw_data = f.read()
+                # Пробуем декодировать как utf-8
+                try:
+                    decoded = raw_data.decode('utf-8', errors='ignore')
+                    if decoded and decoded.strip():
+                        logger.info(f"RAW текст извлечён: {len(decoded)} символов")
+                        return decoded
+                except:
+                    pass
+        except Exception as e:
+            logger.error(f'Ошибка чтения RAW: {e}')
+
+        # Всегда возвращаем строку, даже пустую
+        logger.warning("Не удалось извлечь текст, возвращаем пустую строку")
+        return ""  # Никогда не возвращаем None
     
     def _parse_sberbank_text(self, text: str) -> List[Dict[str, Any]]:
         """
@@ -685,10 +961,34 @@ class PaymentMatcher:
         payer_account = transaction.get('payer_account', '')
         payer_inn = transaction.get('payer_inn', '')
         payment_purpose = transaction.get('payment_purpose', '').lower()
-        
+        matched_uid = transaction.get('matched_uid', '')  # Добавляем UID из квитанции
+
         candidates: List[Tuple[Any, float]] = []
-        
-        # 1. Поиск по уникальному ID начисления (из QR-кода)
+
+        # 1. Поиск по UID из квитанции (самый точный метод)
+        if matched_uid:
+            from .models import Assessment
+            try:
+                assessment = Assessment.objects.select_related('owner').get(payment_uid=matched_uid)
+                return (assessment.owner, 100.0)
+            except Assessment.DoesNotExist:
+                logger.info(f'Начисление с UID {matched_uid} не найдено')
+
+        # 2. Поиск по номеру участка из назначения
+        plot_pattern = r'уч\.?№?(\d+)'
+        plot_match = re.search(plot_pattern, payment_purpose, re.IGNORECASE)
+        if plot_match:
+            plot_number = plot_match.group(1)
+            from land.models import LandPlot
+            try:
+                plot = LandPlot.objects.select_related('owners').filter(plot_number=plot_number).first()
+                if plot and plot.owners.exists():
+                    owner = plot.owners.first()
+                    return (owner, 95.0)
+            except Exception as e:
+                logger.warning(f'Ошибка поиска по участку: {e}')
+
+        # 3. Поиск по уникальному ID начисления в тексте
         snt_id_pattern = r'SNT-(\d{6})'
         snt_match = re.search(snt_id_pattern, payment_purpose, re.IGNORECASE)
         if snt_match:
@@ -699,55 +999,33 @@ class PaymentMatcher:
                 return (assessment.owner, 100.0)
             except Assessment.DoesNotExist:
                 pass
-        
-        # 2. Поиск по ФИО в назначении платежа
+            
+        # 4. Поиск по ФИО в назначении платежа
         owners = self.Owner.objects.all()
         for owner in owners:
             confidence: float = 0.0
             owner_name_parts = owner.full_name.lower().split()
-            
+
             # Проверяем ФИО в плательщике
-            name_match = sum(1 for part in owner_name_parts if part in payer_name)
+            name_match = sum(1 for part in owner_name_parts if part and part in payer_name)
             if name_match >= 2:
                 confidence += 50
             elif name_match >= 1:
                 confidence += 20
-            
+
             # Проверяем ФИО в назначении
-            name_in_purpose = sum(1 for part in owner_name_parts if part in payment_purpose)
+            name_in_purpose = sum(1 for part in owner_name_parts if part and part in payment_purpose)
             if name_in_purpose >= 2:
                 confidence += 60
-            
-            # Проверяем номер телефона в назначении
-            contacts = self.ContactInfo.objects.filter(
-                owner=owner, type='ph', is_active=True
-            )
-            for contact in contacts:
-                clean_phone = ''.join(c for c in contact.value if c.isdigit())[-10:]
-                if clean_phone and clean_phone in payment_purpose:
-                    confidence += 90
-                    break
-            
-            # Проверяем номер участка в назначении
-            for plot in owner.land_plots.all():
-                if plot.plot_number.lower() in payment_purpose:
-                    confidence += 80
-                    break
-            
-            # Проверяем кадастровый номер
-            for plot in owner.land_plots.all():
-                if plot.cadastral_number.lower() in payment_purpose:
-                    confidence += 95
-                    break
-            
+
             if confidence > 0:
                 candidates.append((owner, confidence))
-        
+
         candidates.sort(key=lambda x: x[1], reverse=True)
-        
+
         if candidates and candidates[0][1] >= 30:
             return candidates[0]
-        
+
         return None
     
     def match_assessment(self, owner: Any, amount: Decimal, payment_purpose: str) -> Optional[Any]:
@@ -791,39 +1069,74 @@ class PaymentMatcher:
         """
         from .models import Assessment, Payment
         from decimal import Decimal
-        
+
         amount = transaction.get('amount', Decimal('0'))
         payment_purpose = transaction.get('payment_purpose', '')
         payer_name = transaction.get('payer_name', '')
-        
+
         result = {
             'matched': False,
             'payment_created': False,
             'assessment_updated': False,
             'message': ''
         }
-        
+
         # 1. Поиск владельца
         owner_match = self.match_owner(transaction)
         if not owner_match:
             result['message'] = f'Не найден владелец для {payer_name}'
             return result
-        
+
         owner, confidence = owner_match
         result['matched_owner'] = owner.full_name
         result['confidence'] = confidence
-        
+
         # 2. Поиск начисления
         assessment = self.match_assessment(owner, amount, payment_purpose)
         if not assessment:
             result['message'] = f'Не найдено подходящее начисление для {owner.full_name}'
             return result
-        
+
         result['matched_assessment_id'] = assessment.id
         result['matched_assessment_amount'] = str(assessment.amount)
         result['current_debt'] = str(assessment.debt)
+
+        # 3. Создаём уникальный transaction_id, если его нет
+        transaction_id = transaction.get('transaction_id', '')
+        if transaction_id:
+            existing_payment = Payment.objects.filter(transaction_id=transaction_id).first()
+            if existing_payment:
+                result['matched'] = True
+                result['payment_exists'] = True
+                result['payment_id'] = existing_payment.id
+                result['message'] = f'Платёж уже обработан (ID: {existing_payment.id})'
+                return result
+
+        # Также проверяем по UID и сумме
+        matched_uid = transaction.get('matched_uid', '')
+        if matched_uid:
+            amount = transaction.get('amount')
+            existing_payment = Payment.objects.filter(
+                matched_uid=matched_uid,
+                amount=amount
+            ).first()
+            if existing_payment:
+                result['matched'] = True
+                result['payment_exists'] = True
+                result['payment_id'] = existing_payment.id
+                result['message'] = f'Платёж с UID {matched_uid} уже обработан'
+                return result
         
-        # 3. Создаём платёж
+        # Проверяем, не существует ли уже платеж с таким transaction_id
+        from .models import Payment
+        existing_payment = Payment.objects.filter(transaction_id=transaction_id).first()
+        if existing_payment:
+            result['message'] = f'Платёж с таким transaction_id уже существует'
+            result['payment_exists'] = True
+            result['payment_id'] = existing_payment.id
+            return result
+
+        # Создаём платёж
         payment = Payment.objects.create(
             assessment=assessment,
             amount=amount,
@@ -831,24 +1144,24 @@ class PaymentMatcher:
             payment_method='bank',
             bank_name=transaction.get('bank_name', ''),
             bank_account=transaction.get('payer_account', ''),
-            transaction_id=transaction.get('transaction_id', ''),
+            transaction_id=transaction_id,  # Теперь всегда уникальный
             payment_purpose=payment_purpose[:500],
             status=Payment.STATUS_PROCESSED,
         )
-        
+
         result['payment_created'] = True
         result['payment_id'] = payment.id
         result['payment_amount'] = str(amount)
-        
+
         # 4. Проверяем статус начисления после оплаты
         assessment.refresh_from_db()
         result['new_debt'] = str(assessment.debt)
         result['assessment_status'] = assessment.get_status_display()
-        
+
         if assessment.status == Assessment.STATUS_PAID:
             result['message'] = f'✅ Начисление полностью оплачено!'
         else:
             result['message'] = f'💰 Внесён платёж {amount} ₽. Остаток долга: {assessment.debt} ₽'
-        
+
         result['matched'] = True
         return result

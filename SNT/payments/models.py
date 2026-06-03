@@ -209,23 +209,23 @@ class Assessment(models.Model):
         Использует максимальный существующий ID + 1.
         """
         from django.db import transaction
-        
+
         # Используем блокировку для предотвращения дубликатов при параллельных запросах
         with transaction.atomic():
             # Получаем максимальный ID
             max_id = cls.objects.aggregate(models.Max('id'))['id__max']
-            
+
             if max_id is not None:
                 next_id = max_id + 1
             else:
                 next_id = 1
-            
+
             # Проверяем, что UID не занят
             uid = f"SNT-{next_id:06d}"
             while cls.objects.filter(payment_uid=uid).exists():
                 next_id += 1
                 uid = f"SNT-{next_id:06d}"
-            
+
             return uid  
 
 
@@ -291,7 +291,13 @@ class Payment(models.Model):
     # Банковские реквизиты
     bank_name = models.CharField('Банк', max_length=100, blank=True)
     bank_account = models.CharField('Счёт плательщика', max_length=30, blank=True)
-    transaction_id = models.CharField('ID транзакции', max_length=100, blank=True, unique=True, null=True)
+    transaction_id = models.CharField(
+        'ID транзакции', 
+        max_length=100, 
+        blank=True, 
+        null=True,
+        unique=True
+    )
     payment_purpose = models.TextField('Назначение платежа', blank=True)
 
     # Идентификатор из квитанции
