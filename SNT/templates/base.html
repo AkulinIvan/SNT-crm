@@ -927,6 +927,9 @@
                     <a href="/plots/" class="nav-link {% if active_page == 'plots' %}active{% endif %}">
                         <span class="icon">🏠</span> Участки
                     </a>
+                    <a href="/voting/" class="nav-link {% if active_page == 'voting' %}active{% endif %}">
+                        <span class="icon">🗳️</span> Голосования
+                    </a>
                     {% if user.is_authenticated %}
                     <a href="/map/" class="nav-link {% if active_page == 'map' %}active{% endif %}">
                         <span class="icon">🗺️</span> Карта СНТ

@@ -1,0 +1,318 @@
+{% extends "base.html" %}
+
+{% block title %}Редактирование голосования | CRM СНТ{% endblock %}
+
+{% block breadcrumb %}
+<a href="/">Главная</a> <span>/</span> <a href="/voting/">Голосования</a> <span>/</span> <span>Редактирование</span>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2>✏️ Редактирование голосования</h2>
+    <p>Измените параметры голосования</p>
+</div>
+
+<div class="table-container">
+    <div class="table-toolbar">
+        <span style="font-weight: 600;">📝 Основная информация</span>
+    </div>
+    <div style="padding: 24px;">
+        <form id="edit-voting-form">
+            <div class="form-group">
+                <label>Название голосования *</label>
+                <input type="text" id="voting-title" required placeholder="Например: Годовое собрание членов СНТ">
+            </div>
+            <div class="form-group">
+                <label>Описание</label>
+                <textarea id="voting-description" rows="3" placeholder="Опишите цель и повестку голосования"></textarea>
+            </div>
+            <div class="form-group">
+                <label>Тип голосования *</label>
+                <select id="voting-type" required>
+                    <option value="absentee">Заочное голосование</option>
+                    <option value="in_person">Очное собрание</option>
+                    <option value="mixed">Смешанное</option>
+                </select>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                <div class="form-group">
+                    <label>Дата начала *</label>
+                    <input type="datetime-local" id="voting-start" required>
+                </div>
+                <div class="form-group">
+                    <label>Дата окончания *</label>
+                    <input type="datetime-local" id="voting-end" required>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Кворум (%) *</label>
+                <input type="number" id="voting-quorum" value="50" min="0" max="100" step="1" required>
+                <small>Минимальный процент участников для признания собрания правомочным</small>
+            </div>
+            <div class="form-group">
+                <label>Место проведения (для очного собрания)</label>
+                <input type="text" id="voting-place" placeholder="Адрес места проведения">
+            </div>
+            
+            <hr style="margin: 24px 0;">
+            
+            <h3 style="margin-bottom: 16px;">📋 Вопросы для голосования</h3>
+            <div id="questions-container"></div>
+            
+            <button type="button" class="btn btn-secondary" onclick="addQuestion()">+ Добавить вопрос</button>
+            
+            <div style="margin-top: 24px; display: flex; gap: 12px; justify-content: flex-end;">
+                <button type="button" class="btn btn-secondary" onclick="window.history.back()">Отмена</button>
+                <button type="submit" class="btn btn-primary">💾 Сохранить изменения</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<style>
+    .question-item {
+        background: var(--gray-50);
+        padding: 16px;
+        border-radius: 8px;
+        margin-bottom: 16px;
+        border: 1px solid var(--gray-200);
+    }
+    
+    .question-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 12px;
+    }
+    
+    .question-title-input, .question-desc-input, .question-options-input {
+        width: 100%;
+        padding: 8px 12px;
+        border: 1px solid var(--gray-300);
+        border-radius: 6px;
+        font-size: 0.9rem;
+    }
+    
+    .delete-question-btn {
+        background: none;
+        border: none;
+        color: var(--danger);
+        cursor: pointer;
+        font-size: 1.2rem;
+        padding: 4px 8px;
+        border-radius: 6px;
+    }
+    
+    .delete-question-btn:hover {
+        background: var(--danger-light);
+    }
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    const votingId = {{ voting_id|default:0 }};
+    let originalData = null;
+    
+    async function loadVoting() {
+        const data = await apiFetch(`/api/sessions/${votingId}/`);
+        if (!data) return;
+        
+        originalData = data;
+        
+        // Заполняем форму
+        document.getElementById('voting-title').value = data.title;
+        document.getElementById('voting-description').value = data.description || '';
+        document.getElementById('voting-type').value = data.session_type;
+        document.getElementById('voting-quorum').value = data.quorum_percent;
+        document.getElementById('voting-place').value = data.meeting_place || '';
+        
+        // Форматируем даты для input datetime-local
+        const startDate = new Date(data.start_date);
+        const endDate = new Date(data.end_date);
+        
+        const formatDateTimeLocal = (date) => {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            const hours = String(date.getHours()).padStart(2, '0');
+            const minutes = String(date.getMinutes()).padStart(2, '0');
+            return `${year}-${month}-${day}T${hours}:${minutes}`;
+        };
+        
+        document.getElementById('voting-start').value = formatDateTimeLocal(startDate);
+        document.getElementById('voting-end').value = formatDateTimeLocal(endDate);
+        
+        // Загружаем вопросы
+        const questionsContainer = document.getElementById('questions-container');
+        questionsContainer.innerHTML = '';
+        
+        if (data.questions && data.questions.length > 0) {
+            data.questions.forEach((question, index) => {
+                addQuestionWithData(question, index);
+            });
+        } else {
+            // Добавляем пустой вопрос по умолчанию
+            addQuestionWithData(null, 0);
+        }
+    }
+    
+    function addQuestionWithData(question, index) {
+        const container = document.getElementById('questions-container');
+        
+        const questionDiv = document.createElement('div');
+        questionDiv.className = 'question-item';
+        questionDiv.setAttribute('data-index', index);
+        
+        const optionsText = question ? (question.options || []).map(opt => opt.text).join('\n') : 'За\nПротив\nВоздержался';
+        
+        questionDiv.innerHTML = `
+            <div class="question-header">
+                <strong>Вопрос ${index + 1}</strong>
+                <button type="button" class="delete-question-btn" onclick="this.closest('.question-item').remove()">🗑️</button>
+            </div>
+            <div class="form-group">
+                <label>Вопрос *</label>
+                <input type="text" class="question-title-input" value="${escapeHtml(question ? question.title : '')}" placeholder="Например: Утверждение отчёта председателя" required>
+            </div>
+            <div class="form-group">
+                <label>Описание вопроса</label>
+                <textarea class="question-desc-input" rows="2" placeholder="Дополнительная информация">${escapeHtml(question ? (question.description || '') : '')}</textarea>
+            </div>
+            <div class="form-group">
+                <label>Варианты ответа (каждый с новой строки)</label>
+                <textarea class="question-options-input" rows="3" placeholder="За&#10;Против&#10;Воздержался" required>${escapeHtml(optionsText)}</textarea>
+            </div>
+        `;
+        
+        container.appendChild(questionDiv);
+    }
+    
+    function addQuestion() {
+        const container = document.getElementById('questions-container');
+        const questionCount = container.querySelectorAll('.question-item').length;
+        
+        const questionDiv = document.createElement('div');
+        questionDiv.className = 'question-item';
+        questionDiv.setAttribute('data-index', questionCount);
+        
+        questionDiv.innerHTML = `
+            <div class="question-header">
+                <strong>Вопрос ${questionCount + 1}</strong>
+                <button type="button" class="delete-question-btn" onclick="this.closest('.question-item').remove()">🗑️</button>
+            </div>
+            <div class="form-group">
+                <label>Вопрос *</label>
+                <input type="text" class="question-title-input" placeholder="Например: Утверждение бюджета" required>
+            </div>
+            <div class="form-group">
+                <label>Описание вопроса</label>
+                <textarea class="question-desc-input" rows="2" placeholder="Дополнительная информация"></textarea>
+            </div>
+            <div class="form-group">
+                <label>Варианты ответа (каждый с новой строки)</label>
+                <textarea class="question-options-input" rows="3" placeholder="За&#10;Против&#10;Воздержался" required></textarea>
+            </div>
+        `;
+        
+        container.appendChild(questionDiv);
+        
+        // Прокручиваем к новому вопросу
+        questionDiv.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    
+    async function updateVoting(event) {
+        event.preventDefault();
+        
+        const title = document.getElementById('voting-title').value.trim();
+        const description = document.getElementById('voting-description').value.trim();
+        const sessionType = document.getElementById('voting-type').value;
+        const startDate = document.getElementById('voting-start').value;
+        const endDate = document.getElementById('voting-end').value;
+        const quorumPercent = parseFloat(document.getElementById('voting-quorum').value);
+        const meetingPlace = document.getElementById('voting-place').value.trim();
+        
+        if (!title || !startDate || !endDate) {
+            showAlert('Заполните все обязательные поля', 'error');
+            return;
+        }
+        
+        if (new Date(startDate) >= new Date(endDate)) {
+            showAlert('Дата окончания должна быть позже даты начала', 'error');
+            return;
+        }
+        
+        // Сбор вопросов
+        const questions = [];
+        const questionItems = document.querySelectorAll('.question-item');
+        
+        for (let i = 0; i < questionItems.length; i++) {
+            const item = questionItems[i];
+            const qTitle = item.querySelector('.question-title-input').value.trim();
+            const qDesc = item.querySelector('.question-desc-input').value.trim();
+            const qOptions = item.querySelector('.question-options-input').value;
+            
+            if (!qTitle) {
+                showAlert(`Заполните название вопроса ${i + 1}`, 'error');
+                return;
+            }
+            
+            const options = qOptions.split('\n').filter(opt => opt.trim().length > 0);
+            if (options.length < 2) {
+                showAlert(`В вопросе ${i + 1} должно быть минимум 2 варианта ответа`, 'error');
+                return;
+            }
+            
+            questions.push({
+                title: qTitle,
+                description: qDesc,
+                question_type: 'single',
+                options: options
+            });
+        }
+        
+        if (questions.length === 0) {
+            showAlert('Добавьте хотя бы один вопрос', 'error');
+            return;
+        }
+        
+        const payload = {
+            title: title,
+            description: description,
+            session_type: sessionType,
+            start_date: startDate,
+            end_date: endDate,
+            quorum_percent: quorumPercent,
+            meeting_place: meetingPlace,
+            questions: questions
+        };
+        
+        const result = await apiFetch(`/api/sessions/${votingId}/`, {
+            method: 'PATCH',
+            body: JSON.stringify(payload)
+        });
+        
+        if (result) {
+            showAlert('Голосование обновлено', 'success');
+            setTimeout(() => {
+                window.location.href = `/voting/${votingId}/`;
+            }, 1500);
+        }
+    }
+    
+    document.getElementById('edit-voting-form').addEventListener('submit', updateVoting);
+    
+    // Установка минимальных дат
+    const now = new Date();
+    now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+    const minDateTime = now.toISOString().slice(0, 16);
+    document.getElementById('voting-start').min = minDateTime;
+    
+    document.getElementById('voting-start').addEventListener('change', function() {
+        document.getElementById('voting-end').min = this.value;
+    });
+    
+    // Загрузка данных
+    loadVoting();
+</script>
+{% endblock %}

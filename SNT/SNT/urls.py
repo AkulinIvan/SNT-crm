@@ -18,6 +18,7 @@ urlpatterns = [
     path('api/', include('organizations.urls_api')),
     path('api/', include('subscriptions.urls_api')),
     path('api/plots/import-excel/', ExcelImportView.as_view(), name='excel-import-api'),
+    path('api/', include('voting.urls_api')),
     
     # Веб-интерфейс
     path('', include('users.urls_web')),
@@ -27,4 +28,5 @@ urlpatterns = [
     path('', include('accounts.urls_web')),
     path('organizations/', include('organizations.urls_web')),
     path('', include('subscriptions.urls_web')),
+    path('', include('voting.urls_web')),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

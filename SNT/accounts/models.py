@@ -123,6 +123,8 @@ class User(AbstractUser):
             ("can_export_data", "Может экспортировать данные"),
             ("can_manage_users", "Может управлять пользователями"),
             ("can_view_audit_log", "Может просматривать логи"),
+            ("can_manage_voting", "Может управлять голосованиями"),
+            ("can_vote", "Может участвовать в голосованиях"),
         ]
 
     def __str__(self):

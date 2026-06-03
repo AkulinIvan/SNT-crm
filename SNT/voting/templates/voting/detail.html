@@ -1,0 +1,288 @@
+{% extends "base.html" %}
+
+{% block title %}Детали голосования | CRM СНТ{% endblock %}
+
+{% block breadcrumb %}
+<a href="/">Главная</a> <span>/</span> <a href="/voting/">Голосования</a> <span>/</span> <span id="voting-title">Загрузка...</span>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div>
+            <h2 id="voting-title-text">🗳️ Загрузка...</h2>
+            <p id="voting-description"></p>
+        </div>
+        <div id="voting-actions"></div>
+    </div>
+</div>
+
+<div class="stats-grid" style="margin-bottom: 24px;">
+    <div class="stat-card">
+        <div class="stat-label">Статус</div>
+        <div class="stat-value" id="voting-status">—</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Даты проведения</div>
+        <div class="stat-value" id="voting-dates" style="font-size: 1rem;">—</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Участие</div>
+        <div class="stat-value" id="voting-turnout">—</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Кворум</div>
+        <div class="stat-value" id="voting-quorum">—</div>
+    </div>
+</div>
+
+<div class="table-container">
+    <div class="table-toolbar">
+        <span style="font-weight: 600;">📋 Вопросы для голосования</span>
+    </div>
+    <div id="questions-list">
+        <div class="empty-state">
+            <div class="empty-icon">⏳</div>
+            <p>Загрузка вопросов...</p>
+        </div>
+    </div>
+</div>
+
+<div id="voting-button-container" style="text-align: center; margin-top: 24px;"></div>
+
+{% if perms.voting.can_manage_voting %}
+<div class="table-container" style="margin-top: 24px;">
+    <div class="table-toolbar">
+        <span style="font-weight: 600;">👥 Участники голосования</span>
+        <button class="btn btn-secondary btn-sm" onclick="sendInvitations()">📧 Отправить приглашения</button>
+    </div>
+    <div id="ballots-list">
+        <div class="empty-state">
+            <div class="empty-icon">📊</div>
+            <p>Загрузка списка участников...</p>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<style>
+    .question-card {
+        background: var(--white);
+        border-bottom: 1px solid var(--gray-200);
+        padding: 20px;
+    }
+    .question-card:last-child {
+        border-bottom: none;
+    }
+    .question-title {
+        font-weight: 600;
+        font-size: 1rem;
+        margin-bottom: 8px;
+    }
+    .question-description {
+        color: var(--gray-600);
+        font-size: 0.85rem;
+        margin-bottom: 16px;
+    }
+    .options-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+    }
+    .option-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 16px;
+        background: var(--gray-50);
+        border-radius: 8px;
+        border: 1px solid var(--gray-200);
+    }
+    .option-votes {
+        margin-left: auto;
+        color: var(--primary);
+        font-weight: 500;
+    }
+    .voting-status-badge {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 0.8rem;
+        font-weight: 500;
+    }
+    .status-draft { background: var(--gray-200); color: var(--gray-700); }
+    .status-active { background: #dcfce7; color: #16a34a; }
+    .status-closed { background: #fee2e2; color: #dc2626; }
+    .status-cancelled { background: #f1f5f9; color: #64748b; }
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let votingData = null;
+    const votingId = {{ voting_id|default:0 }};
+
+    async function loadVotingDetail() {
+        const data = await apiFetch(`/api/sessions/${votingId}/`);
+        if (!data) return;
+        
+        votingData = data;
+        
+        document.getElementById('voting-title').textContent = data.title;
+        document.getElementById('voting-title-text').innerHTML = `🗳️ ${escapeHtml(data.title)}`;
+        document.getElementById('voting-description').innerHTML = escapeHtml(data.description || '');
+        
+        // Статус
+        const statusMap = {
+            'draft': 'Черновик',
+            'active': 'Активно',
+            'closed': 'Завершено',
+            'cancelled': 'Отменено'
+        };
+        const statusClass = {
+            'draft': 'status-draft',
+            'active': 'status-active',
+            'closed': 'status-closed',
+            'cancelled': 'status-cancelled'
+        };
+        document.getElementById('voting-status').innerHTML = `<span class="voting-status-badge ${statusClass[data.status]}">${statusMap[data.status] || data.status}</span>`;
+        
+        // Даты
+        document.getElementById('voting-dates').innerHTML = `${formatDateTime(data.start_date)} — ${formatDateTime(data.end_date)}`;
+        
+        // Участие
+        const turnout = data.total_eligible > 0 ? Math.round(data.total_voted / data.total_eligible * 100) : 0;
+        document.getElementById('voting-turnout').innerHTML = `${data.total_voted} / ${data.total_eligible} (${turnout}%)`;
+        
+        // Кворум
+        const quorumRequired = data.total_eligible > 0 ? Math.ceil(data.total_eligible * data.quorum_percent / 100) : 0;
+        document.getElementById('voting-quorum').innerHTML = `${data.quorum_percent}% (${quorumRequired} голосов) ${data.quorum_reached ? '✅ Достигнут' : '❌ Не достигнут'}`;
+        
+        // Вопросы
+        const questionsContainer = document.getElementById('questions-list');
+        if (!data.questions || data.questions.length === 0) {
+            questionsContainer.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-icon">❓</div>
+                    <h3>Нет вопросов</h3>
+                    <p>В этом голосовании пока нет вопросов</p>
+                </div>
+            `;
+        } else {
+            questionsContainer.innerHTML = data.questions.map(question => `
+                <div class="question-card">
+                    <div class="question-title">${escapeHtml(question.title)}</div>
+                    <div class="question-description">${escapeHtml(question.description || '')}</div>
+                    <div class="options-list">
+                        ${question.options.map(option => `
+                            <div class="option-item">
+                                <span>${escapeHtml(option.text)}</span>
+                                <span class="option-votes">${option.votes_count} голосов (${option.percentage}%)</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `).join('');
+        }
+        
+        // Кнопки действий
+        const actionsContainer = document.getElementById('voting-actions');
+        const buttonContainer = document.getElementById('voting-button-container');
+        
+        if (data.status === 'active' && data.is_active) {
+            // Активное голосование - кнопка "Проголосовать"
+            buttonContainer.innerHTML = `
+                <button class="btn btn-primary btn-lg" onclick="vote()" style="padding: 12px 32px; font-size: 1rem;">
+                    🗳️ Проголосовать
+                </button>
+            `;
+        } else if (data.status === 'closed') {
+            // Завершённое - кнопка "Результаты"
+            buttonContainer.innerHTML = `
+                <button class="btn btn-secondary" onclick="viewResults()">📊 Посмотреть результаты</button>
+            `;
+        }
+        
+        if ({{ perms.voting.can_manage_voting|yesno:"true,false" }}) {
+            if (data.status === 'draft') {
+                actionsContainer.innerHTML = `
+                    <button class="btn btn-success" onclick="activateVoting()">▶️ Активировать</button>
+                    <button class="btn btn-primary" onclick="editVoting()">✏️ Редактировать</button>
+                `;
+            } else if (data.status === 'active') {
+                actionsContainer.innerHTML = `
+                    <button class="btn btn-danger" onclick="closeVoting()">🔒 Завершить голосование</button>
+                `;
+            }
+        }
+    }
+    
+    async function vote() {
+        window.location.href = `/voting/${votingId}/vote/`;
+    }
+    
+    async function viewResults() {
+        window.location.href = `/voting/${votingId}/results/`;
+    }
+    
+    async function activateVoting() {
+        openModal('Активация голосования', 
+            '<p>Вы уверены, что хотите активировать это голосование?</p><p>После активации участники смогут голосовать.</p>',
+            'Активировать',
+            async () => {
+                const result = await apiFetch(`/api/sessions/${votingId}/activate/`, { method: 'POST' });
+                if (result) {
+                    showAlert('Голосование активировано', 'success');
+                    loadVotingDetail();
+                }
+                closeModal();
+            }
+        );
+    }
+    
+    async function closeVoting() {
+        openModal('Завершение голосования', 
+            '<p>Вы уверены, что хотите завершить голосование?</p><p>После завершения голосовать будет нельзя.</p>',
+            'Завершить',
+            async () => {
+                const result = await apiFetch(`/api/sessions/${votingId}/close/`, { method: 'POST' });
+                if (result) {
+                    showAlert('Голосование завершено', 'success');
+                    loadVotingDetail();
+                }
+                closeModal();
+            }
+        );
+    }
+    
+    async function sendInvitations() {
+        openModal('Отправка приглашений', 
+            '<div class="form-group">' +
+            '<label>Тип приглашения:</label>' +
+            '<select id="invitation-type">' +
+            '<option value="email">Email</option>' +
+            '<option value="sms">SMS</option>' +
+            '</select>' +
+            '</div>',
+            'Отправить',
+            async () => {
+                const invitationType = document.getElementById('invitation-type').value;
+                const result = await apiFetch(`/api/sessions/${votingId}/send-invitations/`, {
+                    method: 'POST',
+                    body: JSON.stringify({ invitation_type: invitationType })
+                });
+                if (result) {
+                    showAlert(result.detail, 'success');
+                }
+                closeModal();
+            }
+        );
+    }
+    
+    function editVoting() {
+        window.location.href = `/voting/${votingId}/edit/`;
+    }
+    
+    document.addEventListener('DOMContentLoaded', loadVotingDetail);
+</script>
+{% endblock %}

@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+
+{% block title %}Результаты голосования | CRM СНТ{% endblock %}
+
+{% block breadcrumb %}
+<a href="/">Главная</a> <span>/</span> <a href="/voting/">Голосования</a> <span>/</span> <span>Результаты</span>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2>📊 Результаты голосования</h2>
+    <p id="voting-title">Загрузка...</p>
+</div>
+
+<div id="results-container">
+    <div class="empty-state">
+        <div class="empty-icon">⏳</div>
+        <p>Загрузка результатов...</p>
+    </div>
+</div>
+
+<style>
+    .result-card {
+        background: var(--white);
+        border-radius: 12px;
+        border: 1px solid var(--gray-200);
+        margin-bottom: 24px;
+        overflow: hidden;
+    }
+    
+    .result-header {
+        padding: 16px 20px;
+        background: var(--gray-50);
+        border-bottom: 1px solid var(--gray-200);
+    }
+    
+    .result-header h3 {
+        margin: 0;
+        font-size: 1rem;
+        font-weight: 600;
+    }
+    
+    .result-body {
+        padding: 20px;
+    }
+    
+    .option-result {
+        margin-bottom: 16px;
+    }
+    
+    .option-header {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 6px;
+        font-size: 0.85rem;
+    }
+    
+    .progress-bar {
+        height: 8px;
+        background: var(--gray-200);
+        border-radius: 4px;
+        overflow: hidden;
+    }
+    
+    .progress-fill {
+        height: 100%;
+        background: var(--primary);
+        border-radius: 4px;
+        transition: width 0.5s ease;
+    }
+    
+    .summary-stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 16px;
+        margin-bottom: 24px;
+    }
+    
+    .summary-card {
+        background: var(--white);
+        border-radius: 10px;
+        padding: 16px;
+        border: 1px solid var(--gray-200);
+        text-align: center;
+    }
+    
+    .summary-value {
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: var(--primary);
+    }
+    
+    .summary-label {
+        font-size: 0.75rem;
+        color: var(--gray-500);
+        margin-top: 4px;
+    }
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    const votingId = {{ voting_id|default:0 }};
+    
+    async function loadResults() {
+        const data = await apiFetch(`/api/sessions/${votingId}/results/`);
+        if (!data) return;
+        
+        document.getElementById('voting-title').innerHTML = escapeHtml(data.voting_session.title);
+        
+        const container = document.getElementById('results-container');
+        
+        // Сводка
+        const summaryHtml = `
+            <div class="summary-stats">
+                <div class="summary-card">
+                    <div class="summary-value">${data.voting_session.total_eligible}</div>
+                    <div class="summary-label">Имеют право голоса</div>
+                </div>
+                <div class="summary-card">
+                    <div class="summary-value">${data.voting_session.total_voted}</div>
+                    <div class="summary-label">Проголосовало</div>
+                </div>
+                <div class="summary-card">
+                    <div class="summary-value">${Math.round(data.voting_session.total_voted / data.voting_session.total_eligible * 100)}%</div>
+                    <div class="summary-label">Явка</div>
+                </div>
+                <div class="summary-card">
+                    <div class="summary-value">${data.voting_session.quorum_percent}%</div>
+                    <div class="summary-label">Кворум</div>
+                </div>
+            </div>
+        `;
+        
+        const questionsHtml = data.questions.map(question => `
+            <div class="result-card">
+                <div class="result-header">
+                    <h3>${escapeHtml(question.title)}</h3>
+                    ${question.description ? `<p style="margin-top: 8px; color: var(--gray-600); font-size: 0.85rem;">${escapeHtml(question.description)}</p>` : ''}
+                </div>
+                <div class="result-body">
+                    ${question.options.map(option => `
+                        <div class="option-result">
+                            <div class="option-header">
+                                <span>${escapeHtml(option.text)}</span>
+                                <span>${option.votes_count} голосов (${option.percentage}%)</span>
+                            </div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: ${option.percentage}%"></div>
+                            </div>
+                        </div>
+                    `).join('')}
+                    <div style="margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--gray-200); font-size: 0.8rem; color: var(--gray-500);">
+                        Всего голосов по вопросу: ${question.total_votes}
+                    </div>
+                </div>
+            </div>
+        `).join('');
+        
+        container.innerHTML = summaryHtml + questionsHtml;
+    }
+    
+    document.addEventListener('DOMContentLoaded', loadResults);
+</script>
+{% endblock %}

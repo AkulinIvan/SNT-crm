@@ -1,0 +1,245 @@
+{% extends "base.html" %}
+
+{% block title %}Голосование | CRM СНТ{% endblock %}
+
+{% block breadcrumb %}
+<a href="/">Главная</a> <span>/</span> <a href="/voting/">Голосования</a> <span>/</span> <span id="voting-title">Голосование</span>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2>🗳️ <span id="voting-title-text">Загрузка...</span></h2>
+    <p id="voting-description"></p>
+</div>
+
+<div class="table-container">
+    <div class="table-toolbar">
+        <span style="font-weight: 600;">📝 Вопросы для голосования</span>
+        <span id="vote-status"></span>
+    </div>
+    <div id="questions-form"></div>
+</div>
+
+<div style="text-align: center; margin-top: 24px;">
+    <button class="btn btn-primary" id="submit-vote-btn" onclick="submitVote()" style="padding: 12px 32px; font-size: 1rem;">
+        ✅ Отправить голос
+    </button>
+</div>
+
+<style>
+    .vote-question {
+        border-bottom: 1px solid var(--gray-200);
+        padding: 20px;
+    }
+    .vote-question:last-child {
+        border-bottom: none;
+    }
+    .vote-question-title {
+        font-weight: 600;
+        font-size: 1rem;
+        margin-bottom: 8px;
+    }
+    .vote-question-desc {
+        color: var(--gray-600);
+        font-size: 0.85rem;
+        margin-bottom: 16px;
+    }
+    .vote-options {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+    }
+    .vote-option {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 20px;
+        background: var(--gray-50);
+        border-radius: 8px;
+        cursor: pointer;
+        transition: all 0.2s;
+        border: 2px solid transparent;
+    }
+    .vote-option:hover {
+        background: var(--gray-100);
+    }
+    .vote-option.selected {
+        background: var(--primary-light);
+        border-color: var(--primary);
+    }
+    .vote-option input {
+        margin: 0;
+    }
+    .vote-rating {
+        display: flex;
+        gap: 8px;
+    }
+    .rating-star {
+        font-size: 1.5rem;
+        cursor: pointer;
+        color: var(--gray-400);
+        transition: color 0.2s;
+    }
+    .rating-star:hover,
+    .rating-star.selected {
+        color: #fbbf24;
+    }
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let votingData = null;
+    let selectedAnswers = {};
+    const votingId = {{ voting_id|default:0 }};
+
+    async function loadVoting() {
+        // Проверяем, не голосовал ли уже пользователь
+        const myBallot = await apiFetch(`/api/sessions/${votingId}/my-ballot/`);
+        if (myBallot && myBallot.has_voted) {
+            showAlert('Вы уже проголосовали в этом голосовании', 'warning');
+            setTimeout(() => {
+                window.location.href = `/voting/${votingId}/`;
+            }, 2000);
+            return;
+        }
+        
+        const data = await apiFetch(`/api/sessions/${votingId}/`);
+        if (!data) return;
+        
+        votingData = data;
+        
+        document.getElementById('voting-title').textContent = data.title;
+        document.getElementById('voting-title-text').textContent = data.title;
+        document.getElementById('voting-description').innerHTML = escapeHtml(data.description || '');
+        
+        if (data.status !== 'active' || !data.is_active) {
+            document.getElementById('vote-status').innerHTML = '<span class="badge-status badge-warning">Голосование не активно</span>';
+            document.getElementById('submit-vote-btn').disabled = true;
+            return;
+        }
+        
+        const questionsContainer = document.getElementById('questions-form');
+        
+        if (!data.questions || data.questions.length === 0) {
+            questionsContainer.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-icon">❓</div>
+                    <h3>Нет вопросов</h3>
+                    <p>В этом голосовании пока нет вопросов</p>
+                </div>
+            `;
+            return;
+        }
+        
+        questionsContainer.innerHTML = data.questions.map((question, idx) => `
+            <div class="vote-question" data-question-id="${question.id}">
+                <div class="vote-question-title">${idx + 1}. ${escapeHtml(question.title)}</div>
+                <div class="vote-question-desc">${escapeHtml(question.description || '')}</div>
+                <div class="vote-options" id="options-${question.id}">
+                    ${question.question_type === 'single' ? `
+                        ${question.options.map(option => `
+                            <label class="vote-option" data-option-id="${option.id}">
+                                <input type="radio" name="q${question.id}" value="${option.id}">
+                                <span>${escapeHtml(option.text)}</span>
+                            </label>
+                        `).join('')}
+                    ` : question.question_type === 'rating' ? `
+                        <div class="vote-rating" id="rating-${question.id}">
+                            ${[1,2,3,4,5,6,7,8,9,10].map(star => `
+                                <span class="rating-star" data-rating="${star}">⭐</span>
+                            `).join('')}
+                        </div>
+                        <input type="hidden" id="rating-value-${question.id}" value="">
+                    ` : ''}
+                </div>
+            </div>
+        `).join('');
+        
+        // Инициализация обработчиков для radio
+        data.questions.forEach(question => {
+            if (question.question_type === 'single') {
+                const radios = document.querySelectorAll(`input[name="q${question.id}"]`);
+                radios.forEach(radio => {
+                    radio.addEventListener('change', (e) => {
+                        // Убираем класс selected у всех опций
+                        document.querySelectorAll(`#options-${question.id} .vote-option`).forEach(opt => {
+                            opt.classList.remove('selected');
+                        });
+                        // Добавляем класс selected выбранной
+                        e.target.closest('.vote-option').classList.add('selected');
+                        selectedAnswers[question.id] = parseInt(e.target.value);
+                    });
+                });
+            } else if (question.question_type === 'rating') {
+                const stars = document.querySelectorAll(`#rating-${question.id} .rating-star`);
+                stars.forEach(star => {
+                    star.addEventListener('click', (e) => {
+                        const rating = parseInt(e.target.dataset.rating);
+                        stars.forEach((s, idx) => {
+                            if (idx < rating) {
+                                s.classList.add('selected');
+                            } else {
+                                s.classList.remove('selected');
+                            }
+                        });
+                        document.getElementById(`rating-value-${question.id}`).value = rating;
+                        selectedAnswers[question.id] = rating;
+                    });
+                });
+            }
+        });
+    }
+    
+    async function submitVote() {
+        // Проверяем, все ли вопросы отвечены
+        const unanswered = [];
+        for (const question of (votingData?.questions || [])) {
+            if (!selectedAnswers[question.id]) {
+                unanswered.push(question.title);
+            }
+        }
+        
+        if (unanswered.length > 0) {
+            showAlert(`Ответьте на все вопросы: ${unanswered.join(', ')}`, 'warning');
+            return;
+        }
+        
+        const votes = [];
+        for (const question of votingData.questions) {
+            const answer = selectedAnswers[question.id];
+            if (question.question_type === 'single') {
+                votes.push({
+                    question_id: question.id,
+                    option_id: answer
+                });
+            } else if (question.question_type === 'rating') {
+                votes.push({
+                    question_id: question.id,
+                    rating_value: answer
+                });
+            }
+        }
+        
+        openModal('Подтверждение голоса', 
+            '<p>Вы уверены, что хотите отправить свой голос?</p><p>После отправки изменить ответ будет нельзя.</p>',
+            'Отправить',
+            async () => {
+                const result = await apiFetch(`/api/sessions/${votingId}/vote/`, {
+                    method: 'POST',
+                    body: JSON.stringify({ votes })
+                });
+                if (result) {
+                    showAlert('Ваш голос успешно учтён', 'success');
+                    setTimeout(() => {
+                        window.location.href = `/voting/${votingId}/`;
+                    }, 2000);
+                }
+                closeModal();
+            }
+        );
+    }
+    
+    document.addEventListener('DOMContentLoaded', loadVoting);
+</script>
+{% endblock %}
