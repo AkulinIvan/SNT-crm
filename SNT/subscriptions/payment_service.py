@@ -41,21 +41,25 @@ class PaymentService:
             # Обновляем подписку
             subscription = payment.subscription
             
-            # ВАЖНО: Обновляем тариф на тот, который был в платеже
-            # Тариф уже должен быть установлен при создании платежа
-            # Но убедимся, что он правильный
-            target_tariff = subscription.tariff  # Тариф уже должен быть установлен
-            
             subscription.status = 'active'
             subscription.payment_id = payment.transaction_id
-            subscription.payment_amount = payment.amount
+            subscription.payment_amount = payment.amount  # Используем сумму из платежа
             subscription.payment_date = timezone.now()
             subscription.payment_method = payment.payment_method
             
             # Рассчитываем дату окончания
-            if target_tariff.price_period == 'month':
+            # Определяем период по сумме платежа
+            tariff = subscription.tariff
+            price = float(tariff.price)
+            paid_amount = float(payment.amount)
+            
+            # Если сумма меньше обычной цены - это годовая скидка
+            if paid_amount < price and price > 0:
+                # Годовая подписка со скидкой
+                subscription.end_date = timezone.now() + timezone.timedelta(days=365)
+            elif tariff.price_period == 'month':
                 subscription.end_date = timezone.now() + timezone.timedelta(days=30)
-            elif target_tariff.price_period == 'year':
+            elif tariff.price_period == 'year':
                 subscription.end_date = timezone.now() + timezone.timedelta(days=365)
             else:  # once
                 subscription.end_date = timezone.now() + timezone.timedelta(days=365 * 10)

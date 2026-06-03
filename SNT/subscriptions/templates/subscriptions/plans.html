@@ -60,7 +60,7 @@
 <!-- Карточки тарифов -->
 <div class="tariff-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px; margin-bottom: 48px;">
     {% for tariff in tariffs %}
-    <div class="tariff-card {% if tariff.price == 0 %}tariff-free{% elif tariff.price == 999 %}tariff-popular{% endif %}" style="
+    <div class="tariff-card" style="
         background: white;
         border-radius: 20px;
         padding: 32px 24px;
@@ -69,7 +69,7 @@
         display: flex;
         flex-direction: column;
         transition: transform 0.2s, box-shadow 0.2s;
-        {% if tariff.price == 2490 %}box-shadow: 0 8px 30px rgba(var(--primary-rgb), 0.15);{% endif %}
+        {% if tariff.price == 2490 %}box-shadow: 0 8px 30px rgba(44,122,71,0.15);{% endif %}
     ">
         <!-- Метка "Популярный" -->
         {% if tariff.price == 2490 %}
@@ -95,37 +95,41 @@
         </p>
 
         <!-- Цена -->
-        <div style="text-align: center; margin-bottom: 24px;">
-            <div class="price-monthly" style="font-size: 3rem; font-weight: 800; color: var(--gray-900); line-height: 1;">
-                {% if tariff.price == 0 %}0
-                {% elif tariff.price == 999 %}{{ tariff.price }}
-                {% elif tariff.price == 2490 %}{{ tariff.price }}
-                {% else %}{{ tariff.price }}{% endif %}
-                <span style="font-size: 1rem; font-weight: 500; color: var(--gray-500);">₽</span>
-            </div>
-            <div class="price-yearly" style="display: none; font-size: 3rem; font-weight: 800; color: var(--gray-900); line-height: 1;">
-                {% if tariff.price == 0 %}0
-                {% elif tariff.price == 999 %}833
-                {% elif tariff.price == 2490 %}2075
-                {% else %}{{ tariff.price|floatformat:0 }}{% endif %}
-                <span style="font-size: 1rem; font-weight: 500; color: var(--gray-500);">₽</span>
-            </div>
-            <div class="price-period-monthly" style="font-size: 0.85rem; color: var(--gray-500);">
-                / месяц
-            </div>
-            <div class="price-period-yearly" style="display: none; font-size: 0.85rem; color: var(--gray-500);">
-                / месяц при оплате за год
-            </div>
-            {% if tariff.price > 0 %}
-            <div class="price-yearly-save" style="display: none; margin-top: 6px; font-size: 0.8rem; color: #2e7d32; font-weight: 600;">
-                Экономия 
-                {% if tariff.price == 999 %}1 998
-                {% elif tariff.price == 2490 %}4 980
-                {% else %}9 980{% endif %} 
-                ₽ в год
-            </div>
-            {% endif %}
+<div style="text-align: center; margin-bottom: 24px;">
+    <!-- Помесячная цена -->
+    <div class="price-monthly" style="display: block;">
+        <span style="font-size: 3rem; font-weight: 800; color: var(--gray-900); line-height: 1;">
+            {% if tariff.price == 0 %}0
+            {% elif tariff.name == "Премиум" %}{{ tariff.price|floatformat:0 }}
+            {% else %}{{ tariff.price|floatformat:0 }}{% endif %}
+            <span style="font-size: 1rem; font-weight: 500; color: var(--gray-500);">₽</span>
+        </span>
+        <div style="font-size: 0.85rem; color: var(--gray-500);">/ месяц</div>
+    </div>
+    
+    <!-- Годовая цена со скидкой -->
+    <div class="price-yearly" style="display: none;">
+        <span style="font-size: 3rem; font-weight: 800; color: var(--gray-900); line-height: 1;">
+            {% if tariff.price == 0 %}0
+            {% elif tariff.name == "Базовый" %}833
+            {% elif tariff.name == "Стандарт" %}2075
+            {% elif tariff.name == "Премиум" %}4150
+            {% else %}{{ tariff.price|floatformat:0 }}{% endif %}
+            <span style="font-size: 1rem; font-weight: 500; color: var(--gray-500);">₽</span>
+        </span>
+        <div style="font-size: 0.85rem; color: var(--gray-500);">/ месяц при оплате за год</div>
+        {% if tariff.price > 0 %}
+        <div style="margin-top: 6px; font-size: 0.8rem; color: #2e7d32; font-weight: 600;">
+            Экономия 
+            {% if tariff.name == "Базовый" %}1 992
+            {% elif tariff.name == "Стандарт" %}4 980
+            {% elif tariff.name == "Премиум" %}10 200
+            {% else %}~17{% endif %} 
+            ₽ в год
         </div>
+        {% endif %}
+    </div>
+</div>
 
         <!-- Список возможностей -->
         <ul style="list-style: none; padding: 0; margin: 0 0 28px 0; flex: 1;">
@@ -173,8 +177,8 @@
                 Выбрать тариф
             </button>
         {% endif %}
-            </div>
-            {% endfor %}
+    </div>
+    {% endfor %}
 </div>
 
 <!-- Блок FAQ / гарантии -->
@@ -197,20 +201,16 @@
         
         // Переключаем кнопки
         if (period === 'monthly') {
-            btnMonthly.classList.add('active');
             btnMonthly.style.background = 'white';
             btnMonthly.style.boxShadow = '0 1px 3px rgba(0,0,0,0.08)';
             btnMonthly.style.color = 'var(--gray-900)';
-            btnYearly.classList.remove('active');
             btnYearly.style.background = 'transparent';
             btnYearly.style.boxShadow = 'none';
             btnYearly.style.color = 'var(--gray-500)';
         } else {
-            btnYearly.classList.add('active');
             btnYearly.style.background = 'white';
             btnYearly.style.boxShadow = '0 1px 3px rgba(0,0,0,0.08)';
             btnYearly.style.color = 'var(--gray-900)';
-            btnMonthly.classList.remove('active');
             btnMonthly.style.background = 'transparent';
             btnMonthly.style.boxShadow = 'none';
             btnMonthly.style.color = 'var(--gray-500)';
@@ -223,40 +223,46 @@
         document.querySelectorAll('.price-yearly').forEach(el => {
             el.style.display = period === 'yearly' ? 'block' : 'none';
         });
-        document.querySelectorAll('.price-period-monthly').forEach(el => {
-            el.style.display = period === 'monthly' ? 'block' : 'none';
-        });
-        document.querySelectorAll('.price-period-yearly').forEach(el => {
-            el.style.display = period === 'yearly' ? 'block' : 'none';
-        });
-        document.querySelectorAll('.price-yearly-save').forEach(el => {
-            el.style.display = period === 'yearly' ? 'block' : 'none';
-        });
     }
 
     async function selectTariff(tariffId) {
+        console.log('=== selectTariff called ===');
+        console.log('Tariff ID:', tariffId);
+        console.log('Current period:', currentPeriod);
+        
         showAlert('Обработка запроса...', 'info');
         
         try {
+            const requestBody = { 
+                tariff_id: tariffId,
+                period: currentPeriod 
+            };
+            
+            console.log('Request body:', requestBody);
+
+            // Используем apiFetch без лишних заголовков (они уже в base.html)
             const result = await apiFetch('/api/subscription/upgrade/', {
                 method: 'POST',
-                body: JSON.stringify({ 
-                    tariff_id: tariffId,
-                    period: currentPeriod 
-                })
+                body: JSON.stringify(requestBody)
             });
+
+            console.log('Response:', result);
 
             if (result && result.success) {
                 if (result.payment_url) {
+                    console.log('Redirecting to payment:', result.payment_url);
                     window.location.href = result.payment_url;
                 } else {
                     showAlert(result.message || 'Тариф успешно обновлён', 'success');
                     setTimeout(() => window.location.reload(), 1500);
                 }
             } else {
-                showAlert(result?.detail || 'Ошибка при выборе тарифа', 'error');
+                const errorMsg = result?.detail || result?.message || 'Ошибка при выборе тарифа';
+                console.error('Error:', errorMsg);
+                showAlert(errorMsg, 'error');
             }
         } catch (error) {
+            console.error('Exception:', error);
             showAlert('Ошибка: ' + error.message, 'error');
         }
     }
@@ -264,6 +270,7 @@
     async function updateSubscriptionStatus() {
         try {
             const subscription = await apiFetch('/api/subscription/current/');
+            console.log('Current subscription:', subscription);
             if (subscription && subscription.tariff_name) {
                 const currentTariffElement = document.getElementById('current-tariff-name');
                 if (currentTariffElement) {
@@ -287,11 +294,6 @@
     .tariff-card:hover {
         transform: translateY(-4px);
         box-shadow: 0 12px 40px rgba(0, 0, 0, 0.1);
-    }
-    .period-btn.active {
-        background: white !important;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.08) !important;
-        color: var(--gray-900) !important;
     }
 </style>
 {% endblock %}
