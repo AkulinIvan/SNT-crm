@@ -1379,24 +1379,58 @@ class BankStatementViewSet(viewsets.ModelViewSet):
         file = request.FILES.get('file')
         if not file:
             return Response({'detail': 'Загрузите файл'}, status=status.HTTP_400_BAD_REQUEST)
-
+    
         logger.info(f'Получен файл: {file.name}, размер: {file.size} байт')
-
-        # Сохраняем файл
+    
+        # Определяем банк по содержимому файла или имени
         bank_name = request.data.get('bank_name', '')
+        
+        # Если банк не указан, пытаемся определить автоматически
+        if not bank_name:
+            if 'alfa' in file.name.lower() or 'альфа' in file.name.lower():
+                bank_name = 'Альфа-Банк'
+            elif 'sber' in file.name.lower() or 'сбер' in file.name.lower():
+                bank_name = 'Сбербанк'
+            elif 'tinkoff' in file.name.lower() or 'тинькофф' in file.name.lower():
+                bank_name = 'Тинькофф'
+            else:
+                # Пробуем прочитать первый килобайт файла для определения
+                try:
+                    file.seek(0)
+                    content = file.read(1024).decode('utf-8', errors='ignore')
+                    file.seek(0)  # Сбрасываем позицию
+                    
+                    if 'АЛЬФА-БАНК' in content or 'Альфа-Банк' in content:
+                        bank_name = 'Альфа-Банк'
+                    elif 'Сбербанк' in content or 'СБЕРБАНК' in content:
+                        bank_name = 'Сбербанк'
+                    elif 'Тинькофф' in content or 'TINKOFF' in content:
+                        bank_name = 'Тинькофф'
+                    else:
+                        bank_name = 'Неизвестный банк'
+                except:
+                    bank_name = 'Неизвестный банк'
+    
+        # Сохраняем файл
         statement = BankStatement.objects.create(
-            bank_name=bank_name or 'Неизвестный банк',
+            bank_name=bank_name,
             account_number=request.data.get('account_number', ''),
             statement_date=date.today(),
             file_original=file,
             status=BankStatement.STATUS_IMPORTED,
         )
-
+        
+        logger.info(f'Создана выписка #{statement.id}, банк: {bank_name}')
+    
         # Парсим файл
-        parser = BankStatementParser(bank_name if bank_name else None)
-
+        parser = BankStatementParser(bank_name if bank_name != 'Неизвестный банк' else None)
+    
         try:
-            transactions_data = parser.parse_file(statement.file_original.path)
+            # Важно: передаём правильный путь к файлу
+            file_path = statement.file_original.path
+            logger.info(f'Путь к файлу: {file_path}')
+            
+            transactions_data = parser.parse_file(file_path)
             logger.info(f'Распарсено транзакций: {len(transactions_data)}')
         except Exception as e:
             logger.error(f'Ошибка парсинга: {e}', exc_info=True)
@@ -1408,7 +1442,7 @@ class BankStatementViewSet(viewsets.ModelViewSet):
                 'statement_id': statement.id,
                 'matched': 0,
             }, status=status.HTTP_400_BAD_REQUEST)
-
+    
         if not transactions_data:
             statement.status = BankStatement.STATUS_ERROR
             statement.notes = 'Не удалось извлечь транзакции из файла'
@@ -1418,17 +1452,17 @@ class BankStatementViewSet(viewsets.ModelViewSet):
                 'statement_id': statement.id,
                 'matched': 0,
             }, status=status.HTTP_400_BAD_REQUEST)
-
+    
         # Создаём транзакции и обрабатываем платежи
         matcher = PaymentMatcher()
         matched_count = 0
         payment_results = []
-
+    
         with db_transaction.atomic():
             for trans_data in transactions_data:
                 # Добавляем информацию о банке
                 trans_data['bank_name'] = statement.bank_name
-
+    
                 # Создаём банковскую транзакцию
                 bank_trans = BankTransaction.objects.create(
                     statement=statement,
@@ -1439,38 +1473,38 @@ class BankStatementViewSet(viewsets.ModelViewSet):
                     payer_inn=trans_data.get('payer_inn', ''),
                     payment_purpose=trans_data.get('payment_purpose', ''),
                 )
-
+    
                 # Обрабатываем платеж с автоматическим обновлением статуса
                 result = matcher.process_and_update_payments(trans_data)
-
-                if result['matched']:
+    
+                if result and result.get('matched'):
                     bank_trans.matched_owner_id = result.get('matched_owner_id')
                     bank_trans.is_matched = True
                     bank_trans.match_confidence = result.get('confidence', 0)
-
+    
                     if result.get('payment_created'):
                         from .models import Payment
                         payment = Payment.objects.get(id=result['payment_id'])
                         bank_trans.matched_payment = payment
                         bank_trans.matched_uid = payment.assessment.payment_uid
                         matched_count += 1
-
+    
                         payment_results.append({
                             'transaction_id': bank_trans.id,
                             'payer_name': trans_data.get('payer_name', ''),
                             'amount': str(trans_data['amount']),
-                            'assessment_id': result['matched_assessment_id'],
-                            'new_status': result['assessment_status'],
-                            'debt_remaining': result['new_debt'],
+                            'assessment_id': result.get('matched_assessment_id'),
+                            'new_status': result.get('assessment_status'),
+                            'debt_remaining': result.get('new_debt'),
                         })
-
+    
                     bank_trans.save()
-
+    
         statement.total_transactions = len(transactions_data)
         statement.matched_transactions = matched_count
         statement.status = BankStatement.STATUS_PROCESSED
         statement.save()
-
+    
         return Response({
             'detail': f'Импортировано {len(transactions_data)} транзакций',
             'statement_id': statement.id,

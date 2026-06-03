@@ -32,7 +32,17 @@
             <input type="file" id="file-input" accept=".csv,.xlsx,.xls,.txt,.pdf" style="display: none;" onchange="handleFileSelect(event)">
             <button class="btn btn-primary" style="margin-top: 16px;" onclick="document.getElementById('file-input').click()">Выбрать файл</button>
         </div>
-        
+        <div style="margin-top: 16px; padding: 16px; background: var(--gray-50); border-radius: var(--radius);">
+            <label style="display: block; margin-bottom: 8px; font-weight: 600;">🏦 Выберите банк:</label>
+            <select id="bank-select" style="padding: 8px; border-radius: 6px; border: 1px solid var(--gray-300); width: 100%; max-width: 300px;">
+                <option value="">Автоопределение</option>
+                <option value="Альфа-Банк">Альфа-Банк</option>
+                <option value="Сбербанк">Сбербанк</option>
+                <option value="Тинькофф">Тинькофф</option>
+                <option value="ВТБ">ВТБ</option>
+                <option value="Газпромбанк">Газпромбанк</option>
+            </select>
+        </div>
         <div id="file-info" style="display: none; margin-top: 16px; padding: 12px; background: var(--primary-light); border-radius: var(--radius-sm);">
             <strong>Выбран файл:</strong> <span id="file-name"></span>
             <button class="btn btn-primary" style="margin-left: 12px;" onclick="uploadFile()">🚀 Загрузить и обработать</button>
@@ -154,6 +164,13 @@
         const formData = new FormData();
         formData.append('file', selectedFile);
 
+        // Добавляем выбранный банк
+        const bankSelect = document.getElementById('bank-select');
+        if (bankSelect && bankSelect.value) {
+            formData.append('bank_name', bankSelect.value);
+            console.log('Выбран банк:', bankSelect.value);
+        }
+
         const csrftoken = getCSRFToken();
 
         try {
@@ -269,11 +286,15 @@
             tbody.innerHTML = data.results.map(s => `
                 <tr>
                     <td>${formatDate(s.statement_date)}</td>
-                    <td>${escapeHtml(s.bank_name)}</td>
+                    <td>
+                        <span style="display: flex; align-items: center; gap: 4px;">
+                            🏦 ${escapeHtml(s.bank_name || 'Неизвестный банк')}
+                        </span>
+                    </td>
                     <td><a href="${s.file_original}" style="color: var(--primary);">📎 ${s.file_original.split('/').pop()}</a></td>
                     <td>${s.total_transactions}</td>
-                    <td><strong>${s.matched_transactions}</strong></td>
-                    <td><span class="badge-status badge-active">${s.matched_transactions || 0}</span></td>
+                    <td><strong class="text-success">${s.matched_transactions || 0}</strong></td>
+                    <td><span class="badge-status badge-active">✅ ${s.matched_transactions || 0} оплачено</span></td>
                     <td>${getImportStatusBadge(s.status)}</td>
                     <td>
                         <button class="btn-icon" onclick="viewStatementDetails(${s.id})" title="Детали">👁️</button>
