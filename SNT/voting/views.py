@@ -21,7 +21,8 @@ from .serializers import (
     VotingInvitationSerializer
 )
 from .permissions import CanManageVoting, CanVote
-
+import logging
+logger = logging.getLogger(__name__)
 
 class VotingSessionViewSet(OrganizationMixin, viewsets.ModelViewSet):
     """
@@ -50,23 +51,47 @@ class VotingSessionViewSet(OrganizationMixin, viewsets.ModelViewSet):
         return VotingSessionDetailSerializer
     
     def get_queryset(self):
-        queryset = VotingSession.objects.select_related(
-            'organization', 'created_by'
-        ).prefetch_related(
-            'questions__options'
-        )
-        
-        # Фильтрация по организации
-        if self.request.current_organization:
-            queryset = queryset.filter(organization=self.request.current_organization)
-        
-        # Фильтрация по статусу для обычных пользователей
-        user = self.request.user
-        if not (user.is_superuser or user.is_admin or user.has_perm('voting.can_manage_voting')):
-            # Обычные пользователи видят только активные и завершённые
-            queryset = queryset.filter(status__in=['active', 'closed'])
-        
-        return queryset
+        try:
+            logger.info("=== VotingSessionViewSet.get_queryset START ===")
+            logger.info(f"User: {self.request.user} (ID: {self.request.user.id if self.request.user.is_authenticated else 'Anonymous'})")
+            logger.info(f"Has current_organization: {hasattr(self.request, 'current_organization')}")
+            
+            if hasattr(self.request, 'current_organization'):
+                logger.info(f"Current organization: {self.request.current_organization}")
+                if self.request.current_organization:
+                    logger.info(f"Org ID: {self.request.current_organization.id}")
+            
+            # Базовый запрос
+            queryset = VotingSession.objects.select_related(
+                'organization', 'created_by'
+            ).prefetch_related(
+                'questions__options'
+            )
+            
+            logger.info(f"Base queryset count: {queryset.count()}")
+            
+            # Фильтрация по организации
+            if hasattr(self.request, 'current_organization') and self.request.current_organization:
+                queryset = queryset.filter(organization=self.request.current_organization)
+                logger.info(f"After org filter: {queryset.count()}")
+            
+            # Фильтрация по статусу для обычных пользователей
+            user = self.request.user
+            if user.is_authenticated:
+                is_admin = user.is_superuser or user.is_admin or user.has_perm('voting.can_manage_voting')
+                logger.info(f"Is admin/manager: {is_admin}")
+                
+                if not is_admin:
+                    queryset = queryset.filter(status__in=['active', 'closed'])
+                    logger.info(f"After status filter for regular user: {queryset.count()}")
+            
+            logger.info(f"Final queryset count: {queryset.count()}")
+            return queryset
+            
+        except Exception as e:
+            logger.error(f"ERROR in get_queryset: {str(e)}", exc_info=True)
+            # Возвращаем пустой queryset вместо 500 ошибки
+            return VotingSession.objects.none()
     
     def perform_create(self, serializer):
         voting_session = serializer.save(created_by=self.request.user)
