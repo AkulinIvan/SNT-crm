@@ -1,5 +1,5 @@
 from django.contrib import admin
-from django.utils.html import format_html
+from django.utils.safestring import mark_safe
 from .models import VotingSession, Question, AnswerOption, Ballot, Vote, VotingInvitation
 
 
@@ -40,9 +40,11 @@ class VotingSessionAdmin(admin.ModelAdmin):
     inlines = [QuestionInline]
     
     def quorum_reached_display(self, obj):
+        """Отображение достижения кворума"""
         if obj.quorum_reached:
-            return format_html('<span style="color: green;">✓ Достигнут</span>')
-        return format_html('<span style="color: red;">✗ Не достигнут</span>')
+            return mark_safe('<span style="color: green;">✓ Достигнут</span>')
+        return mark_safe('<span style="color: red;">✗ Не достигнут</span>')
+    
     quorum_reached_display.short_description = 'Кворум'
     
     actions = ['activate_votings', 'close_votings']
