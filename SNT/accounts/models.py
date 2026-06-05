@@ -56,7 +56,7 @@ class User(AbstractUser):
             )
         ]
     )
-    email = models.EmailField(unique=True, null=True, blank=True)
+    email = models.EmailField(unique=True, null=True, blank=True, default=None)
     position = models.CharField(
         'Должность',
         max_length=100,

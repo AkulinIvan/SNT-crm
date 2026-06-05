@@ -89,6 +89,7 @@ MIDDLEWARE = [
     'accounts.middleware.OrganizationMiddleware',
     'common.middleware.RequestMiddleware',
     'common.middleware.TariffLimitMiddleware',
+    'users.signals.RequestSignalMiddleware',
 ]
 
 ROOT_URLCONF = 'SNT.urls'
@@ -116,12 +117,6 @@ WSGI_APPLICATION = 'SNT.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/4.2/ref/settings/#databases
 
-# DATABASES = {
-#     'default': {
-#         'ENGINE': 'django.db.backends.sqlite3',
-#         'NAME': BASE_DIR / 'db.sqlite3',
-#     }
-# }
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
@@ -159,9 +154,9 @@ AUTH_PASSWORD_VALIDATORS = [
 # Internationalization
 # https://docs.djangoproject.com/en/4.2/topics/i18n/
 
-LANGUAGE_CODE = 'en-us'
+LANGUAGE_CODE = 'ru-ru'
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'Europe/Moscow'
 
 USE_I18N = True
 
@@ -171,15 +166,13 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/4.2/howto/static-files/
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-
-# STATIC SETTINGS
 STATIC_URL = '/static/'
-STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')  # Папка для собранных файлов
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+STATICFILES_DIRS = [
+    os.path.join(BASE_DIR, 'static'),
+]
 
 # Default primary key field type
-# https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field
-
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 
@@ -214,43 +207,488 @@ CSRF_TRUSTED_ORIGINS = [
     'http://127.0.0.1:8000',
 ]
 
-# Для отладки (только в разработке!)
 CSRF_FAILURE_VIEW = 'django.views.csrf.csrf_failure'
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
+# Создаем директорию для логов
+LOGS_DIR = os.path.join(BASE_DIR, 'logs')
+os.makedirs(LOGS_DIR, exist_ok=True)
 
+# Настройка ротации логов
+# Максимальный размер файла лога (в байтах) - 50 МБ
+LOG_MAX_BYTES = 50 * 1024 * 1024
+# Количество сохраняемых файлов лога
+LOG_BACKUP_COUNT = 10
+# Количество сохраняемых файлов для ошибок (больше, т.к. важнее)
+ERROR_BACKUP_COUNT = 20
+
+# Настройка логирования с ротацией
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
     'formatters': {
         'verbose': {
-            'format': '{levelname} {asctime} {module} {message}',
+            'format': '{levelname} {asctime} {module} {process:d} {thread:d} {message}',
             'style': '{',
+            'datefmt': '%Y-%m-%d %H:%M:%S',
+        },
+        'detailed': {
+            'format': '[{asctime}] {levelname} [{name}:{lineno}] {message}',
+            'style': '{',
+            'datefmt': '%Y-%m-%d %H:%M:%S',
+        },
+        'simple': {
+            'format': '{levelname} [{name}] {message}',
+            'style': '{',
+        },
+        'payment_detailed': {
+            'format': '[{asctime}] {levelname} [{name}:{lineno}] {funcName} - {message}',
+            'style': '{',
+            'datefmt': '%Y-%m-%d %H:%M:%S',
+        },
+        # Исправленный JSON форматтер - используем обычный string format
+        'json': {
+            'format': '%(asctime)s - %(levelname)s - %(name)s - %(message)s',
+            'datefmt': '%Y-%m-%d %H:%M:%S',
+        },
+    },
+    'filters': {
+        'require_debug_false': {
+            '()': 'django.utils.log.RequireDebugFalse',
+        },
+        'require_debug_true': {
+            '()': 'django.utils.log.RequireDebugTrue',
         },
     },
     'handlers': {
+        # Консольный вывод
         'console': {
+            'level': 'INFO',
             'class': 'logging.StreamHandler',
+            'formatter': 'simple',
+            'filters': ['require_debug_true'],
+        },
+        'console_payments': {
+            'level': 'INFO',
+            'class': 'logging.StreamHandler',
+            'formatter': 'payment_detailed',
+            'filters': ['require_debug_true'],
+        },
+        
+        # Основные файловые логгеры с ротацией
+        'file_accounts': {
+            'level': 'DEBUG',
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': os.path.join(LOGS_DIR, 'accounts.log'),
+            'maxBytes': LOG_MAX_BYTES,
+            'backupCount': LOG_BACKUP_COUNT,
+            'formatter': 'detailed',
+            'encoding': 'utf-8',
+        },
+        'file_errors': {
+            'level': 'ERROR',
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': os.path.join(LOGS_DIR, 'errors.log'),
+            'maxBytes': LOG_MAX_BYTES,
+            'backupCount': ERROR_BACKUP_COUNT,
             'formatter': 'verbose',
+            'encoding': 'utf-8',
+        },
+        'file_security': {
+            'level': 'INFO',
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': os.path.join(LOGS_DIR, 'security.log'),
+            'maxBytes': LOG_MAX_BYTES,
+            'backupCount': LOG_BACKUP_COUNT,
+            'formatter': 'detailed',
+            'encoding': 'utf-8',
+        },
+        'file_debug': {
+            'level': 'DEBUG',
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': os.path.join(LOGS_DIR, 'debug.log'),
+            'maxBytes': LOG_MAX_BYTES,
+            'backupCount': LOG_BACKUP_COUNT,
+            'formatter': 'detailed',
+            'encoding': 'utf-8',
+        },
+        'file_django': {
+            'level': 'INFO',
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': os.path.join(LOGS_DIR, 'django.log'),
+            'maxBytes': LOG_MAX_BYTES,
+            'backupCount': LOG_BACKUP_COUNT,
+            'formatter': 'verbose',
+            'encoding': 'utf-8',
+        },
+        
+        # Payments модуль
+        'file_payments': {
+            'level': 'DEBUG',
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': os.path.join(LOGS_DIR, 'payments.log'),
+            'maxBytes': LOG_MAX_BYTES,
+            'backupCount': LOG_BACKUP_COUNT,
+            'formatter': 'payment_detailed',
+            'encoding': 'utf-8',
+        },
+        'file_payments_errors': {
+            'level': 'ERROR',
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': os.path.join(LOGS_DIR, 'payments_errors.log'),
+            'maxBytes': LOG_MAX_BYTES,
+            'backupCount': ERROR_BACKUP_COUNT,
+            'formatter': 'payment_detailed',
+            'encoding': 'utf-8',
+        },
+        'file_bank_parser': {
+            'level': 'DEBUG',
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': os.path.join(LOGS_DIR, 'bank_parser.log'),
+            'maxBytes': LOG_MAX_BYTES,
+            'backupCount': LOG_BACKUP_COUNT,
+            'formatter': 'payment_detailed',
+            'encoding': 'utf-8',
+        },
+        'file_email_service': {
+            'level': 'DEBUG',
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': os.path.join(LOGS_DIR, 'email_service.log'),
+            'maxBytes': LOG_MAX_BYTES,
+            'backupCount': LOG_BACKUP_COUNT,
+            'formatter': 'payment_detailed',
+            'encoding': 'utf-8',
+        },
+        'file_qr_generator': {
+            'level': 'DEBUG',
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': os.path.join(LOGS_DIR, 'qr_generator.log'),
+            'maxBytes': LOG_MAX_BYTES,
+            'backupCount': LOG_BACKUP_COUNT,
+            'formatter': 'payment_detailed',
+            'encoding': 'utf-8',
+        },
+        
+        # Land модуль
+        'file_land': {
+            'level': 'DEBUG',
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': os.path.join(LOGS_DIR, 'land.log'),
+            'maxBytes': LOG_MAX_BYTES,
+            'backupCount': LOG_BACKUP_COUNT,
+            'formatter': 'detailed',
+            'encoding': 'utf-8',
+        },
+        'file_land_errors': {
+            'level': 'ERROR',
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': os.path.join(LOGS_DIR, 'land_errors.log'),
+            'maxBytes': LOG_MAX_BYTES,
+            'backupCount': LOG_BACKUP_COUNT,
+            'formatter': 'detailed',
+            'encoding': 'utf-8',
+        },
+        
+        # Organizations модуль
+        'file_organizations': {
+            'level': 'DEBUG',
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': os.path.join(LOGS_DIR, 'organizations.log'),
+            'maxBytes': LOG_MAX_BYTES,
+            'backupCount': LOG_BACKUP_COUNT,
+            'formatter': 'detailed',
+            'encoding': 'utf-8',
+        },
+        
+        # Subscriptions модуль
+        'file_subscriptions': {
+            'level': 'DEBUG',
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': os.path.join(LOGS_DIR, 'subscriptions.log'),
+            'maxBytes': LOG_MAX_BYTES,
+            'backupCount': LOG_BACKUP_COUNT,
+            'formatter': 'detailed',
+            'encoding': 'utf-8',
+        },
+        
+        # Users модуль
+        'file_users': {
+            'level': 'DEBUG',
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': os.path.join(LOGS_DIR, 'users.log'),
+            'maxBytes': LOG_MAX_BYTES,
+            'backupCount': LOG_BACKUP_COUNT,
+            'formatter': 'detailed',
+            'encoding': 'utf-8',
+        },
+        
+        # Voting модуль
+        'file_voting': {
+            'level': 'DEBUG',
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': os.path.join(LOGS_DIR, 'voting.log'),
+            'maxBytes': LOG_MAX_BYTES,
+            'backupCount': LOG_BACKUP_COUNT,
+            'formatter': 'detailed',
+            'encoding': 'utf-8',
+        },
+        
+        # API логи (отключен JSON формат до исправления)
+        'file_api': {
+            'level': 'INFO',
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': os.path.join(LOGS_DIR, 'api.log'),
+            'maxBytes': LOG_MAX_BYTES,
+            'backupCount': LOG_BACKUP_COUNT,
+            'formatter': 'detailed',
+            'encoding': 'utf-8',
+        },
+        
+        # Производительность
+        'file_performance': {
+            'level': 'INFO',
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': os.path.join(LOGS_DIR, 'performance.log'),
+            'maxBytes': LOG_MAX_BYTES,
+            'backupCount': LOG_BACKUP_COUNT,
+            'formatter': 'detailed',
+            'encoding': 'utf-8',
         },
     },
     'loggers': {
-        'accounts.middleware': {
-            'handlers': ['console'],
+        # Корневой логгер
+        '': {
+            'handlers': ['console', 'file_errors'],
+            'level': 'INFO',
+        },
+        
+        # Django логгеры
+        'django': {
+            'handlers': ['console', 'file_django', 'file_errors'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'django.request': {
+            'handlers': ['file_errors', 'file_api', 'console'],
+            'level': 'ERROR',
+            'propagate': False,
+        },
+        'django.server': {
+            'handlers': ['console', 'file_django'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'django.db.backends': {
+            'handlers': ['console', 'file_errors', 'file_performance'],
+            'level': 'WARNING',
+            'propagate': False,
+        },
+        'django.security': {
+            'handlers': ['file_security', 'console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        
+        # Accounts модуль
+        'accounts': {
+            'handlers': ['file_accounts', 'console'],
             'level': 'DEBUG',
-            'propagate': True,
+            'propagate': False,
+        },
+        'accounts.views': {
+            'handlers': ['file_accounts', 'console'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'accounts.signals': {
+            'handlers': ['file_accounts', 'console'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'accounts.middleware': {
+            'handlers': ['file_accounts', 'console', 'file_performance'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'accounts.serializers': {
+            'handlers': ['file_accounts', 'console'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        
+        # Payments модуль
+        'payments': {
+            'handlers': ['file_payments', 'console_payments', 'file_payments_errors'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'payments.views': {
+            'handlers': ['file_payments', 'console_payments', 'file_payments_errors'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'payments.models': {
+            'handlers': ['file_payments', 'file_payments_errors'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'payments.serializers': {
+            'handlers': ['file_payments'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'payments.signals': {
+            'handlers': ['file_payments'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'payments.bank_parser': {
+            'handlers': ['file_bank_parser', 'console_payments', 'file_payments_errors'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'payments.email_service': {
+            'handlers': ['file_email_service', 'console_payments', 'file_payments_errors'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'payments.qr_generator': {
+            'handlers': ['file_qr_generator', 'console_payments'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        
+        # Land модуль
+        'land': {
+            'handlers': ['file_land', 'console', 'file_land_errors'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'land.views': {
+            'handlers': ['file_land', 'console', 'file_land_errors'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'land.services': {
+            'handlers': ['file_land', 'console', 'file_land_errors'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        
+        # Organizations модуль
+        'organizations': {
+            'handlers': ['file_organizations', 'console'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'organizations.views': {
+            'handlers': ['file_organizations', 'console'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        
+        # Subscriptions модуль
+        'subscriptions': {
+            'handlers': ['file_subscriptions', 'console'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'subscriptions.views': {
+            'handlers': ['file_subscriptions', 'console'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'subscriptions.payment_service': {
+            'handlers': ['file_subscriptions', 'console'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'subscriptions.signals': {
+            'handlers': ['file_subscriptions', 'console'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        
+        # Users модуль
+        'users': {
+            'handlers': ['file_users', 'console'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'users.views': {
+            'handlers': ['file_users', 'console'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'users.signals': {
+            'handlers': ['file_users', 'console'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'users.serializers': {
+            'handlers': ['file_users', 'console'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        
+        # Voting модуль
+        'voting': {
+            'handlers': ['file_voting', 'console'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'voting.views': {
+            'handlers': ['file_voting', 'console'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'voting.signals': {
+            'handlers': ['file_voting', 'console'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'voting.serializers': {
+            'handlers': ['file_voting', 'console'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'voting.permissions': {
+            'handlers': ['file_voting', 'console'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        
+        # API логгер
+        'api': {
+            'handlers': ['file_api', 'console'],
+            'level': 'INFO',
+            'propagate': False,
         },
     },
 }
 
+# Дополнительные настройки для payments
+PAYMENTS_CONFIG = {
+    'QR_VERSION': 3,
+    'QR_BOX_SIZE': 8,
+    'QR_BORDER': 2,
+    'QR_ERROR_CORRECTION': 'M',
+    'MAX_ASSESSMENTS_PER_PAGE': 50,
+    'BULK_EMAIL_BATCH_SIZE': 100,
+    'BANK_STATEMENT_RETENTION_DAYS': 365,
+    'PAYMENT_RETENTION_DAYS': 730,
+    'ENABLE_PDF_GENERATION': True,
+    'ENABLE_QR_CODE': True,
+    'DEFAULT_PENALTY_RATE': 0.1,
+}
 
-ROSREESTR_API_KEY = '53ba1b7a55abbа14aa97eff3a5220792'  # Ваш API ключ
+ROSREESTR_API_KEY = '53ba1b7a55abbа14aa97eff3a5220792'
 ROSREESTR_API_URL = 'https://api-cloud.ru/api/rosreestr.php'
-ROSREESTR_TIMEOUT = 120  # Таймаут ожидания ответа
+ROSREESTR_TIMEOUT = 120
 
-KADNET_API_KEY = '' 
+KADNET_API_KEY = ''
 
 # Email настройки
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
@@ -261,9 +699,24 @@ EMAIL_HOST_USER = 'akuliniwan@yandex.ru'
 EMAIL_HOST_PASSWORD = 'password'
 DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 
+# Email настройки для массовых рассылок
+EMAIL_BULK_BATCH_SIZE = 50
+EMAIL_RETRY_ATTEMPTS = 3
+EMAIL_RETRY_DELAY = 5
+
 # Для разработки (чтобы не отправлять реальные письма)
 # EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
 
 AUTHENTICATION_BACKENDS = [
     'django.contrib.auth.backends.ModelBackend',
 ]
+
+# Настройки кеширования
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'LOCATION': 'unique-snowflake',
+    }
+}
+
+PAYMENTS_CACHE_TIMEOUT = 300

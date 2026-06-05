@@ -421,9 +421,6 @@ class BulkEmailSender:
             on_progress=on_progress
         )
 
-
-
-# Вместо этого используйте функцию-фабрику
 def get_email_sender() -> BulkEmailSender:
     """Фабрика для создания отправителя email"""
     return BulkEmailSender()

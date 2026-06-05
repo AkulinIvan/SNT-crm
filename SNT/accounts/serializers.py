@@ -1,8 +1,10 @@
+import logging
+
 from rest_framework import serializers
 from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
 from .models import User, UserActionLog
-
+logger = logging.getLogger(__name__)
 
 class UserLoginSerializer(serializers.Serializer):
     """Сериализатор для входа в систему"""
@@ -15,20 +17,29 @@ class UserLoginSerializer(serializers.Serializer):
     remember_me = serializers.BooleanField(default=False, required=False)
 
     def validate(self, data):
-        username = data.get('username')
-        password = data.get('password')
-        
-        if username and password:
-            user = authenticate(username=username, password=password)
-            if not user:
-                raise serializers.ValidationError('Неверный логин или пароль')
-            if not user.is_active:
-                raise serializers.ValidationError('Учетная запись деактивирована')
-        else:
-            raise serializers.ValidationError('Необходимо указать логин и пароль')
-        
-        data['user'] = user
-        return data
+        try:
+            username = data.get('username')
+            password = data.get('password')
+            
+            if username and password:
+                user = authenticate(username=username, password=password)
+                if not user:
+                    logger.warning(f"Неудачная попытка аутентификации: username={username}")
+                    raise serializers.ValidationError('Неверный логин или пароль')
+                if not user.is_active:
+                    logger.warning(f"Попытка входа деактивированного пользователя: {username}")
+                    raise serializers.ValidationError('Учетная запись деактивирована')
+            else:
+                raise serializers.ValidationError('Необходимо указать логин и пароль')
+            
+            data['user'] = user
+            return data
+            
+        except serializers.ValidationError:
+            raise
+        except Exception as e:
+            logger.error(f"Ошибка при валидации входа: {e}", exc_info=True)
+            raise serializers.ValidationError('Ошибка при проверке данных')
 
 
 class UserChangePasswordSerializer(serializers.Serializer):
