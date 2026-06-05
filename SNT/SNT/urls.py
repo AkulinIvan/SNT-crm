@@ -9,6 +9,7 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     
     # API
+    path('api/', include('common.urls_api')),
     path('api/', include('land.urls_api')),
     path('api/', include('users.urls_api')),
     path('api/', include('calls.urls_api')),

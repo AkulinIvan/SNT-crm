@@ -976,7 +976,7 @@
                         {{ user.first_name|first|upper }}{{ user.last_name|first|upper }}
                     </div>
                     <div class="user-details">
-                        <div class="user-name">{{ user.get_full_name|default:user.username }}</div>
+                        <div class="user-name">{{ user.get_full_name|default:user.username|escape }}</div>
                         <div class="user-role">{{ user.get_role_display }}</div>
                     </div>
                     <button class="logout-btn" onclick="event.stopPropagation(); handleLogout()" title="Выйти">🚪</button>

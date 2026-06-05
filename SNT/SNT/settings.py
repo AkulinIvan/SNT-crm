@@ -52,7 +52,7 @@ INSTALLED_APPS = [
     'payments',
     'organizations',
     'subscriptions',
-    'voting',    
+    'voting',
 ]
 
 
@@ -87,10 +87,61 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'accounts.middleware.UserActivityMiddleware',
     'accounts.middleware.OrganizationMiddleware',
-    'common.middleware.RequestMiddleware',
-    'common.middleware.TariffLimitMiddleware',
-    'users.signals.RequestSignalMiddleware',
+    # middleware для защиты API
+    'common.middleware.RequestMiddleware',                    # Сохранение request в потоке
+    'common.middleware.APIAccessLoggingMiddleware',          # Логирование API запросов
+    'common.middleware.APIRateLimitMiddleware',              # Ограничение частоты запросов
+    'common.middleware.APIIPAccessMiddleware',               # Ограничение по IP
+    'common.middleware.APITimeRestrictionMiddleware',        # Ограничение по времени
+    'common.middleware.TariffLimitMiddleware',               # Проверка тарифных лимитов
+    'common.middleware.APIMaintenanceMiddleware',            # Режим обслуживания
+    'common.middleware.APIRequestSizeMiddleware',            # Ограничение размера запроса
+    'common.middleware.APISecurityHeadersMiddleware',        # Security headers
+    'common.middleware.APICSRFProtectionMiddleware',         # CSRF защита
 ]
+
+# API Security Settings
+# Белый список IP (если пустой - проверка отключена)
+ALLOWED_API_IPS = [
+    '127.0.0.1',
+    '85.143.101.0/24',  # Ваша офисная сеть
+    # Добавьте IP ваших серверов
+]
+
+# Чёрный список IP
+BLOCKED_API_IPS = [
+    # '192.168.1.100',  # Пример заблокированного IP
+]
+
+# CORS настройки (если API используется с других доменов)
+CORS_ALLOWED_ORIGINS = [
+    'https://snt.ru',
+    'https://api.snt.ru',
+    'http://localhost:3000',
+    'http://127.0.0.1:8000',
+]
+
+# Режим обслуживания (можно включать через админку)
+API_MAINTENANCE_MODE = False
+
+# CSRF настройки для API
+CSRF_TRUSTED_ORIGINS = [
+    'snt-crm.ru',
+    'test.snt-crm.ru',
+    'api.snt-crm.ru',
+    'localhost',
+    '127.0.0.1',
+]
+
+# API Rate Limits (можно переопределить в middleware)
+API_RATE_LIMITS = {
+    'default': 60,
+    'auth': 10,
+    'create': 30,
+    'export': 5,
+    'import': 3,
+    'payment': 20,
+}
 
 ROOT_URLCONF = 'SNT.urls'
 
@@ -200,7 +251,7 @@ SNT_CHAIRMAN = 'Председатель правления'
 CSRF_COOKIE_NAME = 'csrftoken'
 CSRF_COOKIE_HTTPONLY = False
 CSRF_COOKIE_SAMESITE = 'Lax'
-CSRF_COOKIE_SECURE = False
+CSRF_COOKIE_SECURE = True
 CSRF_USE_SESSIONS = False
 CSRF_TRUSTED_ORIGINS = [
     'http://localhost:8000',

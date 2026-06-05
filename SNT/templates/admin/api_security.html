@@ -1,0 +1,67 @@
+<!-- SNT/templates/admin/api_security.html -->
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+<div style="padding: 20px;">
+    <h1>API Security Dashboard</h1>
+    
+    <!-- Maintenance Mode -->
+    <div style="margin-bottom: 30px; padding: 20px; background: #f5f5f5; border-radius: 8px;">
+        <h2>Maintenance Mode</h2>
+        <p>Current status: 
+            <strong style="color: {% if maintenance_mode %}#c62828{% else %}#2e7d32{% endif %};">
+                {% if maintenance_mode %}ENABLED{% else %}DISABLED{% endif %}
+            </strong>
+        </p>
+        <button onclick="toggleMaintenance()" class="button">
+            {% if maintenance_mode %}Disable{% else %}Enable{% endif %} Maintenance Mode
+        </button>
+    </div>
+    
+    <!-- Blocked IPs -->
+    <div style="margin-bottom: 30px;">
+        <h2>Blocked IP Addresses</h2>
+        <ul>
+            {% for ip in blocked_ips %}
+            <li>{{ ip }}</li>
+            {% empty %}
+            <li>No blocked IPs</li>
+            {% endfor %}
+        </ul>
+    </div>
+    
+    <!-- Rate Limits -->
+    <div>
+        <h2>Rate Limits (requests per minute)</h2>
+        <table style="width: 100%; border-collapse: collapse;">
+            <thead>
+                <tr><th>Type</th><th>Limit</th></tr>
+            </thead>
+            <tbody>
+                {% for type, limit in rate_limits.items %}
+                <tr><td>{{ type }}</td><td>{{ limit }}</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+function toggleMaintenance() {
+    const enabled = !{{ maintenance_mode|lower }};
+    fetch('/api-security/toggle-maintenance/', {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': '{{ csrf_token }}',
+            'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: `enabled=${enabled}`
+    }).then(response => response.json())
+      .then(data => {
+          if (data.success) {
+              location.reload();
+          }
+      });
+}
+</script>
+{% endblock %}
