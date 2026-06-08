@@ -2,7 +2,9 @@ from django.db import models
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.core.exceptions import ValidationError
 import re
+from django.core.cache import cache
 
+from .managers import CachedLandPlotManager
 from organizations.models import Organization
 
 
@@ -120,7 +122,8 @@ class LandPlot(models.Model):
         blank=True,
         db_index=True
     )
-
+    objects = CachedLandPlotManager()
+    
     class Meta:
         verbose_name = 'Земельный участок'
         verbose_name_plural = 'Земельные участки'
@@ -225,6 +228,7 @@ class LandPlot(models.Model):
 
     def save(self, *args, **kwargs):
         """Нормализация данных перед сохранением"""
+        is_new = self.pk is None
         if self.plot_number:
             self.plot_number = self.plot_number.strip().upper()
         if self.cadastral_number:
@@ -234,6 +238,21 @@ class LandPlot(models.Model):
         
         self.full_clean()
         super().save(*args, **kwargs)
+        
+        # Инвалидируем кэш
+        if not is_new:
+            LandPlot.objects.invalidate_plot_cache(self.pk)
+        
+        # Инвалидируем статистику
+        cache.delete_pattern('land_plots_stats:*')
+        cache.delete_pattern('api:plots_stats:*')
+
+    def delete(self, *args, **kwargs):
+        """Удаление с инвалидацией кэша"""
+        plot_id = self.pk
+        super().delete(*args, **kwargs)
+        LandPlot.objects.invalidate_plot_cache(plot_id)
+
 
     def get_owners_list(self):
         """Получение списка владельцев с долями"""

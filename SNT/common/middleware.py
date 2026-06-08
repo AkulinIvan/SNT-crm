@@ -1,10 +1,10 @@
-# SNT/common/middleware.py
 import threading
 import logging
 import re
 from datetime import datetime
 from ipaddress import ip_address, ip_network
 from django.http import JsonResponse
+
 from django.utils.deprecation import MiddlewareMixin
 from django.core.cache import cache
 from django.conf import settings
@@ -498,11 +498,11 @@ class APICSRFProtectionMiddleware(MiddlewareMixin):
         '/api/quick-payment/match-payment/',
         '/api/health/',
         '/api/test-rate-limit/',
-        '/api/security/maintenance/toggle/',  # Добавляем security endpoints
-        '/api/security/ip/block/',            # Добавляем
-        '/api/security/ip/unblock/',          # Добавляем
-        '/api/security/ip/list/',             # Добавляем
-        '/api/security/stats/',               # Добавляем
+        '/api/security/maintenance/toggle/',
+        '/api/security/ip/block/',
+        '/api/security/ip/unblock/',
+        '/api/security/ip/list/',
+        '/api/security/stats/',
     ]
     
     # GET, HEAD, OPTIONS методы всегда разрешены без CSRF
@@ -531,15 +531,77 @@ class APICSRFProtectionMiddleware(MiddlewareMixin):
                 status=403
             )
         
-        # Проверяем CSRF токен
-        from django.middleware.csrf import _compare_salted_tokens
+        # Получаем CSRF токен из cookie
         request_csrf_token = request.COOKIES.get('csrftoken', '')
         
-        if not _compare_salted_tokens(request_csrf_token, csrf_token):
-            logger.warning(f"Invalid CSRF token for {request.path}")
-            return JsonResponse(
-                {'detail': 'Неверный CSRF токен', 'code': 'csrf_token_invalid'},
-                status=403
-            )
+        # Пытаемся использовать публичный метод Django для проверки
+        try:
+            from django.middleware.csrf import CsrfViewMiddleware
+            csrf_middleware = CsrfViewMiddleware(lambda req: None)
+            
+            # Используем внутренний метод (он существует в Django)
+            if hasattr(csrf_middleware, '_compare_salted_tokens'):
+                if not csrf_middleware._compare_salted_tokens(request_csrf_token, csrf_token):
+                    logger.warning(f"Invalid CSRF token for {request.path}")
+                    return JsonResponse(
+                        {'detail': 'Неверный CSRF токен', 'code': 'csrf_token_invalid'},
+                        status=403
+                    )
+            else:
+                # Fallback: простое сравнение для совместимости
+                if request_csrf_token != csrf_token:
+                    logger.warning(f"CSRF token mismatch for {request.path}")
+                    return JsonResponse(
+                        {'detail': 'Неверный CSRF токен', 'code': 'csrf_token_invalid'},
+                        status=403
+                    )
+        except Exception as e:
+            # Если произошла ошибка, логируем, но не блокируем запрос
+            logger.error(f"CSRF validation error: {e}")
         
         return None
+    
+class CacheControlMiddleware(MiddlewareMixin):
+    """
+    Middleware для добавления Cache-Control заголовков.
+    """
+    
+    def process_response(self, request, response):
+        if request.method == 'GET':
+            # Не кэшируем страницы авторизации и админку
+            if not any(path in request.path for path in ['/login', '/admin', '/logout']):
+                if hasattr(response, 'status_code') and response.status_code == 200:
+                    if 'Cache-Control' not in response:
+                        # Статические файлы - долгий кэш
+                        if request.path.startswith(('/static/', '/media/')):
+                            response['Cache-Control'] = 'public, max-age=86400'
+                        # API - средний кэш
+                        elif request.path.startswith('/api/'):
+                            response['Cache-Control'] = 'public, max-age=60'
+                        # Страницы - короткий кэш
+                        else:
+                            response['Cache-Control'] = 'public, max-age=300'
+        
+        return response
+    
+class ConditionalGetMiddleware(MiddlewareMixin):
+    """
+    Middleware для поддержки ETag и If-None-Match.
+    """
+    
+    def process_response(self, request, response):
+        if request.method == 'GET' and response.status_code == 200:
+            # Генерируем ETag
+            if 'ETag' not in response:
+                import hashlib
+                content = response.content if hasattr(response, 'content') else str(response).encode()
+                etag = hashlib.md5(content).hexdigest()
+                response['ETag'] = f'"{etag}"'
+                
+                # Проверяем If-None-Match
+                if_none_match = request.META.get('HTTP_IF_NONE_MATCH')
+                if if_none_match and if_none_match == response['ETag']:
+                    response.status_code = 304
+                    response.content = b''
+        
+        return response

@@ -98,6 +98,8 @@ MIDDLEWARE = [
     'common.middleware.APIRequestSizeMiddleware',            # Ограничение размера запроса
     'common.middleware.APISecurityHeadersMiddleware',        # Security headers
     'common.middleware.APICSRFProtectionMiddleware',         # CSRF защита
+    'common.middleware.CacheControlMiddleware',
+    'common.middleware.ConditionalGetMiddleware',
 ]
 
 # API Security Settings
@@ -767,7 +769,51 @@ CACHES = {
     'default': {
         'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
         'LOCATION': 'unique-snowflake',
+        'TIMEOUT': 300,  # 5 минут по умолчанию
+        'OPTIONS': {
+            'MAX_ENTRIES': 10000,
+        }
+    },
+    'redis': {
+        'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+        'LOCATION': 'redis://127.0.0.1:6379/1',
+        'TIMEOUT': 300,
+        'OPTIONS': {
+            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+            'PARSER_CLASS': 'redis.connection.HiredisParser',
+            'CONNECTION_POOL_CLASS': 'redis.BlockingConnectionPool',
+            'CONNECTION_POOL_CLASS_KWARGS': {
+                'max_connections': 50,
+                'timeout': 20,
+            },
+            'MAX_CONNECTIONS': 1000,
+            'PICKLE_VERSION': -1,
+        }
     }
 }
 
-PAYMENTS_CACHE_TIMEOUT = 300
+import redis
+try:
+    redis.Redis(host='127.0.0.1', port=6379).ping()
+    CACHE_BACKEND = 'redis'
+except:
+    CACHE_BACKEND = 'default'
+
+# Настройки кэширования
+CACHE_MIDDLEWARE_SECONDS = 300
+CACHE_MIDDLEWARE_KEY_PREFIX = 'snt_crm'
+
+# Время кэширования для разных типов данных
+CACHE_TIMEOUTS = {
+    'list': 60,           # Списки - 1 минута
+    'detail': 300,        # Детали - 5 минут
+    'stats': 300,         # Статистика - 5 минут
+    'geo': 600,           # Геоданные - 10 минут
+    'map': 600,           # Данные карты - 10 минут
+    'rosreestr': 86400,   # Данные Росреестра - 24 часа
+    'template': 3600,     # Шаблоны - 1 час
+}
+
+# Кэширование для анонимных пользователей
+CACHE_ANONYMOUS_ONLY = True
+

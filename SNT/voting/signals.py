@@ -181,25 +181,30 @@ def update_question_stats(sender, instance, created, **kwargs):
 
 @receiver(post_save, sender='voting.Ballot')
 def update_voting_session_stats(sender, instance, created, **kwargs):
-    """
-    Обновление статистики сессии голосования при создании/изменении бюллетеня.
-    """
+    """Обновление статистики сессии при создании бюллетеня"""
     try:
         if instance.status == 'submitted':
             voting_session = instance.voting_session
-            
-            # Обновляем количество проголосовавших
             total_voted = voting_session.ballots.filter(status='submitted').count()
-            voting_session.total_voted = total_voted
-            voting_session.save(update_fields=['total_voted'])
             
-            logger.info(f"Voting session {voting_session.id} stats updated: "
-                       f"total_voted={total_voted}/{voting_session.total_eligible}")
-            
+            if total_voted != voting_session.total_voted:
+                voting_session.total_voted = total_voted
+                voting_session.save(update_fields=['total_voted'])
+                logger.debug(f"Updated session {voting_session.id} total_voted to {total_voted}")
+                
     except Exception as e:
         logger.error(f"Error updating voting session stats: {e}")
 
-
+@receiver(pre_delete, sender='voting.Ballot')
+def cleanup_ballot_votes(sender, instance, **kwargs):
+    """Очистка голосов при удалении бюллетеня"""
+    try:
+        votes_count = instance.votes.count()
+        if votes_count > 0:
+            logger.info(f"Deleting {votes_count} votes with ballot {instance.id}")
+    except Exception as e:
+        logger.error(f"Error cleaning up ballot votes: {e}")
+        
 @receiver(pre_delete, sender='voting.VotingSession')
 def check_voting_session_before_delete(sender, instance, **kwargs):
     """

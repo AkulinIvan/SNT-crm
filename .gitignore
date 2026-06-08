@@ -8,7 +8,7 @@ migrations/
 .env
 create_users.py
 debug.log
-
+tests
 
 *.log
 media/

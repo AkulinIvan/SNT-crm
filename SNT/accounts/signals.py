@@ -67,6 +67,12 @@ def assign_permissions_by_role(sender, instance, created, **kwargs):
                 logger.info(f"Назначены все права администратору {instance.username}")
                 return
             
+            # Для неизвестных ролей - очищаем права
+            if instance.role not in permissions_map and instance.role not in ['admin']:
+                instance.user_permissions.clear()
+                logger.info(f"Очищены права для неизвестной роли: {instance.role}")
+            
+            
             # Для остальных ролей - выборочные права
             codenames = permissions_map.get(instance.role, [])
             if codenames:

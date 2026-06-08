@@ -4,6 +4,11 @@ import traceback
 import os
 import tempfile
 
+from django.core.cache import cache
+from common.cache_decorators import cached_api, invalidate_cache_on_change, CacheControlMixin
+from django.views.decorators.cache import cache_page
+from django.views.decorators.vary import vary_on_headers
+
 from django.db import models, DatabaseError, IntegrityError
 from django.core.exceptions import ValidationError, PermissionDenied
 from rest_framework import viewsets, status
@@ -37,7 +42,7 @@ from .excel_importer import ExcelImporter
 logger = logging.getLogger(__name__)
 
 
-class LandPlotViewSet(OrganizationMixin, viewsets.ModelViewSet):
+class LandPlotViewSet(OrganizationMixin, CacheControlMixin, viewsets.ModelViewSet):
     """
     ViewSet для управления земельными участками.
     
@@ -52,6 +57,7 @@ class LandPlotViewSet(OrganizationMixin, viewsets.ModelViewSet):
     - POST /api/plots/bulk-update-status/ - массовое обновление статусов
     - POST /api/plots/import-excel/ - импорт из Excel
     """
+    cache_timeout = 60
     queryset = LandPlot.objects.prefetch_related('ownerships__owner')
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['status']
@@ -211,6 +217,7 @@ class LandPlotViewSet(OrganizationMixin, viewsets.ModelViewSet):
             self._logger.error(f"Error in perform_create: {e}", exc_info=True)
             raise
 
+    @cached_api(timeout=60, key_prefix='plots_list', vary_on_org=True)
     def list(self, request, *args, **kwargs):
         """Расширенный list с дополнительной статистикой"""
         self._logger.info(
@@ -261,6 +268,12 @@ class LandPlotViewSet(OrganizationMixin, viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
+    @cached_api(timeout=300, key_prefix='plots_detail', vary_on_org=True)
+    def retrieve(self, request, *args, **kwargs):
+        """Получение деталей участка с кэшированием"""
+        return super().retrieve(request, *args, **kwargs)
+    
+    @invalidate_cache_on_change('api:plots_list:*', 'api:plots_stats:*', 'api:plots_geo:*')
     def create(self, request, *args, **kwargs):
         """Создание участка с проверкой лимитов тарифа"""
         plot_number = request.data.get('plot_number', 'unknown')
@@ -317,6 +330,17 @@ class LandPlotViewSet(OrganizationMixin, viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
+    @invalidate_cache_on_change('api:plots_list:*', 'api:plots_stats:*', 'api:plots_geo:*')
+    def update(self, request, *args, **kwargs):
+        """Обновление участка с инвалидацией кэша"""
+        return super().update(request, *args, **kwargs)
+
+    @invalidate_cache_on_change('api:plots_list:*', 'api:plots_stats:*', 'api:plots_geo:*')
+    def partial_update(self, request, *args, **kwargs):
+        """Частичное обновление с инвалидацией кэша"""
+        return super().partial_update(request, *args, **kwargs)
+    
+    @invalidate_cache_on_change('api:plots_list:*', 'api:plots_stats:*', 'api:plots_geo:*')
     def destroy(self, request, *args, **kwargs):
         """Безопасное удаление с проверками"""
         land_plot = self.get_object()
@@ -382,6 +406,7 @@ class LandPlotViewSet(OrganizationMixin, viewsets.ModelViewSet):
             self._logger.error(f"Error checking assessments: {e}", exc_info=True)
             return False
 
+    @cached_api(timeout=600, key_prefix='plots_geo', vary_on_org=True)
     @action(detail=False, methods=['get'], url_path='geo')
     def geo(self, request):
         """
@@ -834,6 +859,7 @@ class LandPlotViewSet(OrganizationMixin, viewsets.ModelViewSet):
         
         return unique
     
+    @cached_api(timeout=300, key_prefix='plots_stats', vary_on_org=True)
     @action(detail=False, methods=['get'], url_path='stats')
     def stats(self, request):
         """Расширенная статистика по участкам с учетом СНТ пользователя."""
@@ -931,6 +957,7 @@ class LandPlotViewSet(OrganizationMixin, viewsets.ModelViewSet):
             'without_boundaries': 0,
         }
 
+    @cached_api(timeout=60, key_prefix='plots_near')
     @action(detail=False, methods=['get'], url_path='near')
     def near_plots(self, request):
         """
@@ -1359,11 +1386,14 @@ class LandPlotViewSet(OrganizationMixin, viewsets.ModelViewSet):
 
 # ==================== Веб-вьюхи ====================
 
-class LandPlotListView(View):
+class LandPlotListView(CacheControlMixin, View):
     """Страница со списком участков."""
     _logger = logging.getLogger(f'{__name__}.LandPlotListView')
+    cache_timeout = 300
     
     @method_decorator(login_required)
+    @method_decorator(cache_page(300))
+    @method_decorator(vary_on_headers('Cookie'))
     def get(self, request):
         try:
             return render(request, 'land/list.html', {'active_page': 'plots'})
@@ -1372,11 +1402,15 @@ class LandPlotListView(View):
             return render(request, 'error.html', {'error': 'Ошибка загрузки страницы'})
 
 
-class LandPlotDetailView(View):
+class LandPlotDetailView(CacheControlMixin, View):
     """Страница карточки участка."""
     _logger = logging.getLogger(f'{__name__}.LandPlotDetailView')
+    cache_timeout = 600
     
     @method_decorator(login_required)
+    @method_decorator(cache_page(600))
+    @method_decorator(vary_on_headers('Cookie'))
+    @method_decorator(subscription_required(feature='map', redirect_url='subscription_plans'))
     def get(self, request, pk):
         try:
             self._logger.debug(f"Plot detail page requested: pk={pk}")

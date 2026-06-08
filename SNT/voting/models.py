@@ -1,8 +1,14 @@
+# SNT/voting/models.py
 from django.db import models
 from django.conf import settings
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.utils import timezone
 from datetime import timedelta
+import secrets
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class VotingSession(models.Model):
     """
@@ -91,9 +97,22 @@ class VotingSession(models.Model):
             models.Index(fields=['organization', 'status']),
             models.Index(fields=['start_date', 'end_date']),
         ]
+        permissions = [
+            ("can_vote", "Может голосовать"),
+            ("can_manage_voting", "Может управлять голосованиями"),
+        ]
     
     def __str__(self):
         return self.title
+    
+    def save(self, *args, **kwargs):
+        """При сохранении обновляем статус если нужно"""
+        # Если дата окончания прошла, а статус активный - автоматически закрываем
+        if self.status == 'active' and self.end_date < timezone.now():
+            self.status = 'closed'
+            logger.info(f"Voting session {self.id} auto-closed because end_date passed")
+        
+        super().save(*args, **kwargs)
     
     @property
     def is_active(self):
@@ -115,6 +134,20 @@ class VotingSession(models.Model):
         return self.total_voted >= required
     
     @property
+    def quorum_required(self):
+        """Количество голосов, необходимых для кворума"""
+        if self.total_eligible == 0:
+            return 0
+        return (self.total_eligible * self.quorum_percent) / 100
+    
+    @property
+    def quorum_remaining(self):
+        """Сколько ещё голосов нужно для кворума"""
+        if self.quorum_reached:
+            return 0
+        return max(0, self.quorum_required - self.total_voted)
+    
+    @property
     def days_remaining(self):
         """Дней до окончания"""
         if self.is_closed or self.end_date < timezone.now():
@@ -122,15 +155,75 @@ class VotingSession(models.Model):
         delta = self.end_date - timezone.now()
         return delta.days
     
+    @property
+    def hours_remaining(self):
+        """Часов до окончания"""
+        if self.is_closed or self.end_date < timezone.now():
+            return 0
+        delta = self.end_date - timezone.now()
+        return delta.seconds // 3600
+    
+    @property
+    def participation_rate(self):
+        """Процент участия"""
+        if self.total_eligible == 0:
+            return 0
+        return (self.total_voted / self.total_eligible) * 100
+    
+    def activate(self):
+        """Активировать голосование"""
+        if self.status != 'draft':
+            raise ValueError(f"Cannot activate voting session with status {self.status}")
+        
+        if self.questions.count() == 0:
+            raise ValueError("Cannot activate voting session without questions")
+        
+        self.status = 'active'
+        self.save()
+        logger.info(f"Voting session {self.id} activated")
+    
     def close_voting(self):
         """Закрыть голосование"""
+        if self.status not in ['active', 'draft']:
+            raise ValueError(f"Cannot close voting session with status {self.status}")
+        
         self.status = 'closed'
         self.save()
+        logger.info(f"Voting session {self.id} closed")
+    
+    def cancel(self):
+        """Отменить голосование"""
+        self.status = 'cancelled'
+        self.save()
+        logger.info(f"Voting session {self.id} cancelled")
     
     def calculate_results(self):
         """Рассчитать результаты по всем вопросам"""
         for question in self.questions.all():
             question.calculate_results()
+        logger.info(f"Results calculated for voting session {self.id}")
+    
+    def update_eligible_count(self):
+        """Обновить количество имеющих право голоса"""
+        from users.models import Owner
+        
+        count = Owner.objects.filter(
+            memberships__organization=self.organization,
+            memberships__status='active'
+        ).count()
+        
+        self.total_eligible = count
+        self.save(update_fields=['total_eligible'])
+        logger.debug(f"Updated eligible count for session {self.id}: {count}")
+    
+    def get_ballot_for_owner(self, owner):
+        """Получить бюллетень владельца"""
+        return self.ballots.filter(owner=owner).first()
+    
+    def has_voted(self, owner):
+        """Проверить, голосовал ли владелец"""
+        ballot = self.get_ballot_for_owner(owner)
+        return ballot and ballot.status == 'submitted'
 
 
 class Question(models.Model):
@@ -177,9 +270,13 @@ class Question(models.Model):
     def calculate_results(self):
         """Рассчитать результаты по вариантам ответов"""
         for option in self.options.all():
-            option.votes_count = option.votes.count()
-            option.percentage = (option.votes_count / self.total_votes * 100) if self.total_votes > 0 else 0
-            option.save(update_fields=['votes_count', 'percentage'])
+            option.update_votes_count()
+        logger.debug(f"Results calculated for question {self.id}")
+    
+    @property
+    def total_ballots(self):
+        """Количество бюллетеней, ответивших на вопрос"""
+        return self.votes.filter(ballot__status='submitted').count()
 
 
 class AnswerOption(models.Model):
@@ -212,6 +309,19 @@ class AnswerOption(models.Model):
     
     def __str__(self):
         return self.text
+    
+    def update_votes_count(self):
+        """Обновить количество голосов"""
+        self.votes_count = self.votes.filter(ballot__status='submitted').count()
+        
+        question_total = self.question.total_votes
+        if question_total > 0:
+            self.percentage = (self.votes_count / question_total) * 100
+        else:
+            self.percentage = 0
+        
+        self.save(update_fields=['votes_count', 'percentage'])
+        logger.debug(f"Updated option {self.id}: votes={self.votes_count}, percentage={self.percentage:.1f}%")
 
 
 class Ballot(models.Model):
@@ -271,6 +381,7 @@ class Ballot(models.Model):
     ip_address = models.GenericIPAddressField('IP-адрес', null=True, blank=True)
     user_agent = models.TextField('User Agent', blank=True)
     
+    # Время голосования
     submitted_at = models.DateTimeField('Дата подачи', auto_now_add=True)
     updated_at = models.DateTimeField('Обновлено', auto_now=True)
     
@@ -287,20 +398,56 @@ class Ballot(models.Model):
     def __str__(self):
         return f"Бюллетень {self.owner.full_name} - {self.voting_session.title}"
     
+    def save(self, *args, **kwargs):
+        """При сохранении обновляем статистику сессии"""
+        is_new = self.pk is None
+        old_status = None
+        
+        if not is_new:
+            old_ballot = Ballot.objects.get(pk=self.pk)
+            old_status = old_ballot.status
+        
+        super().save(*args, **kwargs)
+        
+        # Обновляем статистику сессии
+        if self.status == 'submitted' and old_status != 'submitted':
+            # Добавляем голос
+            self.voting_session.total_voted += 1
+            self.voting_session.save(update_fields=['total_voted'])
+            logger.debug(f"Ballot {self.id} added to session stats")
+        elif old_status == 'submitted' and self.status != 'submitted':
+            # Убираем голос
+            self.voting_session.total_voted = max(0, self.voting_session.total_voted - 1)
+            self.voting_session.save(update_fields=['total_voted'])
+            logger.debug(f"Ballot {self.id} removed from session stats")
+    
     @property
     def is_valid(self):
         return self.status == 'submitted'
     
     def mark_valid(self):
+        """Отметить бюллетень как действительный"""
         self.status = 'submitted'
         self.save()
+        logger.info(f"Ballot {self.id} marked as valid")
     
     def mark_invalid(self, reason=''):
+        """Отметить бюллетень как недействительный"""
         self.status = 'invalid'
-        if reason:
-            # Можно добавить поле reason
-            pass
         self.save()
+        logger.info(f"Ballot {self.id} marked as invalid: {reason}")
+    
+    def get_votes_summary(self):
+        """Получить сводку по голосам"""
+        summary = {}
+        for vote in self.votes.select_related('question', 'option'):
+            if vote.option:
+                summary[vote.question.title] = vote.option.text
+            elif vote.rating_value:
+                summary[vote.question.title] = f"Оценка: {vote.rating_value}/10"
+            elif vote.text_answer:
+                summary[vote.question.title] = vote.text_answer[:100]
+        return summary
 
 
 class Vote(models.Model):
@@ -351,7 +498,29 @@ class Vote(models.Model):
     def __str__(self):
         if self.option:
             return f"{self.ballot.owner.full_name}: {self.question.title} -> {self.option.text}"
+        elif self.rating_value:
+            return f"{self.ballot.owner.full_name}: {self.question.title} -> {self.rating_value}/10"
+        elif self.text_answer:
+            return f"{self.ballot.owner.full_name}: {self.question.title} -> {self.text_answer[:50]}"
         return f"{self.ballot.owner.full_name}: {self.question.title}"
+    
+    def save(self, *args, **kwargs):
+        """При сохранении голоса обновляем статистику вопроса"""
+        is_new = self.pk is None
+        
+        super().save(*args, **kwargs)
+        
+        if is_new and self.ballot.status == 'submitted':
+            # Обновляем количество голосов в вопросе
+            self.question.total_votes = Vote.objects.filter(
+                question=self.question,
+                ballot__status='submitted'
+            ).count()
+            self.question.save(update_fields=['total_votes'])
+            
+            # Обновляем статистику опции
+            if self.option:
+                self.option.update_votes_count()
 
 
 class VotingInvitation(models.Model):
@@ -404,9 +573,28 @@ class VotingInvitation(models.Model):
         return f"Приглашение {self.owner.full_name} ({self.get_invitation_type_display()})"
     
     def generate_token(self):
+        """Генерация уникального токена"""
         import secrets
         self.unique_token = secrets.token_urlsafe(32)
         return self.unique_token
+    
+    def mark_sent(self):
+        """Отметить как отправленное"""
+        self.sent_at = timezone.now()
+        self.save(update_fields=['sent_at'])
+        logger.debug(f"Invitation {self.id} marked as sent")
+    
+    def mark_opened(self):
+        """Отметить как открытое"""
+        if not self.opened_at:
+            self.opened_at = timezone.now()
+            self.save(update_fields=['opened_at'])
+            logger.debug(f"Invitation {self.id} marked as opened")
+    
+    def get_voting_url(self):
+        """Получить URL для голосования"""
+        from django.urls import reverse
+        return reverse('voting:public_vote', kwargs={'token': self.unique_token})
     
     def save(self, *args, **kwargs):
         if not self.unique_token:

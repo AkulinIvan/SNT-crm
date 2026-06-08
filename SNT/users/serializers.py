@@ -417,15 +417,23 @@ class OwnerDetailSerializer(serializers.ModelSerializer):
         """Получение организаций владельца"""
         try:
             memberships = obj.memberships.filter(status='active')
-            return [
-                {
+            result = []
+            for m in memberships:
+                org_data = {
                     'id': m.organization.id,
                     'name': m.organization.name,
                     'short_name': m.organization.short_name,
-                    'joined_at': m.joined_at
                 }
-                for m in memberships
-            ]
+                # Используем правильные поля модели
+                if hasattr(m, 'member_since') and m.member_since:
+                    org_data['joined_at'] = m.member_since
+                elif hasattr(m, 'created_at') and m.created_at:
+                    org_data['joined_at'] = m.created_at.date()
+                else:
+                    org_data['joined_at'] = None
+                
+                result.append(org_data)
+            return result
         except Exception as e:
             logger.error(f"Error getting organizations for owner {obj.id}: {e}")
             return []
