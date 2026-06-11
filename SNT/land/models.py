@@ -240,13 +240,34 @@ class LandPlot(models.Model):
         self.full_clean()
         super().save(*args, **kwargs)
         
-        # Инвалидируем кэш
+        # Инвалидируем кэш для этого участка
         if not is_new:
-            LandPlot.objects.invalidate_plot_cache(self.pk)
+            try:
+                LandPlot.objects.invalidate_plot_cache(self.pk)
+            except Exception as e:
+                # Логируем ошибку, но не прерываем сохранение
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"Error invalidating cache for plot {self.pk}: {e}")
         
-        # Инвалидируем статистику
-        cache.delete_pattern('land_plots_stats:*')
-        cache.delete_pattern('api:plots_stats:*')
+        # Инвалидируем статистику - безопасный способ без delete_pattern
+        try:
+            # Удаляем основные ключи кэша, если они существуют
+            cache.delete('land_plots_stats:org_all')
+            
+            # Для LocMemCache не поддерживается delete_pattern,
+            # поэтому просто игнорируем очистку паттернов
+            # или используем clear() только в крайнем случае
+            if hasattr(cache, 'delete_pattern'):
+                cache.delete_pattern('api:plots_stats:*')
+            else:
+                # Для LocMemCache - просто удаляем возможные ключи вручную
+                # или пропускаем, так как кэш и так небольшой
+                pass
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Could not invalidate stats cache: {e}")
 
     def delete(self, *args, **kwargs):
         """Удаление с инвалидацией кэша"""

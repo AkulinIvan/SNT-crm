@@ -89,7 +89,7 @@
             <p id="plot-meta" style="color: var(--gray-500);">...</p>
         </div>
         <div style="display: flex; gap: 8px;">
-            <button class="btn btn-secondary" onclick="window.location.href='/plots/'">← К списку</button>
+            <button class="btn btn-secondary" onclick="returnToPlotsList()">← К списку</button>
             <button class="btn btn-primary" id="btn-edit-plot" onclick="openEditPlotModal()">✏️ Редактировать</button>
             <button class="btn btn-danger" id="btn-delete-plot" onclick="confirmDeletePlot()">🗑️ Удалить</button>
             <button class="btn btn-success" onclick="exportToGeoJSON()" id="btn-export-geojson" style="display: none;">📄 GeoJSON</button>
@@ -121,6 +121,9 @@
             <div class="table-container">
                 <div class="table-toolbar">
                     <span style="font-weight: 600;">🗺️ Координаты на карте</span>
+                    <button class="btn btn-secondary btn-sm" onclick="setCoordinatesFromBoundaries()" id="btn-set-coords" style="display: none;">
+                        🎯 Установить центр
+                    </button>
                     <button class="btn btn-secondary btn-sm" onclick="openSetCoordinatesModal()">📍 Задать координаты</button>
                 </div>
                 <div id="plot-map" style="height: 350px;"></div>
@@ -309,11 +312,15 @@
             method: 'POST',
             body: JSON.stringify({ latitude: lat, longitude: lon }),
         });
-        
+
         if (result) {
+            // Обновляем отображение координат с проверкой
             document.getElementById('info-latitude').textContent = lat.toFixed(6);
             document.getElementById('info-longitude').textContent = lon.toFixed(6);
             showAlert('Координаты обновлены', 'success');
+
+            // Обновляем данные участка
+            plotData = await apiFetch(`/api/plots/${plotId}/`);
         }
     }
     
@@ -344,6 +351,10 @@
         document.getElementById('info-updated').textContent = formatDateTime(plotData.updated_at);
 
         const hasBoundaries = plotData.boundaries && plotData.boundaries.length >= 3;
+        const setCoordsBtn = document.getElementById('btn-set-coords');
+        if (setCoordsBtn) {
+            setCoordsBtn.style.display = hasBoundaries ? 'inline-flex' : 'none';
+        }
         const exportBtn = document.getElementById('btn-export-geojson');
         const previewBtn = document.getElementById('btn-preview-boundaries');
             
@@ -359,8 +370,8 @@
             : `<span class="badge-warning">Не загружены</span>
                ${plotData.cadastral_number ? `<button class="btn btn-primary btn-sm" onclick="loadBoundaries(${plotId})" style="margin-left: 8px;">🗺️ Загрузить из Росреестра</button>` : ''}`;
 
-        document.getElementById('info-latitude').textContent = plotData.latitude ? plotData.latitude.toFixed(6) : '—';
-        document.getElementById('info-longitude').textContent = plotData.longitude ? plotData.longitude.toFixed(6) : '—';
+        document.getElementById('info-latitude').textContent = plotData.latitude !== null && plotData.latitude !== undefined ? plotData.latitude.toFixed(6) : '—';
+        document.getElementById('info-longitude').textContent = plotData.longitude !== null && plotData.longitude !== undefined ? plotData.longitude.toFixed(6) : '—';
         document.getElementById('info-notes').innerHTML = plotData.notes ? `<p style="white-space: pre-wrap;">${escapeHtml(plotData.notes)}</p>` : '<span style="color: var(--gray-400);">Нет примечаний</span>';
 
         if (!plotMap) {
@@ -384,25 +395,84 @@
     async function loadBoundaries(plotId) {
         const btn = event?.target;
         const originalText = btn?.innerHTML || 'Загрузить';
+        
         if (btn) {
             btn.disabled = true;
-            btn.innerHTML = '⏳ Загрузка...';
+            btn.innerHTML = '⏳ Загрузка из Росреестра...';
         }
-        
+
         try {
-            const result = await apiFetch(`/api/plots/${plotId}/load-boundaries/`, { method: 'POST' });
-            if (result?.boundaries) {
-                showAlert(`✅ Границы загружены (${result.boundaries.length} точек)`, 'success');
-                await loadPlotDetail();
+            showAlert('🔄 Запрашиваем данные из Росреестра...', 'info');
+
+            const result = await apiFetch(`/api/plots/${plotId}/load-boundaries/`, { 
+                method: 'POST'
+            });
+
+            if (result && result.boundaries && result.boundaries.length >= 3) {
+                // Обновляем локальные данные
+                plotData = await apiFetch(`/api/plots/${plotId}/`);
+
+                // Обновляем координаты на странице
+                if (result.latitude && result.longitude) {
+                    const latDisplay = result.latitude.toFixed(6);
+                    const lonDisplay = result.longitude.toFixed(6);
+                    document.getElementById('info-latitude').textContent = latDisplay;
+                    document.getElementById('info-longitude').textContent = lonDisplay;
+                    showAlert(`📍 Координаты определены: ${latDisplay}, ${lonDisplay}`, 'success');
+                }
+
+                // Обновляем границы на карте
+                if (boundariesLayer) {
+                    boundariesLayer.clearLayers();
+                }
+                if (plotData.boundaries && plotData.boundaries.length >= 3) {
+                    drawBoundaries(plotData.boundaries, plotData.status);
+
+                    // Обновляем маркер на карте
+                    if (plotMarker) {
+                        plotMap.removeLayer(plotMarker);
+                        plotMarker = null;
+                    }
+                    if (plotData.latitude && plotData.longitude) {
+                        addMarker(plotData.latitude, plotData.longitude);
+                        plotMap.setView([plotData.latitude, plotData.longitude], 16);
+                    } else if (plotData.boundaries) {
+                        // Если нет координат, центрируем по границам
+                        const coords = plotData.boundaries.map(p => [p[0], p[1]]);
+                        plotMap.fitBounds(L.polygon(coords).getBounds(), { padding: [30, 30] });
+                    }
+
+                    // Обновляем информационную панель
+                    document.getElementById('info-boundaries').innerHTML = `
+                        <span class="badge-success">✅ Загружены из Росреестра (${plotData.boundaries.length} точек)</span>
+                        <button class="btn btn-secondary btn-sm" onclick="refreshBoundaries(${plotId})" style="margin-left: 8px;">🔄 Обновить</button>
+                        <button class="btn btn-info btn-sm" onclick="previewBoundariesOnMap()" style="margin-left: 4px;">🗺️ Показать</button>
+                    `;
+
+                    // Показываем кнопки экспорта
+                    const exportBtn = document.getElementById('btn-export-geojson');
+                    const previewBtn = document.getElementById('btn-preview-boundaries');
+                    if (exportBtn) exportBtn.style.display = 'inline-flex';
+                    if (previewBtn) previewBtn.style.display = 'inline-flex';
+
+                    showAlert(`✅ Границы успешно загружены! ${plotData.boundaries.length} точек, координаты определены`, 'success');
+                }
+            } else if (result && result.detail) {
+                showAlert(result.detail, 'warning');
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = originalText;
+                }
             } else {
-                showAlert('❌ Границы не найдены', 'warning');
+                showAlert('❌ Границы не найдены в Росреестре. Проверьте кадастровый номер.', 'warning');
                 if (btn) {
                     btn.disabled = false;
                     btn.innerHTML = originalText;
                 }
             }
         } catch (error) {
-            showAlert(`❌ Ошибка: ${error.message}`, 'error');
+            console.error('Ошибка загрузки границ:', error);
+            showAlert(`❌ Ошибка: ${error.message || 'Не удалось загрузить границы'}`, 'error');
             if (btn) {
                 btn.disabled = false;
                 btn.innerHTML = originalText;
@@ -411,27 +481,66 @@
     }
     
     async function refreshBoundaries(plotId) {
-        if (!confirm('Обновить границы?')) return;
+        if (!confirm('Обновить границы из Росреестра? Это может занять несколько секунд.')) return;
+        
         const btn = event?.target;
         const originalText = btn?.innerHTML || 'Обновить';
+        
         if (btn) {
             btn.disabled = true;
             btn.innerHTML = '⏳ Обновление...';
         }
-        
+
         try {
-            const result = await apiFetch(`/api/plots/${plotId}/load-boundaries/`, { method: 'POST' });
-            if (result?.boundaries) {
-                showAlert(`✅ Границы обновлены (${result.boundaries.length} точек)`, 'success');
-                await loadPlotDetail();
+            showAlert('🔄 Обновляем данные из Росреестра...', 'info');
+
+            const result = await apiFetch(`/api/plots/${plotId}/load-boundaries/`, { 
+                method: 'POST'
+            });
+
+            if (result && result.boundaries && result.boundaries.length >= 3) {
+                // Обновляем все данные
+                plotData = await apiFetch(`/api/plots/${plotId}/`);
+
+                // Обновляем отображение координат
+                if (plotData.latitude && plotData.longitude) {
+                    document.getElementById('info-latitude').textContent = plotData.latitude.toFixed(6);
+                    document.getElementById('info-longitude').textContent = plotData.longitude.toFixed(6);
+                }
+
+                // Обновляем карту
+                if (boundariesLayer) boundariesLayer.clearLayers();
+                if (plotMarker && plotMap) {
+                    plotMap.removeLayer(plotMarker);
+                    plotMarker = null;
+                }
+
+                if (plotData.boundaries && plotData.boundaries.length >= 3) {
+                    drawBoundaries(plotData.boundaries, plotData.status);
+                }
+
+                if (plotData.latitude && plotData.longitude) {
+                    addMarker(plotData.latitude, plotData.longitude);
+                    plotMap.setView([plotData.latitude, plotData.longitude], 16);
+                }
+
+                // Обновляем информационную панель
+                document.getElementById('info-boundaries').innerHTML = `
+                    <span class="badge-success">✅ Обновлены из Росреестра (${plotData.boundaries.length} точек)</span>
+                    <button class="btn btn-secondary btn-sm" onclick="refreshBoundaries(${plotId})" style="margin-left: 8px;">🔄 Обновить</button>
+                    <button class="btn btn-info btn-sm" onclick="previewBoundariesOnMap()" style="margin-left: 4px;">🗺️ Показать</button>
+                `;
+
+                showAlert(`✅ Границы обновлены! ${plotData.boundaries.length} точек, координаты: ${plotData.latitude?.toFixed(6) || '—'}, ${plotData.longitude?.toFixed(6) || '—'}`, 'success');
             } else {
-                showAlert('❌ Границы не найдены', 'warning');
+                showAlert('❌ Границы не найдены в Росреестре', 'warning');
                 if (btn) {
                     btn.disabled = false;
                     btn.innerHTML = originalText;
                 }
             }
         } catch (error) {
+            console.error('Ошибка обновления границ:', error);
             showAlert(`❌ Ошибка: ${error.message}`, 'error');
             if (btn) {
                 btn.disabled = false;
@@ -440,6 +549,68 @@
         }
     }
     
+    // Функция для установки координат по центру загруженных границ
+    function setCoordinatesFromBoundaries() {
+        if (!plotData.boundaries || plotData.boundaries.length < 3) {
+            showAlert('Сначала загрузите границы участка', 'warning');
+            return;
+        }
+
+        // Вычисляем центр границ
+        let sumLat = 0;
+        let sumLon = 0;
+        for (const point of plotData.boundaries) {
+            sumLat += point[0];
+            sumLon += point[1];
+        }
+        const centerLat = sumLat / plotData.boundaries.length;
+        const centerLon = sumLon / plotData.boundaries.length;
+
+        openModal('Установить координаты по центру границ', `
+            <div class="form-group">
+                <label>Широта (рассчитана):</label>
+                <input type="text" id="center-lat" value="${centerLat.toFixed(6)}" readonly style="background: var(--gray-100);">
+            </div>
+            <div class="form-group">
+                <label>Долгота (рассчитана):</label>
+                <input type="text" id="center-lon" value="${centerLon.toFixed(6)}" readonly style="background: var(--gray-100);">
+            </div>
+            <p>Установить эти координаты как местоположение участка на карте?</p>
+        `, 'Установить', async () => {
+            const result = await apiFetch(`/api/plots/${plotId}/set-coordinates/`, {
+                method: 'POST',
+                body: JSON.stringify({ 
+                    latitude: centerLat, 
+                    longitude: centerLon 
+                }),
+            });
+
+            if (result) {
+                showAlert('Координаты установлены по центру границ', 'success');
+                closeModal();
+
+                // Обновляем данные участка
+                plotData = await apiFetch(`/api/plots/${plotId}/`);
+
+                // Обновляем отображение координат
+                const latDisplay = plotData.latitude !== null ? plotData.latitude.toFixed(6) : '—';
+                const lonDisplay = plotData.longitude !== null ? plotData.longitude.toFixed(6) : '—';
+                document.getElementById('info-latitude').textContent = latDisplay;
+                document.getElementById('info-longitude').textContent = lonDisplay;
+
+                // Обновляем карту
+                if (plotMarker) {
+                    plotMap.removeLayer(plotMarker);
+                    plotMarker = null;
+                }
+                if (plotData.latitude !== null && plotData.longitude !== null) {
+                    addMarker(plotData.latitude, plotData.longitude);
+                    plotMap.setView([plotData.latitude, plotData.longitude], 16);
+                }
+            }
+        });
+    }
+
     async function loadOwners() {
         const data = await apiFetch(`/api/ownerships/?land_plot=${plotId}`);
         const tbody = document.getElementById('owners-table-body');
@@ -468,25 +639,56 @@
     }
     
     function openSetCoordinatesModal() {
+        // Безопасное получение значений с проверкой на null
+        const currentLat = plotData.latitude !== null && plotData.latitude !== undefined ? plotData.latitude : '';
+        const currentLon = plotData.longitude !== null && plotData.longitude !== undefined ? plotData.longitude : '';
+        
         openModal('Задать координаты участка', `
-            <div class="form-group"><label>Широта *</label><input type="number" id="coord-lat" value="${plotData.latitude || '55.7558'}" step="any"></div>
-            <div class="form-group"><label>Долгота *</label><input type="number" id="coord-lon" value="${plotData.longitude || '37.6173'}" step="any"></div>
+            <div class="form-group">
+                <label>Широта *</label>
+                <input type="number" id="coord-lat" value="${currentLat}" step="any" placeholder="55.7558">
+            </div>
+            <div class="form-group">
+                <label>Долгота *</label>
+                <input type="number" id="coord-lon" value="${currentLon}" step="any" placeholder="37.6173">
+            </div>
             <p style="font-size: 0.8rem; color: var(--gray-500);">Координаты можно найти на Яндекс.Картах или Google Maps</p>
         `, 'Сохранить', async () => {
             const lat = parseFloat(document.getElementById('coord-lat').value);
             const lon = parseFloat(document.getElementById('coord-lon').value);
+
             if (isNaN(lat) || isNaN(lon)) {
                 showAlert('Введите корректные координаты', 'error');
                 return;
             }
+
             const result = await apiFetch(`/api/plots/${plotId}/set-coordinates/`, {
                 method: 'POST',
                 body: JSON.stringify({ latitude: lat, longitude: lon }),
             });
+
             if (result) {
                 showAlert('Координаты обновлены', 'success');
                 closeModal();
-                await loadPlotDetail();
+
+                // Обновляем данные участка
+                plotData = await apiFetch(`/api/plots/${plotId}/?t=${Date.now()}`);
+
+                // Обновляем отображение координат на странице (с проверкой на null)
+                const latDisplay = plotData.latitude !== null ? plotData.latitude.toFixed(6) : '—';
+                const lonDisplay = plotData.longitude !== null ? plotData.longitude.toFixed(6) : '—';
+                document.getElementById('info-latitude').textContent = latDisplay;
+                document.getElementById('info-longitude').textContent = lonDisplay;
+
+                // Обновляем карту - добавляем маркер
+                if (plotMarker) {
+                    plotMap.removeLayer(plotMarker);
+                    plotMarker = null;
+                }
+                if (plotData.latitude !== null && plotData.longitude !== null) {
+                    addMarker(plotData.latitude, plotData.longitude);
+                    plotMap.setView([plotData.latitude, plotData.longitude], 16);
+                }
             }
         });
     }
@@ -1224,6 +1426,12 @@
                 previewMap.fitBounds(L.polygon(coordinates).getBounds(), { padding: [20, 20] });
             }
         }, 200);
+    }
+
+    function returnToPlotsList() {
+    // Устанавливаем флаг, что нужно обновить кэш
+        sessionStorage.setItem('refresh_plots_list', 'true');
+        window.location.href = '/plots/';
     }
 
     window.closeSimpleModal = function() {

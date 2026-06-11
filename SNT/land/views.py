@@ -550,37 +550,50 @@ class LandPlotViewSet(OrganizationMixin, CacheControlMixin, viewsets.ModelViewSe
         self._logger.info(
             f"Loading boundaries for plot #{land_plot.plot_number} "
             f"(cadastral: {land_plot.cadastral_number})"
-        )
+        )   
 
         if not land_plot.cadastral_number:
             self._logger.warning(f"No cadastral number for plot #{land_plot.plot_number}")
             return Response(
                 {'detail': 'Отсутствует кадастровый номер'},
                 status=status.HTTP_400_BAD_REQUEST
-            )
+            )   
 
         try:
             start_time = timezone.now()
             
             boundaries = rosreestr_service.get_parcel_boundaries(
                 land_plot.cadastral_number
-            )
+            )   
 
-            elapsed = (timezone.now() - start_time).total_seconds()
+            elapsed = (timezone.now() - start_time).total_seconds() 
 
             if boundaries and len(boundaries) >= 3:
                 land_plot.boundaries = boundaries
                 land_plot.rosreestr_updated = timezone.now()
-                land_plot.save(update_fields=['boundaries', 'rosreestr_updated', 'updated_at'])
+                
+                # ВЫЧИСЛЯЕМ И СОХРАНЯЕМ ЦЕНТРАЛЬНЫЕ КООРДИНАТЫ
+                center_lat, center_lon = self._calculate_center_from_boundaries(boundaries)
+                
+                if center_lat and center_lon:
+                    land_plot.latitude = center_lat
+                    land_plot.longitude = center_lon
+                    self._logger.info(
+                        f"Coordinates calculated: lat={center_lat:.6f}, lon={center_lon:.6f}"
+                    )
+                
+                land_plot.save(update_fields=['boundaries', 'rosreestr_updated', 'latitude', 'longitude', 'updated_at'])    
 
                 self._logger.info(
                     f"Boundaries loaded for plot #{land_plot.plot_number}: "
                     f"{len(boundaries)} points ({elapsed:.2f}s)"
-                )
+                )   
 
                 return Response({
                     'detail': f'Границы загружены ({len(boundaries)} точек)',
                     'boundaries': boundaries,
+                    'latitude': center_lat,
+                    'longitude': center_lon,
                     'updated_at': land_plot.rosreestr_updated,
                 })
             else:
@@ -590,7 +603,7 @@ class LandPlotViewSet(OrganizationMixin, CacheControlMixin, viewsets.ModelViewSe
                 return Response(
                     {'detail': 'Границы не найдены в кадастре. Проверьте правильность кадастрового номера.'},
                     status=status.HTTP_404_NOT_FOUND
-                )
+                )   
 
         except Exception as e:
             self._logger.error(f"Error loading boundaries: {e}", exc_info=True)
@@ -1444,6 +1457,34 @@ class LandPlotViewSet(OrganizationMixin, CacheControlMixin, viewsets.ModelViewSe
                 {'detail': 'Ошибка при проверке тарифа'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+    def _calculate_center_from_boundaries(self, boundaries):
+        """
+        Вычисление центральной точки из границ полигона.
+
+        Args:
+            boundaries: список точек [[lat, lon], ...]
+
+        Returns:
+            tuple: (latitude, longitude) или (None, None)
+        """
+        if not boundaries or len(boundaries) < 3:
+            return None, None
+
+        try:
+            # Вычисляем центр масс полигона
+            # Для простоты используем среднее арифметическое всех точек
+            total_lat = sum(point[0] for point in boundaries)
+            total_lon = sum(point[1] for point in boundaries)
+            count = len(boundaries)
+
+            center_lat = total_lat / count
+            center_lon = total_lon / count
+
+            return center_lat, center_lon
+        except Exception as e:
+            self._logger.error(f"Error calculating center: {e}")
+            return None, None   
 
 
 # ==================== Веб-вьюхи ====================

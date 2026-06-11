@@ -69,18 +69,46 @@ class CachedLandPlotManager(models.Manager):
     
     def invalidate_plot_cache(self, plot_id):
         """Инвалидация кэша для участка"""
+        # Список ключей для удаления
         cache_keys = [
             f'land_plot:{plot_id}',
-            'land_plots_stats:*',
-            'api:plots_list:*',
-            'api:plots_stats:*',
-            'api:plots_geo:*',
         ]
+        
+        # Удаляем конкретные ключи
         for key in cache_keys:
-            cache.delete(key)
-            cache.delete_pattern(key)
+            try:
+                cache.delete(key)
+            except Exception as e:
+                logger.error(f"Error deleting cache key {key}: {e}")
+        
+        # Инвалидируем статистику - безопасно
+        try:
+            # Удаляем ключи статистики, если они существуют
+            cache.delete('land_plots_stats:org_all')
+            
+            # Для API кэшей - используем delete_pattern только если он доступен
+            if hasattr(cache, 'delete_pattern'):
+                cache.delete_pattern('api:plots_list:*')
+                cache.delete_pattern('api:plots_stats:*')
+                cache.delete_pattern('api:plots_geo:*')
+            else:
+                # Для LocMemCache просто сбрасываем всё (если нужно)
+                # cache.clear()  # Осторожно! Очищает весь кэш
+                logger.debug("delete_pattern not available, skipping pattern deletion")
+        except Exception as e:
+            logger.error(f"Error invalidating stats cache: {e}")
+        
         logger.info(f"Invalidated cache for plot {plot_id}")
         
+        def clear_all_cache(self):
+            """Полная очистка кэша (использовать с осторожностью)"""
+            try:
+                cache.clear()
+                logger.info("All cache cleared")
+            except Exception as e:
+                logger.error(f"Error clearing cache: {e}")
+
+
 class CachedLandPlotQuerySet(models.QuerySet):
     """QuerySet с кэшированием"""
     
