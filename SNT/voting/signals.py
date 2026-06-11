@@ -1,3 +1,4 @@
+# SNT/voting/signals.py
 import logging
 import traceback
 from django.db.models.signals import post_save, pre_save, pre_delete
@@ -22,14 +23,12 @@ def add_voting_permissions_for_managers(sender, instance, created, **kwargs):
     logger.info(f"Is superuser: {getattr(instance, 'is_superuser', False)}")
     
     try:
-        # Проверяем, имеет ли пользователь права менеджера или суперпользователя
         is_manager = getattr(instance, 'is_manager', False)
         is_superuser = getattr(instance, 'is_superuser', False)
         
         if is_manager or is_superuser:
             logger.info(f"User {instance.id} is manager or superuser, checking voting permissions")
             
-            # Получаем ContentType для модели Voting
             try:
                 from django.apps import apps
                 VotingSession = apps.get_model('voting', 'VotingSession')
@@ -39,10 +38,8 @@ def add_voting_permissions_for_managers(sender, instance, created, **kwargs):
                 logger.error(f"Error getting content type: {e}")
                 content_type = None
             
-            # Получаем необходимые разрешения
             permissions_to_add = []
             
-            # can_vote - право голосовать
             can_vote_perm = Permission.objects.filter(
                 codename='can_vote',
                 content_type=content_type
@@ -54,7 +51,6 @@ def add_voting_permissions_for_managers(sender, instance, created, **kwargs):
             else:
                 logger.warning("Permission 'can_vote' not found")
             
-            # can_manage_voting - право управлять голосованиями (для менеджеров)
             if is_manager or is_superuser:
                 can_manage_perm = Permission.objects.filter(
                     codename='can_manage_voting',
@@ -67,7 +63,6 @@ def add_voting_permissions_for_managers(sender, instance, created, **kwargs):
                 else:
                     logger.warning("Permission 'can_manage_voting' not found")
             
-            # Добавляем разрешения
             added_count = 0
             with transaction.atomic():
                 for perm in permissions_to_add:
@@ -100,7 +95,6 @@ def log_voting_session_created(sender, instance, created, **kwargs):
             logger.info(f"New voting session created: ID={instance.id}, title='{instance.title}', "
                        f"organization_id={instance.organization_id}, created_by={instance.created_by_id}")
         else:
-            # Проверяем изменения, если есть трекер
             if hasattr(instance, 'tracker'):
                 changes = []
                 tracker = instance.tracker
@@ -129,12 +123,10 @@ def validate_ballot_before_save(sender, instance, **kwargs):
     logger.debug(f"Validating ballot {instance.id if instance.id else 'new'}")
     
     try:
-        # Проверяем, что голосование активно
         if instance.voting_session and not instance.voting_session.is_active:
             logger.warning(f"Cannot save ballot for inactive voting session {instance.voting_session_id}")
             raise ValueError("Нельзя сохранить бюллетень для неактивного голосования")
         
-        # Проверяем, не было ли уже голосования от этого владельца
         if instance.status == 'submitted' and not instance.id:
             existing_ballot = instance.__class__.objects.filter(
                 voting_session=instance.voting_session,
@@ -159,12 +151,10 @@ def update_question_stats(sender, instance, created, **kwargs):
     try:
         if created:
             question = instance.question
-            # Обновляем количество голосов в вопросе
             question.total_votes = question.votes.filter(ballot__status='submitted').count()
             question.save(update_fields=['total_votes'])
             logger.debug(f"Updated question {question.id} total_votes to {question.total_votes}")
             
-            # Обновляем статистику опции если есть
             if instance.option:
                 instance.option.votes_count = instance.option.votes.filter(ballot__status='submitted').count()
                 if question.total_votes > 0:
@@ -195,6 +185,7 @@ def update_voting_session_stats(sender, instance, created, **kwargs):
     except Exception as e:
         logger.error(f"Error updating voting session stats: {e}")
 
+
 @receiver(pre_delete, sender='voting.Ballot')
 def cleanup_ballot_votes(sender, instance, **kwargs):
     """Очистка голосов при удалении бюллетеня"""
@@ -205,6 +196,7 @@ def cleanup_ballot_votes(sender, instance, **kwargs):
     except Exception as e:
         logger.error(f"Error cleaning up ballot votes: {e}")
         
+
 @receiver(pre_delete, sender='voting.VotingSession')
 def check_voting_session_before_delete(sender, instance, **kwargs):
     """
@@ -213,13 +205,11 @@ def check_voting_session_before_delete(sender, instance, **kwargs):
     logger.info(f"Checking voting session {instance.id} before delete")
     
     try:
-        # Проверяем, есть ли уже голоса
         ballots_count = instance.ballots.count()
         if ballots_count > 0:
             logger.warning(f"Cannot delete voting session {instance.id} - has {ballots_count} ballots")
             raise ValueError(f"Нельзя удалить голосование, в котором уже есть {ballots_count} бюллетеней")
         
-        # Проверяем, есть ли вопросы
         questions_count = instance.questions.count()
         if questions_count > 0:
             logger.info(f"Voting session {instance.id} has {questions_count} questions that will be deleted")
@@ -239,7 +229,6 @@ def log_invitation_created(sender, instance, created, **kwargs):
             logger.info(f"New invitation created: ID={instance.id}, token={instance.unique_token[:8]}..., "
                        f"owner_id={instance.owner_id}, voting_session_id={instance.voting_session_id}")
         else:
-            # Проверяем, было ли открыто приглашение
             if instance.opened_at and hasattr(instance, 'tracker') and instance.tracker.has_changed('opened_at'):
                 logger.info(f"Invitation {instance.id} opened at {instance.opened_at}")
                 
@@ -259,12 +248,10 @@ def initialize_voting_permissions():
         from django.contrib.auth import get_user_model
         User = get_user_model()
         
-        # Получаем ContentType для модели Voting
         from django.apps import apps
         VotingSession = apps.get_model('voting', 'VotingSession')
         content_type = ContentType.objects.get_for_model(VotingSession)
         
-        # Получаем необходимые разрешения
         can_vote_perm = Permission.objects.filter(
             codename='can_vote',
             content_type=content_type
@@ -291,7 +278,6 @@ def initialize_voting_permissions():
                 content_type=content_type
             )
         
-        # Находим всех менеджеров и админов
         users = User.objects.filter(Q(is_manager=True) | Q(is_superuser=True))
         logger.info(f"Found {users.count()} managers/superusers")
         
@@ -316,3 +302,41 @@ def initialize_voting_permissions():
         
     except Exception as e:
         logger.error(f"Error initializing voting permissions: {e}\n{traceback.format_exc()}")
+
+
+# ============================================================
+# ИСПРАВЛЕННЫЙ СИГНАЛ - правильная модель и отложенный импорт
+# ============================================================
+@receiver(post_save, sender='organizations.OrganizationMembership')
+def update_voting_eligible_count(sender, instance, created, **kwargs):
+    """
+    При изменении членства в СНТ обновляем количество избирателей в активных голосованиях.
+    Используем строковую ссылку на модель, чтобы избежать циклических импортов.
+    """
+    from django.apps import apps
+    VotingSession = apps.get_model('voting', 'VotingSession')
+    
+    logger.debug(f"Membership changed: owner={instance.owner_id}, org={instance.organization_id}, status={instance.status}")
+    
+    try:
+        # Обновляем для всех активных голосований в этой организации
+        active_votings = VotingSession.objects.filter(
+            organization=instance.organization,
+            status='active'
+        )
+        
+        for voting in active_votings:
+            # Пересчитываем количество имеющих право голоса
+            from users.models import Owner
+            eligible_count = Owner.objects.filter(
+                memberships__organization=voting.organization,
+                memberships__status='active'
+            ).count()
+            
+            if voting.total_eligible != eligible_count:
+                voting.total_eligible = eligible_count
+                voting.save(update_fields=['total_eligible'])
+                logger.info(f"Updated eligible count for voting {voting.id}: {eligible_count}")
+                
+    except Exception as e:
+        logger.error(f"Error updating voting eligible count: {e}\n{traceback.format_exc()}")

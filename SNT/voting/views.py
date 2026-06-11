@@ -388,7 +388,14 @@ class VotingSessionViewSet(OrganizationMixin, viewsets.ModelViewSet):
             representative_document = request.data.get('representative_document', '')
             
             logger.debug(f"Votes data count: {len(votes_data)}")
-            
+            if representative_name or representative_document:
+                # Проверить, что представитель выбран общим собранием
+                # Или загрузить документ-доверенность
+                if not representative_document:
+                    return Response(
+                        {'detail': 'Для голосования через представителя нужен документ'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
             # Создаём или обновляем бюллетень
             if existing_ballot:
                 ballot = existing_ballot

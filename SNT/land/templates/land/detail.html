@@ -92,6 +92,8 @@
             <button class="btn btn-secondary" onclick="window.location.href='/plots/'">← К списку</button>
             <button class="btn btn-primary" id="btn-edit-plot" onclick="openEditPlotModal()">✏️ Редактировать</button>
             <button class="btn btn-danger" id="btn-delete-plot" onclick="confirmDeletePlot()">🗑️ Удалить</button>
+            <button class="btn btn-success" onclick="exportToGeoJSON()" id="btn-export-geojson" style="display: none;">📄 GeoJSON</button>
+            <button class="btn btn-info" onclick="previewBoundariesOnMap()" id="btn-preview-boundaries" style="display: none;">🗺️ Границы</button>
         </div>
     </div>
 
@@ -342,6 +344,15 @@
         document.getElementById('info-updated').textContent = formatDateTime(plotData.updated_at);
 
         const hasBoundaries = plotData.boundaries && plotData.boundaries.length >= 3;
+        const exportBtn = document.getElementById('btn-export-geojson');
+        const previewBtn = document.getElementById('btn-preview-boundaries');
+            
+        if (exportBtn) {
+            exportBtn.style.display = hasBoundaries ? 'inline-flex' : 'none';
+        }
+        if (previewBtn) {
+            previewBtn.style.display = hasBoundaries ? 'inline-flex' : 'none';
+        }
         document.getElementById('info-boundaries').innerHTML = hasBoundaries
             ? `<span class="badge-success">Загружены (${plotData.boundaries.length} точек)</span>
                <button class="btn btn-secondary btn-sm" onclick="refreshBoundaries(${plotId})" style="margin-left: 8px;">🔄 Обновить</button>`
@@ -748,7 +759,7 @@
                     <p>💡 <strong>Не нашли нужного владельца?</strong></p>
                     <p style="margin-top: 8px;">Вы можете создать нового владельца прямо сейчас, и он автоматически добавится в список.</p>
                 </div>
-                <button type="button" class="btn-create-owner" onclick="event.preventDefault(); closeModal(); setTimeout(() => openAddNewOwnerModal(), 100);">
+                <button type="button" class="btn-create-owner" onclick="openAddNewOwnerModal()">
                     ➕ Создать нового владельца
                 </button>
             </div>
@@ -1030,5 +1041,197 @@
     }
     
     document.addEventListener('DOMContentLoaded', loadPlotDetail);
+
+    // ==================== ЭКСПОРТ В GEOJSON ====================
+
+    async function exportToGeoJSON() {
+        const plotId = {{ plot_id }};
+
+        // Проверяем наличие границ
+        if (!plotData.has_boundaries) {
+            openModal('Нет границ', `
+                <div class="empty-state" style="padding: 20px;">
+                    <div class="empty-icon">🗺️</div>
+                    <h3>Границы не загружены</h3>
+                    <p>У этого участка нет загруженных границ.</p>
+                    ${plotData.cadastral_number ? `
+                        <button class="btn btn-primary" onclick="loadBoundaries(${plotId}); closeModal();" style="margin-top: 12px;">
+                            🗺️ Загрузить границы из Росреестра
+                        </button>
+                    ` : `
+                        <p style="color: var(--warning); margin-top: 12px;">
+                            ⚠️ Для загрузки границ требуется кадастровый номер
+                        </p>
+                    `}
+                    <button class="btn btn-secondary" onclick="closeModal()" style="margin-top: 12px;">
+                        Отмена
+                    </button>
+                </div>
+            `, 'Закрыть', null);
+            return;
+        }
+
+        try {
+            showAlert('🔄 Экспорт в GeoJSON...', 'info');
+
+            const response = await apiFetch(`/api/plots/${plotId}/geojson/`);
+
+            if (!response) {
+                showAlert('❌ Ошибка при экспорте', 'error');
+                return;
+            }
+
+            // Создаем файл для скачивания
+            const dataStr = JSON.stringify(response, null, 2);
+            const blob = new Blob([dataStr], {type: 'application/json'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `plot_${plotData.plot_number}_${plotId}.geojson`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+            showAlert(`✅ GeoJSON экспортирован: ${response.geometry.coordinates[0].length} точек`, 'success');
+
+        } catch (error) {
+            console.error('Ошибка экспорта:', error);
+            showAlert(`❌ Ошибка экспорта: ${error.message}`, 'error');
+        }
+    }
+
+    // Функция для экспорта всех границ СНТ
+    async function exportAllBoundariesToGeoJSON() {
+        try {
+            showAlert('🔄 Загрузка всех границ...', 'info');
+
+            const response = await apiFetch('/api/plots/export-geojson/');
+
+            if (!response || !response.features || response.features.length === 0) {
+                showAlert('❌ Нет участков с границами для экспорта', 'warning');
+                return;
+            }
+
+            const dataStr = JSON.stringify(response, null, 2);
+            const blob = new Blob([dataStr], {type: 'application/json'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `snt_all_boundaries_${new Date().toISOString().slice(0,19)}.geojson`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+            showAlert(`✅ Экспортировано ${response.features.length} участков с границами`, 'success');
+
+        } catch (error) {
+            console.error('Ошибка экспорта всех границ:', error);
+            showAlert(`❌ Ошибка экспорта: ${error.message}`, 'error');
+        }
+    }
+
+    // Функция для модального окна без кнопок в футере
+    function openSimpleModal(title, content) {
+        const existingModal = document.getElementById('simple-modal');
+        if (existingModal) existingModal.remove();
+
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay active';
+        overlay.id = 'simple-modal';
+
+        overlay.innerHTML = `
+            <div class="modal">
+                <div class="modal-header">
+                    <h3>${title}</h3>
+                    <button class="modal-close" id="simple-close-btn" title="Закрыть">×</button>
+                </div>
+                <div class="modal-body">${content}</div>
+            </div>
+        `;
+
+        document.body.appendChild(overlay);
+        document.body.classList.add('modal-open');
+
+        const closeModal = () => {
+            overlay.remove();
+            document.body.classList.remove('modal-open');
+        };
+
+        overlay.querySelector('#simple-close-btn').addEventListener('click', closeModal);
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) closeModal();
+        });
+
+        const escHandler = (e) => {
+            if (e.key === 'Escape') {
+                closeModal();
+                document.removeEventListener('keydown', escHandler);
+            }
+        };
+        document.addEventListener('keydown', escHandler);
+
+        return overlay;
+    }
+
+    // Использование:
+    function previewBoundariesOnMap() {
+        if (!plotData.has_boundaries) {
+            showAlert('Границы не загружены', 'warning');
+            return;
+        }
+
+        const mapContainerId = 'boundaries-preview-map';
+
+        const content = `
+            <div id="${mapContainerId}" style="height: 400px; width: 100%; border-radius: 8px;"></div>
+            <div style="margin-top: 16px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+                <div style="display: flex; gap: 24px;">
+                    <div>
+                        <span style="color: var(--gray-600); font-size: 0.85rem;">📍 Точек границ:</span>
+                        <strong>${plotData.boundaries?.length || 0}</strong>
+                    </div>
+                    <div>
+                        <span style="color: var(--gray-600); font-size: 0.85rem;">📐 Площадь:</span>
+                        <strong>${plotData.area_sqm} м²</strong>
+                    </div>
+                </div>
+                <button class="btn btn-primary" onclick="exportToGeoJSON(); closeSimpleModal();">📥 Скачать GeoJSON</button>
+            </div>
+        `;
+
+        openSimpleModal(`🗺️ Просмотр границ участка №${escapeHtml(plotData.plot_number)}`, content);
+
+        setTimeout(() => {
+            const mapContainer = document.getElementById(mapContainerId);
+            if (mapContainer && plotData.boundaries && plotData.boundaries.length >= 3) {
+                if (mapContainer._leaflet_id) return;
+
+                const previewMap = L.map(mapContainerId);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '© OpenStreetMap'
+                }).addTo(previewMap);
+
+                const coordinates = plotData.boundaries.map(p => [p[0], p[1]]);
+                L.polygon(coordinates, {
+                    color: '#2c7a47',
+                    fillColor: '#2c7a47',
+                    fillOpacity: 0.15,
+                    weight: 3
+                }).addTo(previewMap);
+
+                previewMap.fitBounds(L.polygon(coordinates).getBounds(), { padding: [20, 20] });
+            }
+        }, 200);
+    }
+
+    window.closeSimpleModal = function() {
+        const modal = document.getElementById('simple-modal');
+        if (modal) modal.remove();
+        document.body.classList.remove('modal-open');
+    };
+
+
 </script>
 {% endblock %}

@@ -96,7 +96,7 @@ class LandPlot(models.Model):
         help_text='Координаты границ участка из Росреестра [[lat, lon], ...]'
     )
     
-    # Новое поле для хранения данных из ПКК
+    # Поле для хранения данных из ПКК
     pkk_data = models.JSONField(
         'Данные ПКК',
         null=True,
@@ -128,6 +128,7 @@ class LandPlot(models.Model):
         verbose_name = 'Земельный участок'
         verbose_name_plural = 'Земельные участки'
         ordering = ['plot_number']
+        unique_together = [['organization', 'plot_number']]  # Номер участка уникален в рамках СНТ
         indexes = [
             models.Index(fields=['status']),
             models.Index(fields=['cadastral_number']),
@@ -209,7 +210,7 @@ class LandPlot(models.Model):
                     'cadastral_number': 'Группа 3 (квартал) должна содержать 6-7 цифр'
                 })
 
-            # Группа 4: от 1 цифры (ИСПРАВЛЕНО)
+            # Группа 4: от 1 цифры
             if len(parts[3]) < 1:
                 raise ValidationError({
                     'cadastral_number': 'Группа 4 (номер участка) должна содержать хотя бы 1 цифру'

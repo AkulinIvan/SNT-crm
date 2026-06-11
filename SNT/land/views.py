@@ -842,6 +842,68 @@ class LandPlotViewSet(OrganizationMixin, CacheControlMixin, viewsets.ModelViewSe
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
+    @action(detail=True, methods=['get'], url_path='geojson')
+    def export_geojson(self, request, pk=None):
+        """
+        GET /api/plots/{id}/geojson/
+        Экспорт участка в GeoJSON формат для GIS-систем.
+        """
+        land_plot = self.get_object()
+        
+        if not land_plot.has_boundaries:
+            return Response(
+                {'detail': 'Границы не загружены. Сначала загрузите границы из Росреестра.'}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        try:
+            # Конвертируем границы из формата [[lat, lon], ...] в GeoJSON формат [[lon, lat], ...]
+            coordinates = []
+            for point in land_plot.boundaries:
+                if len(point) >= 2:
+                    coordinates.append([point[1], point[0]])  # (lon, lat)
+            
+            # Замыкаем полигон если нужно
+            if coordinates and coordinates[0] != coordinates[-1]:
+                coordinates.append(coordinates[0])
+            
+            geojson = {
+                "type": "Feature",
+                "properties": {
+                    "id": land_plot.id,
+                    "plot_number": land_plot.plot_number,
+                    "cadastral_number": land_plot.cadastral_number,
+                    "area_sqm": float(land_plot.area_sqm) if land_plot.area_sqm else None,
+                    "status": land_plot.status,
+                    "status_display": land_plot.get_status_display(),
+                    "address": land_plot.address or "",
+                    "has_coordinates": land_plot.has_coordinates,
+                    "latitude": land_plot.latitude,
+                    "longitude": land_plot.longitude,
+                    "rosreestr_updated": land_plot.rosreestr_updated.isoformat() if land_plot.rosreestr_updated else None,
+                    "created_at": land_plot.created_at.isoformat() if land_plot.created_at else None,
+                    "updated_at": land_plot.updated_at.isoformat() if land_plot.updated_at else None,
+                },
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [coordinates]
+                }
+            }
+            
+            self._logger.info(
+                f"GeoJSON exported for plot #{land_plot.plot_number}: "
+                f"{len(coordinates)} points"
+            )
+            
+            return Response(geojson)
+            
+        except Exception as e:
+            self._logger.error(f"Error exporting GeoJSON: {e}", exc_info=True)
+            return Response(
+                {'detail': f'Ошибка экспорта в GeoJSON: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
     def _normalize_boundaries(self, boundaries: List) -> List:
         """Нормализация границ: замыкание и удаление дубликатов"""
         if not boundaries or len(boundaries) < 3:

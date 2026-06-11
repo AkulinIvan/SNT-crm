@@ -16,7 +16,7 @@ class VotingConfig(AppConfig):
         """
         try:
             # Импортируем сигналы
-            import voting.signals
+            from . import signals
             logger.info("Voting signals loaded")
             
             # Создаём разрешения для голосования

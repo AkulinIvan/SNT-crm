@@ -366,13 +366,371 @@
     // ==================== ДОБАВЛЕНИЕ СНТ ====================
 
     function openAddOrganizationModal() {
-        // ... existing code ...
+        openModal('Создание СНТ', `
+            <div class="form-group">
+                <label>Полное наименование *</label>
+                <input type="text" id="org-name" placeholder="Садоводческое некоммерческое товарищество...">
+            </div>
+            <div class="form-group">
+                <label>Краткое наименование *</label>
+                <input type="text" id="org-short-name" placeholder="СНТ ...">
+            </div>
+            <div class="form-group">
+                <label>ИНН *</label>
+                <input type="text" id="org-inn" placeholder="1234567890">
+            </div>
+            <div class="form-group">
+                <label>Юридический адрес *</label>
+                <textarea id="org-legal-address" rows="2" placeholder="Область, город, улица..."></textarea>
+            </div>
+            <div class="form-group">
+                <label>Банк</label>
+                <input type="text" id="org-bank-name" placeholder="Наименование банка">
+            </div>
+            <div class="form-group">
+                <label>БИК</label>
+                <input type="text" id="org-bank-bik" placeholder="123456789">
+            </div>
+            <div class="form-group">
+                <label>Расчётный счёт</label>
+                <input type="text" id="org-bank-account" placeholder="408178100...">
+            </div>
+            <div class="form-group">
+                <label>Корр. счёт</label>
+                <input type="text" id="org-bank-corr" placeholder="30101810...">
+            </div>
+        `, 'Создать', async () => {
+            const data = {
+                name: document.getElementById('org-name').value.trim(),
+                short_name: document.getElementById('org-short-name').value.trim(),
+                inn: document.getElementById('org-inn').value.trim(),
+                legal_address: document.getElementById('org-legal-address').value.trim(),
+                bank_name: document.getElementById('org-bank-name').value.trim(),
+                bank_bik: document.getElementById('org-bank-bik').value.trim(),
+                bank_account: document.getElementById('org-bank-account').value.trim(),
+                bank_corr_account: document.getElementById('org-bank-corr').value.trim(),
+            };
+
+            const result = await apiFetch('/api/organizations/', {
+                method: 'POST',
+                body: JSON.stringify(data)
+            });
+
+            if (result) {
+                showAlert('СНТ создано', 'success');
+                closeModal();
+                loadOrganizations();
+            }
+        });
     }
 
     // ==================== РЕДАКТИРОВАНИЕ СНТ ====================
 
     async function openEditOrganizationModal(id) {
-        // ... existing code ...
+        // Загружаем данные организации
+        const org = await apiFetch(`/api/organizations/${id}/`);
+        if (!org) return;   
+
+        // Загружаем список сотрудников для выбора председателя и бухгалтера
+        const staffData = await apiFetch(`/api/organizations/${id}/staff-history/`);
+        const availableUsers = staffData?.results || [];    
+
+        // Создаём модальное окно с формой
+        const modalContent = `
+            <div style="max-height: 70vh; overflow-y: auto; padding-right: 8px;">
+                <div class="form-group">
+                    <label>Полное наименование *</label>
+                    <input type="text" id="edit-org-name" class="form-control" value="${escapeHtml(org.name || '')}" placeholder="Садоводческое некоммерческое товарищество...">
+                </div>
+                <div class="form-group">
+                    <label>Краткое наименование *</label>
+                    <input type="text" id="edit-org-short-name" class="form-control" value="${escapeHtml(org.short_name || '')}" placeholder="СНТ ...">
+                </div>
+                
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                    <div class="form-group">
+                        <label>ИНН *</label>
+                        <input type="text" id="edit-org-inn" class="form-control" value="${escapeHtml(org.inn || '')}" placeholder="1234567890">
+                    </div>
+                    <div class="form-group">
+                        <label>КПП</label>
+                        <input type="text" id="edit-org-kpp" class="form-control" value="${escapeHtml(org.kpp || '')}" placeholder="123456789">
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label>ОГРН</label>
+                    <input type="text" id="edit-org-ogrn" class="form-control" value="${escapeHtml(org.ogrn || '')}" placeholder="1234567890123">
+                </div>
+                
+                <div class="form-group">
+                    <label>Юридический адрес *</label>
+                    <textarea id="edit-org-legal-address" class="form-control" rows="2" placeholder="Область, город, улица, дом...">${escapeHtml(org.legal_address || '')}</textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label>Фактический адрес</label>
+                    <textarea id="edit-org-actual-address" class="form-control" rows="2" placeholder="Если отличается от юридического">${escapeHtml(org.actual_address || '')}</textarea>
+                </div>
+                
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                    <div class="form-group">
+                        <label>Телефон</label>
+                        <input type="tel" id="edit-org-phone" class="form-control" value="${escapeHtml(org.phone || '')}" placeholder="+7 (XXX) XXX-XX-XX">
+                    </div>
+                    <div class="form-group">
+                        <label>Email</label>
+                        <input type="email" id="edit-org-email" class="form-control" value="${escapeHtml(org.email || '')}" placeholder="snt@example.ru">
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label>Сайт</label>
+                    <input type="url" id="edit-org-website" class="form-control" value="${escapeHtml(org.website || '')}" placeholder="https://">
+                </div>
+                
+                <hr style="margin: 16px 0;">
+                
+                <h4 style="margin-bottom: 12px;">🏦 Банковские реквизиты</h4>
+                
+                <div class="form-group">
+                    <label>Банк *</label>
+                    <input type="text" id="edit-org-bank-name" class="form-control" value="${escapeHtml(org.bank_name || '')}" placeholder="ПАО Сбербанк">
+                </div>
+                
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                    <div class="form-group">
+                        <label>БИК *</label>
+                        <input type="text" id="edit-org-bank-bik" class="form-control" value="${escapeHtml(org.bank_bik || '')}" placeholder="123456789">
+                    </div>
+                    <div class="form-group">
+                        <label>Расчётный счёт *</label>
+                        <input type="text" id="edit-org-bank-account" class="form-control" value="${escapeHtml(org.bank_account || '')}" placeholder="408178100...">
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label>Корреспондентский счёт *</label>
+                    <input type="text" id="edit-org-bank-corr" class="form-control" value="${escapeHtml(org.bank_corr_account || '')}" placeholder="30101810...">
+                </div>
+                
+                <hr style="margin: 16px 0;">
+                
+                <h4 style="margin-bottom: 12px;">👔 Руководство</h4>
+                
+                <div class="form-group">
+                    <label>Председатель</label>
+                    <select id="edit-org-chairman" class="form-control">
+                        <option value="">— Не назначен —</option>
+                        ${availableUsers
+                            .filter(u => u.role === 'chairman' || u.role === 'manager' || !u.role)
+                            .map(u => `<option value="${u.user_id}" ${org.chairman === u.user_id ? 'selected' : ''}>
+                                ${escapeHtml(u.user_name || `Пользователь ${u.user_id}`)}
+                            </option>`).join('')}
+                    </select>
+                    <small class="form-text text-muted">Выберите председателя из списка сотрудников</small>
+                </div>
+                
+                <div class="form-group">
+                    <label>Бухгалтер</label>
+                    <select id="edit-org-accountant" class="form-control">
+                        <option value="">— Не назначен —</option>
+                        ${availableUsers
+                            .filter(u => u.role === 'accountant' || u.role === 'manager' || !u.role)
+                            .map(u => `<option value="${u.user_id}" ${org.accountant === u.user_id ? 'selected' : ''}>
+                                ${escapeHtml(u.user_name || `Пользователь ${u.user_id}`)}
+                            </option>`).join('')}
+                    </select>
+                    <small class="form-text text-muted">Выберите бухгалтера из списка сотрудников</small>
+                </div>
+                
+                <div class="form-group">
+                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                        <input type="checkbox" id="edit-org-is-active" ${org.is_active ? 'checked' : ''}>
+                        <span>СНТ активно</span>
+                    </label>
+                    <small class="form-text text-muted">Неактивные СНТ не будут отображаться в списке для обычных пользователей</small>
+                </div>
+            </div>
+        `;  
+
+        openModal('Редактировать СНТ', modalContent, 'Сохранить', async () => {
+            // Собираем данные из формы
+            const name = document.getElementById('edit-org-name').value.trim();
+            const shortName = document.getElementById('edit-org-short-name').value.trim();
+            const inn = document.getElementById('edit-org-inn').value.trim();
+            const kpp = document.getElementById('edit-org-kpp').value.trim();
+            const ogrn = document.getElementById('edit-org-ogrn').value.trim();
+            const legalAddress = document.getElementById('edit-org-legal-address').value.trim();
+            const actualAddress = document.getElementById('edit-org-actual-address').value.trim();
+            const phone = document.getElementById('edit-org-phone').value.trim();
+            const email = document.getElementById('edit-org-email').value.trim();
+            const website = document.getElementById('edit-org-website').value.trim();
+            const bankName = document.getElementById('edit-org-bank-name').value.trim();
+            const bankBik = document.getElementById('edit-org-bank-bik').value.trim();
+            const bankAccount = document.getElementById('edit-org-bank-account').value.trim();
+            const bankCorrAccount = document.getElementById('edit-org-bank-corr').value.trim();
+            const chairmanId = document.getElementById('edit-org-chairman').value;
+            const accountantId = document.getElementById('edit-org-accountant').value;
+            const isActive = document.getElementById('edit-org-is-active').checked; 
+
+            // Валидация обязательных полей
+            if (!name) {
+                showAlert('Введите полное наименование СНТ', 'error');
+                return;
+            }
+            if (!shortName) {
+                showAlert('Введите краткое наименование СНТ', 'error');
+                return;
+            }
+            if (!inn) {
+                showAlert('Введите ИНН', 'error');
+                return;
+            }
+            if (inn.length !== 10 && inn.length !== 12) {
+                showAlert('ИНН должен содержать 10 или 12 цифр', 'error');
+                return;
+            }
+            if (!legalAddress) {
+                showAlert('Введите юридический адрес', 'error');
+                return;
+            }
+            if (!bankName) {
+                showAlert('Введите наименование банка', 'error');
+                return;
+            }
+            if (!bankBik || bankBik.length !== 9) {
+                showAlert('БИК должен содержать 9 цифр', 'error');
+                return;
+            }
+            if (!bankAccount) {
+                showAlert('Введите расчётный счёт', 'error');
+                return;
+            }
+            if (!bankCorrAccount) {
+                showAlert('Введите корреспондентский счёт', 'error');
+                return;
+            }   
+
+            // Проверка КПП (9 цифр, если указан)
+            if (kpp && kpp.length !== 9) {
+                showAlert('КПП должен содержать 9 цифр', 'error');
+                return;
+            }   
+
+            // Проверка ОГРН (13 или 15 цифр, если указан)
+            if (ogrn && ogrn.length !== 13 && ogrn.length !== 15) {
+                showAlert('ОГРН должен содержать 13 или 15 цифр', 'error');
+                return;
+            }   
+
+            // Проверка email
+            if (email && !isValidEmail(email)) {
+                showAlert('Введите корректный email адрес', 'error');
+                return;
+            }   
+
+            // Проверка телефона
+            if (phone) {
+                const phoneDigits = phone.replace(/\D/g, '');
+                if (phoneDigits.length < 10 || phoneDigits.length > 11) {
+                    showAlert('Введите корректный номер телефона (10-11 цифр)', 'error');
+                    return;
+                }
+            }   
+
+            const payload = {
+                name: name,
+                short_name: shortName,
+                inn: inn,
+                kpp: kpp || '',
+                ogrn: ogrn || '',
+                legal_address: legalAddress,
+                actual_address: actualAddress || '',
+                phone: phone || '',
+                email: email || '',
+                website: website || '',
+                bank_name: bankName,
+                bank_bik: bankBik,
+                bank_account: bankAccount,
+                bank_corr_account: bankCorrAccount,
+                chairman_id: chairmanId ? parseInt(chairmanId) : null,
+                accountant_id: accountantId ? parseInt(accountantId) : null,
+                is_active: isActive,
+            };  
+
+            const result = await apiFetch(`/api/organizations/${id}/`, {
+                method: 'PATCH',
+                body: JSON.stringify(payload)
+            }); 
+
+            if (result) {
+                showAlert('СНТ успешно обновлено', 'success');
+                closeModal();
+                // Обновляем таблицу и детали
+                if (typeof loadOrganizations === 'function') {
+                    loadOrganizations();
+                }
+                if (typeof loadOrganizationDetail === 'function') {
+                    loadOrganizationDetail();
+                }
+                // Если мы на странице деталей, обновляем URL
+                if (window.location.pathname.includes(`/organizations/${id}/`)) {
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 1000);
+                }
+            }
+        }); 
+
+        // Добавляем обработчики для валидации
+        const innInput = document.getElementById('edit-org-inn');
+        if (innInput) {
+            innInput.addEventListener('input', function(e) {
+                this.value = this.value.replace(/\D/g, '').slice(0, 12);
+            });
+        }   
+
+        const bikInput = document.getElementById('edit-org-bank-bik');
+        if (bikInput) {
+            bikInput.addEventListener('input', function(e) {
+                this.value = this.value.replace(/\D/g, '').slice(0, 9);
+            });
+        }   
+
+        const kppInput = document.getElementById('edit-org-kpp');
+        if (kppInput) {
+            kppInput.addEventListener('input', function(e) {
+                this.value = this.value.replace(/\D/g, '').slice(0, 9);
+            });
+        }   
+
+        const ogrnInput = document.getElementById('edit-org-ogrn');
+        if (ogrnInput) {
+            ogrnInput.addEventListener('input', function(e) {
+                this.value = this.value.replace(/\D/g, '').slice(0, 15);
+            });
+        }   
+
+        const accountInput = document.getElementById('edit-org-bank-account');
+        if (accountInput) {
+            accountInput.addEventListener('input', function(e) {
+                this.value = this.value.replace(/\D/g, '').slice(0, 20);
+            });
+        }   
+
+        const corrInput = document.getElementById('edit-org-bank-corr');
+        if (corrInput) {
+            corrInput.addEventListener('input', function(e) {
+                this.value = this.value.replace(/\D/g, '').slice(0, 20);
+            });
+        }
+    }   
+
+    // Вспомогательная функция для валидации email
+    function isValidEmail(email) {
+        const re = /^[^\s@]+@([^\s@]+\.)+[^\s@]+$/;
+        return re.test(email);
     }
 
     // ==================== ПРОСМОТР ЧЛЕНОВ СНТ ====================

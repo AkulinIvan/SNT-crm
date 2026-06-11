@@ -1011,6 +1011,50 @@ class OrganizationViewSet(viewsets.ModelViewSet):
         except Exception:
             return '0.0.0.0'
 
+    @action(detail=True, methods=['get'], url_path='protocols')
+    def get_protocols(self, request, pk=None):
+        """Получить список протоколов собраний СНТ"""
+        organization = self.get_object()
+        
+        try:
+            from voting.models import VotingSession
+            protocols = VotingSession.objects.filter(
+                organization=organization,
+                status='closed',
+                protocol_number__isnull=False
+            ).values('id', 'title', 'protocol_number', 'protocol_date', 'meeting_place')
+            
+            return Response({
+                'count': protocols.count(),
+                'results': protocols
+            })
+        except ImportError:
+            return Response({'results': []})    
+
+    @action(detail=True, methods=['get'], url_path='protocols/(?P<session_id>[^/.]+)/download')
+    def download_protocol(self, request, pk=None, session_id=None):
+        """Скачать протокол в PDF"""
+        organization = self.get_object()
+        
+        try:
+            from voting.models import VotingSession
+            voting_session = VotingSession.objects.get(
+                id=session_id,
+                organization=organization,
+                status='closed'
+            )
+            
+            pdf_buffer = ProtocolGenerator.generate_voting_protocol(voting_session)
+            
+            response = HttpResponse(pdf_buffer, content_type='application/pdf')
+            response['Content-Disposition'] = f'attachment; filename="protocol_{voting_session.protocol_number or session_id}.pdf"'
+            return response
+            
+        except VotingSession.DoesNotExist:
+            return Response(
+                {'detail': 'Протокол не найден'},
+                status=status.HTTP_404_NOT_FOUND
+            )
 
 class OrganizationListView(TemplateView):
     """Страница списка организаций"""

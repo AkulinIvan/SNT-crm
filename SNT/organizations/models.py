@@ -140,41 +140,6 @@ class Organization(models.Model):
         """Количество пользователей системы, привязанных к организации."""
         return self.staff_members.filter(is_active=True).count()
     
-    def check_tariff_limit(self, resource_type):
-        """
-        Проверка лимита тарифа для ресурса.
-        
-        Args:
-            resource_type: 'owners', 'plots', 'users'
-            
-        Returns:
-            tuple: (is_allowed, current_count, max_limit, message)
-        """
-        subscription = getattr(self, 'subscription', None)
-        
-        if not subscription or not subscription.is_active:
-            return False, 0, 0, 'Нет активной подписки'
-        
-        tariff = subscription.tariff
-        
-        if resource_type == 'owners':
-            current = self.owners_count
-            max_limit = tariff.max_owners
-            message = f'Достигнут лимит владельцев ({current}/{max_limit}). Перейдите на более высокий тариф.'
-        elif resource_type == 'plots':
-            current = self.plots_count
-            max_limit = tariff.max_plots
-            message = f'Достигнут лимит участков ({current}/{max_limit}). Перейдите на более высокий тариф.'
-        elif resource_type == 'users':
-            current = self.users_count
-            max_limit = tariff.max_users
-            message = f'Достигнут лимит пользователей ({current}/{max_limit}). Перейдите на более высокий тариф.'
-        else:
-            return False, 0, 0, 'Неизвестный тип ресурса'
-        
-        return current < max_limit, current, max_limit, message
-    
-    
     def check_tariff_limit(self, resource_type='owners'):
         """
         Проверка лимитов тарифа
@@ -183,7 +148,7 @@ class Organization(models.Model):
             resource_type: 'owners', 'plots', 'users'
         
         Returns:
-            (is_allowed, current, max, message)
+            tuple: (is_allowed, current, max_limit, message)
         """
         subscription = getattr(self, 'subscription', None)
         if not subscription or not subscription.is_active:
@@ -214,14 +179,31 @@ class Organization(models.Model):
             return True, 0, 0, ""
         
         current = current_counts[resource_type]
-        max_limit = max_limits[resource_type]
-        label = labels[resource_type]
+        max_limit = max_limits.get(resource_type, 0)
+        label = labels.get(resource_type, resource_type)
         
         if current >= max_limit:
             return False, current, max_limit, f"Достигнут лимит {label} ({current}/{max_limit})"
         
         return True, current, max_limit, f"Доступно {max_limit - current} {label}"
+    
+    @property
+    def max_board_members(self):
+        """Максимальное количество членов правления по закону"""
+        # По 217-ФЗ ст. 18 ч. 3 - не более 5% от числа членов
+        members_count = self.memberships.filter(status='active').count()
+        return max(3, int(members_count * 0.05))
 
+    def can_add_board_member(self):
+        """Проверка, можно ли добавить ещё одного члена правления"""
+        current_board = self.staff_assignments.filter(
+            is_active=True,
+            role='other'
+        ).count()
+        return current_board < self.max_board_members
+    
+    
+    
     def _get_safe_users_count(self):
         """Безопасное получение количества пользователей"""
         try:
@@ -238,6 +220,21 @@ class Organization(models.Model):
             return 1
         except Exception:
             return 1
+        
+    @property
+    def max_board_members(self):
+        """Максимальное количество членов правления по закону"""
+        # По 217-ФЗ ст. 18 ч. 3 - не более 5% от числа членов
+        members_count = self.memberships.filter(status='active').count()
+        return max(3, int(members_count * 0.05))
+    
+    def can_add_board_member(self):
+        """Проверка, можно ли добавить ещё одного члена правления"""
+        current_board = self.staff_assignments.filter(
+            is_active=True,
+            role='other'
+        ).count()
+        return current_board < self.max_board_members
 
 class OrganizationStaffAssignment(models.Model):
     """
@@ -399,7 +396,9 @@ class OrganizationMembership(models.Model):
     notes = models.TextField('Примечания', blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-
+    joined_at = models.DateTimeField('Дата вступления', null=True, blank=True)
+    joined_by_protocol = models.CharField('Номер протокола о приёме', max_length=50, blank=True)
+    
     class Meta:
         verbose_name = 'Членство в СНТ'
         verbose_name_plural = 'Членства в СНТ'
@@ -411,3 +410,31 @@ class OrganizationMembership(models.Model):
 
     def __str__(self):
         return f'{self.owner.full_name} - {self.organization.short_name} ({self.get_status_display()})'
+    
+    def save(self, *args, **kwargs):
+        if not self.joined_at and self.status == 'active':
+            self.joined_at = timezone.now()
+        super().save(*args, **kwargs)
+        
+
+class MemberCard(models.Model):
+    """Членская книжка (217-ФЗ ст. 12 ч. 13)"""
+    membership = models.OneToOneField(
+        OrganizationMembership, 
+        on_delete=models.CASCADE, 
+        related_name='member_card'
+    )
+    card_number = models.CharField('Номер книжки', max_length=50, unique=True)
+    issued_date = models.DateField('Дата выдачи')
+    issued_by = models.CharField('Кем выдана', max_length=200)
+    
+    # История взносов (связь с платежами)
+    contribution_history = models.JSONField('История взносов', default=list)
+    
+    @classmethod
+    def generate_number(cls, organization, owner):
+        """Генерация номера членской книжки по правилам СНТ"""
+        year = timezone.now().year
+        org_prefix = organization.short_name.replace('СНТ', '').strip()[:5]
+        owner_id = str(owner.id).zfill(4)
+        return f"{org_prefix}-{year}-{owner_id}"

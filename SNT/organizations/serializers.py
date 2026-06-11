@@ -15,6 +15,20 @@ class OrganizationSerializer(serializers.ModelSerializer):
             'id', 'name', 'short_name', 'inn', 'chairman_name', 
             'accountant_name', 'is_active'
         ]
+    def validate_inn(self, value):
+        """Проверка уникальности ИНН"""
+        if Organization.objects.filter(inn=value).exists():
+            raise serializers.ValidationError(
+                'СНТ с таким ИНН уже существует'
+            )
+        return value
+    def validate_short_name(self, value):
+        """Проверка уникальности краткого наименования"""
+        if Organization.objects.filter(short_name=value).exists():
+            raise serializers.ValidationError(
+                'СНТ с таким кратким наименованием уже существует'
+            )
+        return value
 
 
 class OrganizationDetailSerializer(serializers.ModelSerializer):

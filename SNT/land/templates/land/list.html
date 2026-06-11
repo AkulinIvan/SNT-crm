@@ -19,6 +19,12 @@
             <button class="btn btn-secondary" onclick="window.location.href='/import/'">
                 📥 Импорт из Excel
             </button>
+            <button class="btn btn-secondary" onclick="exportSelectedToGeoJSON()" id="btn-export-selected-geojson" style="display: none;">
+                📄 Экспорт выбранных (GeoJSON)
+            </button>
+            <button class="btn btn-secondary" onclick="exportAllBoundariesToGeoJSON()">
+                🗺️ Экспорт всех границ
+            </button>
         </div>
     </div>
 </div>
@@ -517,6 +523,116 @@
         loadPlots();
     };
     
+    async function exportSelectedToGeoJSON() {
+        const selectedCheckboxes = document.querySelectorAll('.plot-checkbox:checked');
+        const plotIds = Array.from(selectedCheckboxes).map(cb => parseInt(cb.value));
+        
+        if (plotIds.length === 0) {
+            showAlert('Выберите участки для экспорта', 'warning');
+            return;
+        }
+
+        showAlert(`🔄 Экспорт ${plotIds.length} участков...`, 'info');
+
+        const features = [];
+        let successCount = 0;
+
+        for (const plotId of plotIds) {
+            try {
+                const geojson = await apiFetch(`/api/plots/${plotId}/geojson/`);
+                if (geojson && geojson.geometry) {
+                    features.push(geojson);
+                    successCount++;
+                }
+            } catch (e) {
+                console.error(`Error exporting plot ${plotId}:`, e);
+            }
+        }
+
+        const featureCollection = {
+            type: "FeatureCollection",
+            features: features,
+            total_features: features.length,
+            exported_at: new Date().toISOString()
+        };
+
+        const dataStr = JSON.stringify(featureCollection, null, 2);
+        const blob = new Blob([dataStr], {type: 'application/json'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `plots_export_${new Date().toISOString().slice(0,19)}.geojson`;
+        a.click();
+        URL.revokeObjectURL(url);
+
+        showAlert(`✅ Экспортировано ${successCount} из ${plotIds.length} участков`, 'success');
+    }   
+
+    // Функция экспорта всех границ (если нет отдельного API, используем существующий all-boundaries)
+    async function exportAllBoundariesToGeoJSON() {
+        try {
+            showAlert('🔄 Загрузка всех границ...', 'info');
+
+            const response = await apiFetch('/api/plots/all-boundaries/');
+
+            if (!response || !response.results || response.results.length === 0) {
+                showAlert('❌ Нет участков с границами для экспорта', 'warning');
+                return;
+            }
+
+            // Конвертируем в GeoJSON FeatureCollection
+            const features = [];
+            for (const plot of response.results) {
+                if (plot.boundaries && plot.boundaries.length >= 3) {
+                    const coordinates = plot.boundaries.map(p => [p[1], p[0]]);
+                    // Замыкаем полигон
+                    if (coordinates[0][0] !== coordinates[coordinates.length-1][0] || 
+                        coordinates[0][1] !== coordinates[coordinates.length-1][1]) {
+                        coordinates.push(coordinates[0]);
+                    }
+
+                    features.push({
+                        type: "Feature",
+                        properties: {
+                            id: plot.id,
+                            plot_number: plot.plot_number,
+                            cadastral_number: plot.cadastral_number,
+                            area_sqm: plot.area_sqm,
+                            status: plot.status,
+                            owners_count: plot.owners_count
+                        },
+                        geometry: {
+                            type: "Polygon",
+                            coordinates: [coordinates]
+                        }
+                    });
+                }
+            }
+
+            const featureCollection = {
+                type: "FeatureCollection",
+                features: features,
+                total_features: features.length,
+                exported_at: new Date().toISOString()
+            };
+
+            const dataStr = JSON.stringify(featureCollection, null, 2);
+            const blob = new Blob([dataStr], {type: 'application/json'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `snt_all_boundaries_${new Date().toISOString().slice(0,19)}.geojson`;
+            a.click();
+            URL.revokeObjectURL(url);
+
+            showAlert(`✅ Экспортировано ${features.length} участков с границами`, 'success');
+
+        } catch (error) {
+            console.error('Ошибка экспорта всех границ:', error);
+            showAlert(`❌ Ошибка экспорта: ${error.message}`, 'error');
+        }
+    }
+
     // Основная функция загрузки данных
     async function loadPlots() {
         const params = new URLSearchParams({

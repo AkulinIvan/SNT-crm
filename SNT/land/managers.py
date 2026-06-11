@@ -80,3 +80,11 @@ class CachedLandPlotManager(models.Manager):
             cache.delete(key)
             cache.delete_pattern(key)
         logger.info(f"Invalidated cache for plot {plot_id}")
+        
+class CachedLandPlotQuerySet(models.QuerySet):
+    """QuerySet с кэшированием"""
+    
+    def with_owners_count(self):
+        return self.annotate(
+            owners_count=models.Count('ownerships')
+        )

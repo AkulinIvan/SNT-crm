@@ -234,6 +234,7 @@ class Question(models.Model):
         ('single', 'Единичный выбор (да/нет/воздержался)'),
         ('multiple', 'Множественный выбор'),
         ('rating', 'Рейтинговое голосование'),
+        ('text', 'Свободный текст'),
     ]
     
     voting_session = models.ForeignKey(

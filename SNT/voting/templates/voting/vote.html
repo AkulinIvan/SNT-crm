@@ -187,6 +187,17 @@
                         selectedAnswers[question.id] = rating;
                     });
                 });
+            } else if (question.question_type === 'multiple') {
+                return `
+                    <div class="vote-options">
+                        ${question.options.map(option => `
+                            <label class="vote-option">
+                                <input type="checkbox" name="q${question.id}" value="${option.id}">
+                                <span>${escapeHtml(option.text)}</span>
+                            </label>
+                        `).join('')}
+                    </div>
+                `;
             }
         });
     }

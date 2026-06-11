@@ -165,6 +165,22 @@ class Owner(models.Model):
 
         return max(0, tariff.max_plots - current_count)
 
+    @property
+    def primary_membership(self):
+        """Основное членство (активное)"""
+        return self.memberships.filter(status='active').first()
+    
+    def validate_unique_membership(self, organization):
+        """Проверка, что владелец уже состоит в другом СНТ"""
+        existing = self.memberships.filter(
+            status='active'
+        ).exclude(organization=organization)
+        
+        if existing.exists():
+            raise ValidationError(
+                f'Владелец уже является членом другого СНТ: {existing.first().organization.short_name}'
+            )
+    
 class Ownership(models.Model):
     """
     Промежуточная модель для связи Owner и LandPlot.

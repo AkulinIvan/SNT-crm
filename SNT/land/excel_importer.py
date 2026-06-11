@@ -520,6 +520,12 @@ class ExcelImporter:
     
     def _get_or_create_plot(self, plot_number, cadastral_number, area_sqm, notes):
         """Получить или создать участок"""
+        # Проверка лимитов перед созданием
+        if self.organization:
+            is_allowed, current, max_limit, message = self.organization.check_tariff_limit('plots')
+            if not is_allowed:
+                self._add_error(0, f"Лимит участков ({current}/{max_limit}) превышен. {message}")
+                return None
         # Очищаем номер участка
         plot_number = str(plot_number).strip().upper()
         
